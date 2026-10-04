@@ -102,7 +102,7 @@ jobs:
         if: always()
         run: rm -f -- android/key.properties "$RUNNER_TEMP/proxly-release.p12"
       - name: Save Android APK
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: proxly-android-${{ inputs.android_build_type }}-${{ github.run_number }}
           path: dist/android/*
@@ -111,7 +111,7 @@ jobs:
           compression-level: 0
       - name: Save Android diagnostics
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: android-build-logs-${{ github.run_number }}-${{ github.run_attempt }}
           path: build-logs/
@@ -179,7 +179,7 @@ jobs:
           git diff --exit-code -- ios/Podfile.lock
       - name: Validate and package IPA
         run: python3 scripts/package_ios.py
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: proxly-ios-unsigned-${{ github.run_number }}
           path: dist/ios/*
@@ -188,7 +188,7 @@ jobs:
           compression-level: 0
       - name: Save diagnostics
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ios-build-logs-${{ github.run_number }}-${{ github.run_attempt }}
           path: |
