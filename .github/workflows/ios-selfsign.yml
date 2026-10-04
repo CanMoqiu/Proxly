@@ -1,0 +1,197 @@
+name: Proxly Android and iOS builds
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag, or commit to build
+        required: true
+        default: main
+        type: string
+      platform:
+        description: Platforms to build
+        required: true
+        default: both
+        type: choice
+        options:
+          - both
+          - ios
+          - android
+      android_build_type:
+        description: Android signed Release or separate Debug test APK
+        required: true
+        default: release
+        type: choice
+        options:
+          - release
+          - debug
+
+permissions:
+  contents: read
+
+concurrency:
+  group: proxly-${{ inputs.platform }}-${{ inputs.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android:
+    if: inputs.platform != 'ios'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      FLUTTER_ROOT: ${{ github.workspace }}/../flutter-sdk-3.47.5
+      ANDROID_BUILD_TYPE: ${{ inputs.android_build_type }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.FLUTTER_ROOT }}
+            ~/.pub-cache
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: android-check-${{ runner.os }}-3.47.5-${{ hashFiles('pubspec.lock', 'android/**/gradle-wrapper.properties') }}
+          restore-keys: android-check-${{ runner.os }}-3.47.5-
+      - name: Install Flutter
+        run: |
+          mkdir -p build-logs
+          git rev-parse HEAD | tee build-logs/commit.txt
+          ruby --version | tee build-logs/ruby.txt
+          if [ ! -x "$FLUTTER_ROOT/bin/flutter" ]; then
+            git clone --depth 1 --branch 3.47.5 https://github.com/flutter/flutter.git "$FLUTTER_ROOT"
+          fi
+          echo "$FLUTTER_ROOT/bin" >> "$GITHUB_PATH"
+          "$FLUTTER_ROOT/bin/flutter" config --no-analytics
+          "$FLUTTER_ROOT/bin/flutter" --version | tee build-logs/flutter.txt
+      - name: Analyze and test
+        run: |
+          python3 -m unittest discover -s scripts -p 'test_*.py'
+          flutter pub get --enforce-lockfile 2>&1 | tee build-logs/dependencies.txt
+          flutter analyze 2>&1 | tee build-logs/analyze.txt
+          flutter test 2>&1 | tee build-logs/tests.txt
+      - name: Restore release signing key
+        if: inputs.android_build_type == 'release'
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: python3 scripts/prepare_android_signing.py
+      - name: Build Android APK
+        run: |
+          case "$ANDROID_BUILD_TYPE" in release|debug) ;; *) exit 1 ;; esac
+          flutter build apk "--$ANDROID_BUILD_TYPE" 2>&1 | tee build-logs/android-build.txt
+      - name: Verify and package Android APK
+        env:
+          ANDROID_CERT_SHA256: ${{ vars.ANDROID_CERT_SHA256 }}
+        run: |
+          export APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -1)
+          export AAPT2="$(dirname "$APKSIGNER")/aapt2"
+          python3 scripts/package_android.py "$ANDROID_BUILD_TYPE"
+      - name: Remove signing material
+        if: always()
+        run: rm -f -- android/key.properties "$RUNNER_TEMP/proxly-release.p12"
+      - name: Save Android APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: proxly-android-${{ inputs.android_build_type }}-${{ github.run_number }}
+          path: dist/android/*
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+      - name: Save Android diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-build-logs-${{ github.run_number }}-${{ github.run_attempt }}
+          path: build-logs/
+          retention-days: 14
+  build:
+    if: inputs.platform != 'android'
+    runs-on: macos-26
+    timeout-minutes: 45
+    env:
+      FLUTTER_VERSION: 3.47.5
+      FLUTTER_ROOT: ${{ github.workspace }}/../flutter-sdk-3.47.5
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - name: Record source and toolchain
+        run: |
+          mkdir -p build-logs
+          git rev-parse HEAD | tee build-logs/commit.txt
+          xcodebuild -version | tee build-logs/xcode.txt
+          test -f ios/Runner.xcodeproj/project.pbxproj || { echo 'This ref does not contain the iOS port yet.'; exit 1; }
+      - uses: actions/cache@v4
+        with:
+          path: ${{ env.FLUTTER_ROOT }}
+          key: flutter-${{ runner.os }}-${{ runner.arch }}-${{ env.FLUTTER_VERSION }}
+      - name: Install Flutter
+        run: |
+          if [ ! -x "$FLUTTER_ROOT/bin/flutter" ]; then
+            git clone --depth 1 --branch "$FLUTTER_VERSION" https://github.com/flutter/flutter.git "$FLUTTER_ROOT"
+          fi
+          echo "$FLUTTER_ROOT/bin" >> "$GITHUB_PATH"
+          "$FLUTTER_ROOT/bin/flutter" --version | tee build-logs/flutter.txt
+          "$FLUTTER_ROOT/bin/flutter" config --no-analytics --no-enable-swift-package-manager
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.pub-cache
+            ~/Library/Caches/CocoaPods
+            ~/.cocoapods
+          key: ios-deps-${{ runner.arch }}-${{ env.FLUTTER_VERSION }}-${{ hashFiles('pubspec.lock', 'ios/Podfile.lock') }}
+          restore-keys: ios-deps-${{ runner.arch }}-${{ env.FLUTTER_VERSION }}-
+      - name: Dependencies
+        run: flutter pub get --enforce-lockfile 2>&1 | tee build-logs/dependencies.txt
+      - name: Analyze and test
+        run: |
+          flutter analyze 2>&1 | tee build-logs/analyze.txt
+          flutter test 2>&1 | tee build-logs/tests.txt
+      - name: Validate native WebViews on iPhone simulator
+        timeout-minutes: 15
+        run: |
+          xcrun simctl list devices available --json > build-logs/simulators.json
+          SIMULATOR_ID=$(python3 -c 'import json; d=json.load(open("build-logs/simulators.json"))["devices"]; print(next(v["udid"] for k in sorted(d, reverse=True) if "iOS" in k for v in d[k] if v["name"].startswith("iPhone")))')
+          xcrun simctl boot "$SIMULATOR_ID" || true
+          xcrun simctl bootstatus "$SIMULATOR_ID" -b
+          trap 'xcrun simctl io "$SIMULATOR_ID" screenshot build-logs/ios-simulator.png || true; xcrun simctl spawn "$SIMULATOR_ID" log show --last 3m --predicate '\''process == "Runner"'\'' --style compact > build-logs/ios-system.txt || true' EXIT
+          flutter test integration_test/web_panel_smoke_test.dart -d "$SIMULATOR_ID" --no-pub --reporter expanded 2>&1 | tee build-logs/ios-webview-smoke.txt
+      - name: Build unsigned device application
+        run: |
+          flutter build ios --release --no-codesign 2>&1 | tee build-logs/ios-build.txt
+          git diff --exit-code -- ios/Podfile.lock
+      - name: Validate and package IPA
+        run: python3 scripts/package_ios.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: proxly-ios-unsigned-${{ github.run_number }}
+          path: dist/ios/*
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+      - name: Save diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-build-logs-${{ github.run_number }}-${{ github.run_attempt }}
+          path: |
+            build-logs/
+            ios/Podfile.lock
+          retention-days: 14
