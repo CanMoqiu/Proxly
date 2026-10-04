@@ -1,0 +1,35 @@
+name: Bug report
+description: Report a reproducible problem in Proxly
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        请先确认使用的是最新版本。不要提交 Clash Token、SSH 密码、私钥、真实地址或个人数据。
+  - type: input
+    id: version
+    attributes:
+      label: Proxly version
+      description: 应用关于页显示的版本号
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Platform and system
+      description: Android/iOS、设备型号和系统版本
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: 请提供最小复现步骤和已脱敏的错误信息
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: 仅上传脱敏内容；不要包含凭据或私钥

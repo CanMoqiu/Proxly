@@ -1,0 +1,19 @@
+name: Feature request
+description: Suggest an improvement to Proxly
+title: "[Feature] "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem and use case
+      description: 你希望解决什么问题，使用场景是什么？
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: 请描述期望的用户行为和限制
+    validations:
+      required: true
