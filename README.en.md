@@ -9,7 +9,7 @@
   [![Flutter](https://img.shields.io/badge/Flutter-stable-02569B?logo=flutter&logoColor=white)](https://flutter.dev/)
   [![License](https://img.shields.io/github/license/CanMoqiu/proxly)](LICENSE)
 
-  [GitHub Releases](https://github.com/CanMoqiu/proxly/releases) · **English** · [简体中文](README.zh-CN.md)
+  [GitHub Releases](https://github.com/CanMoqiu/proxly/releases) · **English** · [简体中文](README.md)
 </div>
 
 ## Overview
