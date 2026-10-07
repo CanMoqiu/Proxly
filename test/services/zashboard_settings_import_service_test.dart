@@ -58,6 +58,7 @@ void main() {
       'setup/api-list': '[{"password":"leak"}]',
       'config/language': 'zh-CN',
       'config/connection-display-style': 'table',
+      'config/disable-pull-to-refresh': 'true',
       'cache/auto-sync-settings-hash': 'hash',
       'config/private': 'controller-secret',
       'config/object': {'authorization': 'Bearer leaked'},
@@ -65,7 +66,7 @@ void main() {
 
     expect(result, isNotNull);
     expect(result!.acceptedCount, 2);
-    expect(result.skippedCount, 6);
+    expect(result.skippedCount, 7);
     final prefs = await SharedPreferences.getInstance();
     final saved = jsonDecode(
       prefs.getString(ZashboardSettingsImportService.preferenceKey)!,

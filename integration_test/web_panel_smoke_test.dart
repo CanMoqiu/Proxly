@@ -13,10 +13,13 @@ import 'package:proxly/pages/connections_page.dart';
 import 'package:proxly/pages/proxy_page.dart';
 import 'package:proxly/services/connection_settings_store.dart';
 import 'package:proxly/services/web_panel_service.dart';
+import 'package:proxly/services/web_panel_scroll.dart';
 import 'package:proxly/services/web_panel_flag_font.dart';
 import 'package:proxly/services/web_panel_page_probe.dart';
 import 'package:proxly/widgets/panel_error_view.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import 'web_panel_scroll_probe.dart';
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
@@ -277,6 +280,7 @@ Future<void> verifyBundledPanelLayoutAndFlags(
   InAppWebViewController? web;
   final scripts = [
     WebPanelPageProbe.disableServiceWorker,
+    WebPanelScroll.buildScript(),
     WebPanelAuthScript.build(
       hostname: '127.0.0.1',
       port: '${panel.port}',
@@ -290,6 +294,10 @@ Future<void> verifyBundledPanelLayoutAndFlags(
   await tester.pumpWidget(MaterialApp(
       home: Scaffold(
           body: InAppWebView(
+    initialSettings: InAppWebViewSettings(
+      overScrollMode: OverScrollMode.NEVER,
+      disallowOverScroll: true,
+    ),
     initialUrlRequest:
         URLRequest(url: WebUri('http://127.0.0.1:${panel.port}/#/proxies')),
     initialUserScripts: UnmodifiableListView(scripts
@@ -308,6 +316,31 @@ Future<void> verifyBundledPanelLayoutAndFlags(
     if (ready) break;
   }
   expect(ready, isTrue);
+  Future<void> verifyScroll() async {
+    final result = await web!.callAsyncJavaScript(
+      functionBody: webPanelScrollProbe,
+    );
+    expect(result?.error, isNull);
+    final scroll = result!.value as Map;
+    expect(scroll['top'], [false, false, false]);
+    expect(scroll['bottom'], [false, false, false]);
+    expect(scroll['horizontal'], [false, false, false]);
+    expect(scroll['multi'], isFalse);
+    expect(scroll['overscroll'], 'none');
+    expect(scroll['preference'], 'false');
+  }
+
+  await verifyScroll();
+  // A live VueUse preference change must not reinstall the faulty touch guard.
+  await web!.evaluateJavascript(source: r'''
+    localStorage.setItem('config/disable-pull-to-refresh', 'true');
+    window.dispatchEvent(new CustomEvent('vueuse-storage', { detail: {
+      key: 'config/disable-pull-to-refresh', newValue: 'true',
+      storageArea: localStorage
+    }}));
+  ''');
+  await tester.pump(const Duration(milliseconds: 100));
+  await verifyScroll();
   final result = await web!.callAsyncJavaScript(functionBody: r'''
     const fonts = await document.fonts.load('48px ProxlyFlags', '🇹🇼');
     const canvas = document.createElement('canvas');
@@ -347,6 +380,7 @@ Future<void> verifyBundledPanelLayoutAndFlags(
     document.documentElement.classList.remove('__proxly_dockless');
     getComputedStyle(document.querySelector('.home-page nav.tab-bar')).visibility;
   '''), 'visible');
+  await verifyScroll();
   await tester.pumpWidget(const SizedBox.shrink());
   await tester.pump(const Duration(seconds: 1));
 }

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'connection_settings_store.dart';
+import 'web_panel_scroll.dart';
 import 'zashboard_config_validator.dart';
 
 class ZashboardSettingsImportResult {
@@ -28,6 +29,7 @@ class ZashboardSettingsImportService {
     'setup/active-uuid',
   };
   static const Set<String> _managedStorageKeys = {
+    WebPanelScroll.managedPreference,
     'config/auto-theme',
     'config/default-theme',
     'config/dark-theme',

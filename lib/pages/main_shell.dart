@@ -156,26 +156,33 @@ class _MainShellState extends State<MainShell> with RouteAware {
   Widget build(BuildContext context) {
     AppLocaleScope.watch(context);
     final palette = AppPalette.of(context);
-    final accentColor = Theme.of(context).colorScheme.primary;
+    final theme = Theme.of(context);
+    final accentColor = theme.colorScheme.primary;
 
     return Scaffold(
       body: IndexedStack(index: _currentIndex, children: _pages),
-      bottomNavigationBar: BottomNavigationBar(
-        backgroundColor: palette.surface,
-        unselectedItemColor: palette.textSecondary,
-        currentIndex: _currentIndex,
-        onTap: (index) {
-          FocusManager.instance.primaryFocus?.unfocus();
-          if (index == _currentIndex) return;
-          final previousIndex = _currentIndex;
-          setState(() => _currentIndex = index);
-          _syncWebPanelTabState();
-          // A hidden WKWebView can suspend JavaScript. Never lock navigation
-          // while waiting for its preferences or controller requests.
-          unawaited(_syncAfterTabChange(previousIndex, index));
-        },
-        selectedItemColor: accentColor,
-        items: _navItems,
+      bottomNavigationBar: Theme(
+        // Match Android's Material 3 ripple on iOS without changing page themes.
+        data: AppPlatform.isIOS
+            ? theme.copyWith(splashFactory: InkSparkle.splashFactory)
+            : theme,
+        child: BottomNavigationBar(
+          backgroundColor: palette.surface,
+          unselectedItemColor: palette.textSecondary,
+          currentIndex: _currentIndex,
+          onTap: (index) {
+            FocusManager.instance.primaryFocus?.unfocus();
+            if (index == _currentIndex) return;
+            final previousIndex = _currentIndex;
+            setState(() => _currentIndex = index);
+            _syncWebPanelTabState();
+            // A hidden WKWebView can suspend JavaScript. Never lock navigation
+            // while waiting for its preferences or controller requests.
+            unawaited(_syncAfterTabChange(previousIndex, index));
+          },
+          selectedItemColor: accentColor,
+          items: _navItems,
+        ),
       ),
     );
   }

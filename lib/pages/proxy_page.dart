@@ -16,6 +16,7 @@ import '../main.dart' show ProxlyApp;
 import '../services/clash_host_validator.dart';
 import '../services/connection_settings_store.dart';
 import '../services/web_panel_service.dart';
+import '../services/web_panel_scroll.dart';
 import '../services/web_panel_flag_font.dart';
 import '../services/app_platform.dart';
 import '../services/panel_load_monitor.dart';
@@ -268,6 +269,7 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
     if (_restoreUserScript != null) {
       await _webViewController!.addUserScript(userScript: _restoreUserScript!);
     }
+    await _webViewController!.addUserScript(userScript: _nativeScrollScript);
     if (_connectionUserScript != null) {
       await _webViewController!.addUserScript(
         userScript: _connectionUserScript!,
@@ -292,6 +294,7 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
       _coreSettingsSyncScript,
       _authStateCleanupScript,
       if (_restoreUserScript != null) _restoreUserScript!,
+      _nativeScrollScript,
       if (_connectionUserScript != null) _connectionUserScript!,
       if (_themeUserScript != null) _themeUserScript!,
       if (Platform.isIOS) _flagFontScript,
@@ -299,6 +302,11 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
     ];
     return UnmodifiableListView(scripts);
   }
+
+  static final UserScript _nativeScrollScript = UserScript(
+    source: WebPanelScroll.buildScript(),
+    injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+  );
 
   // Read persisted localStorage and build a script that injects it before Vue
   // initializes. Base64 avoids escaping JSON characters inside a JS string.
@@ -689,6 +697,9 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
 
   Future<void> _syncTheme(bool isDark) async {
     if (_webViewController == null) return;
+    await _webViewController!.evaluateJavascript(
+      source: WebPanelScroll.buildScript(),
+    );
     final language = AppLocaleController.instance.zashboardLanguage;
     await _webViewController!.evaluateJavascript(
       source: WebPanelAppearanceScript.build(
@@ -1005,6 +1016,7 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
                   domStorageEnabled: true,
                   disableHorizontalScroll: true,
                   overScrollMode: OverScrollMode.NEVER,
+                  disallowOverScroll: true,
                   mixedContentMode: MixedContentMode.MIXED_CONTENT_NEVER_ALLOW,
                   useShouldOverrideUrlLoading: true,
                   // Use Virtual Display rendering to reduce GPU composition overhead.

@@ -12,6 +12,7 @@ import '../main.dart' show ProxlyApp;
 import '../services/clash_host_validator.dart';
 import '../services/connection_settings_store.dart';
 import '../services/web_panel_service.dart';
+import '../services/web_panel_scroll.dart';
 import '../services/web_panel_flag_font.dart';
 import '../services/app_platform.dart';
 import '../services/panel_load_monitor.dart';
@@ -566,6 +567,7 @@ class _ConnectionsPageState extends State<ConnectionsPage>
     if (_restoreUserScript != null) {
       await _webViewController!.addUserScript(userScript: _restoreUserScript!);
     }
+    await _webViewController!.addUserScript(userScript: _nativeScrollScript);
     if (_connectionUserScript != null) {
       await _webViewController!.addUserScript(
         userScript: _connectionUserScript!,
@@ -591,6 +593,7 @@ class _ConnectionsPageState extends State<ConnectionsPage>
       _hideUntilReadyScript,
       _authStateCleanupScript,
       if (_restoreUserScript != null) _restoreUserScript!,
+      _nativeScrollScript,
       if (_connectionUserScript != null) _connectionUserScript!,
       _mobileModeScript,
       _connectionViewScript,
@@ -601,6 +604,11 @@ class _ConnectionsPageState extends State<ConnectionsPage>
     return UnmodifiableListView(scripts);
   }
 
+  static final UserScript _nativeScrollScript = UserScript(
+    source: WebPanelScroll.buildScript(),
+    injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+  );
+
   static final UserScript _flagFontScript = UserScript(
     source: WebPanelFlagFont.buildScript(),
     injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
@@ -608,6 +616,9 @@ class _ConnectionsPageState extends State<ConnectionsPage>
 
   Future<void> _syncTheme(bool isDark) async {
     if (_webViewController == null) return;
+    await _webViewController!.evaluateJavascript(
+      source: WebPanelScroll.buildScript(),
+    );
     final language = AppLocaleController.instance.zashboardLanguage;
     await _webViewController!.evaluateJavascript(
       source: WebPanelAppearanceScript.build(
@@ -794,6 +805,7 @@ class _ConnectionsPageState extends State<ConnectionsPage>
                 userAgent: _mobileUserAgent,
                 disableHorizontalScroll: true,
                 overScrollMode: OverScrollMode.NEVER,
+                disallowOverScroll: true,
                 useWideViewPort: false,
                 loadWithOverviewMode: false,
                 mixedContentMode: MixedContentMode.MIXED_CONTENT_NEVER_ALLOW,
