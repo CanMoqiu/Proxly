@@ -186,8 +186,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       return;
     }
     try {
-      // Bug 4 已修复：不再每秒读 SharedPreferences。
-      // devMode 在 initState / 设置页返回时刷新，无需轮询。
+      // Refresh devMode during initialization and after returning from settings;
+      // avoid reading SharedPreferences on every polling cycle.
 
       if (!ClashService.instance.isConfigured) {
         if (mounted) {
@@ -401,7 +401,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ── Clash 状态卡片 ──────────────────────────────────
+            // Clash status
             Container(
               decoration: BoxDecoration(
                 color: cardBg,
@@ -412,7 +412,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // 标题行
+                  // Controller status and address.
                   Row(
                     children: [
                       Text(
@@ -445,7 +445,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                     ],
                   ),
                   const SizedBox(height: 10),
-                  // 内核版本行
+                  // Core version.
                   Row(
                     children: [
                       Text(
@@ -962,7 +962,7 @@ class HomeAppBar extends StatelessWidget implements PreferredSizeWidget {
   }
 }
 
-// ─── 控制台入口按钮 ────────────────────────────────────────────────────────────
+// Console entry button
 
 class _DashboardButton extends StatefulWidget {
   final VoidCallback onTap;

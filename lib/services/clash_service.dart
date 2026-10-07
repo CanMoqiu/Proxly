@@ -465,7 +465,7 @@ class ClashService {
   Future<Map<String, String>> getVersionInfo() async {
     final data = await _get('/version', (d) => d);
     final coreVersion = (data['version'] as String?) ?? '--';
-    // 查找 OpenClash 专有字段（部分修改版内核附带）
+    // Some modified OpenClash cores expose additional OpenClash-specific fields.
     final openclashVersion = data['openclash_version'] as String? ??
         data['clash_version'] as String?;
     final isMeta = data['meta'] as bool? ?? false;

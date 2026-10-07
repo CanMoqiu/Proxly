@@ -457,7 +457,7 @@ class _NativeConnectionsPageState extends State<NativeConnectionsPage>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // 第一行：来源 IP + 连接时间 + 关闭
+                // Source IP, connection time, and close action.
                 Row(
                   children: [
                     GestureDetector(
@@ -497,14 +497,14 @@ class _NativeConnectionsPageState extends State<NativeConnectionsPage>
                   ],
                 ),
                 const SizedBox(height: 2),
-                // 第二行：目标主机
+                // Destination host.
                 Text(
                   c.host,
                   style: TextStyle(fontSize: 12, color: textPrimary),
                   overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(height: 2),
-                // 第三行：代理链路
+                // Proxy chain.
                 Text(
                   () {
                     if (_chainFullDisplay) return c.chain;
@@ -516,7 +516,7 @@ class _NativeConnectionsPageState extends State<NativeConnectionsPage>
                   overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(height: 2),
-                // 第四行：规则 + 速度 + 累计流量
+                // Rule, speed, and cumulative traffic.
                 Row(
                   children: [
                     Expanded(

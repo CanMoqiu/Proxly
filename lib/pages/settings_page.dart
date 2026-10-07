@@ -86,8 +86,8 @@ class _SettingsPageState extends State<SettingsPage>
   }
 
   Future<void> _setTheme(ThemeMode mode) async {
-    ProxlyApp.setThemeModeOf(context, mode); // 同步更新静态变量 + 触发父级重建
-    if (mounted) setState(() {}); // 强制重建，确保 Switch/ThemeButton 即时响应
+    ProxlyApp.setThemeModeOf(context, mode); // Update shared state and rebuild the app.
+    if (mounted) setState(() {}); // Refresh the switch and theme button immediately.
     final prefs = await SharedPreferences.getInstance();
     final str = mode == ThemeMode.light
         ? 'light'
@@ -264,8 +264,8 @@ class _SettingsPageState extends State<SettingsPage>
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // ── 外观主题卡片 ─────────────────────────────────────────────────
-              // ── 连接配置卡片 ─────────────────────────────────────────────────
+              // Appearance and theme settings.
+              // Connection settings.
               Container(
                 key: const ValueKey('settings_connection_card'),
                 decoration: BoxDecoration(
@@ -388,7 +388,7 @@ class _SettingsPageState extends State<SettingsPage>
                         ),
                       ),
                     ),
-                    // 测试结果内嵌
+                    // Keep the test result inside the connection card.
                     if (_testResult != null) ...[
                       const SizedBox(height: 12),
                       Row(
@@ -419,7 +419,7 @@ class _SettingsPageState extends State<SettingsPage>
                       ),
                     ],
                     const SizedBox(height: 16),
-                    // 按钮行
+                    // Connection actions.
                     Row(
                       children: [
                         Expanded(
@@ -543,7 +543,7 @@ class _SettingsPageState extends State<SettingsPage>
               ),
               const SizedBox(height: 12),
 
-              // ── 关于 ─────────────────────────────────────────────────────────
+              // About
               _NavRow(
                 icon: Icons.info_outline_rounded,
                 title: tr('关于 Proxly'),
@@ -565,7 +565,7 @@ class _SettingsPageState extends State<SettingsPage>
   }
 }
 
-// ── 通用导航行组件 ──────────────────────────────────────────────────────────
+// Shared navigation row
 
 class _NavRow extends StatelessWidget {
   final IconData icon;

@@ -25,7 +25,8 @@ class ProxlyApp extends StatefulWidget {
   final bool showSetupWizard;
   const ProxlyApp({super.key, this.showSetupWizard = false});
 
-  // 静态变量，供子页面同步读取，无需本地副本
+  // Keep the theme mode in shared state so child pages can read it without
+  // maintaining local copies.
   static ThemeMode activeThemeMode = ThemeMode.system;
 
   static void toggleThemeOf(BuildContext context) {
@@ -156,14 +157,14 @@ class _ProxlyAppState extends State<ProxlyApp> with WidgetsBindingObserver {
           ),
         );
       },
-      // 首次启动（未配置地址）显示设置向导，否则直接进入主界面
+      // Show the setup wizard on first launch when no controller address is configured.
       home:
           widget.showSetupWizard ? const SetupWizardPage() : const MainShell(),
     );
   }
 }
 
-// ─── 悬浮主题切换球 ────────────────────────────────────────────────────────────
+// Theme toggle bubble
 
 class _FloatingThemeBall extends StatefulWidget {
   const _FloatingThemeBall();

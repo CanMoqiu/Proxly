@@ -57,7 +57,7 @@ class _MainShellState extends State<MainShell> with RouteAware {
   @override
   void didPopNext() {
     _loadPrefs();
-    // 从控制台（Navigator.push）返回后，同步 Web 标签可见状态
+    // Reconcile Web panel visibility after returning from the pushed console route.
     _syncWebPanelTabState();
   }
 

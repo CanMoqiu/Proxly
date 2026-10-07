@@ -71,7 +71,8 @@ class _ConnectionsPageState extends State<ConnectionsPage>
       'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 '
       '(KHTML, like Gecko) Chrome/125.0.0.0 Mobile Safari/537.36';
 
-  /// 屏蔽 Service Worker，防止在 Virtual Display 0×0 时挂起加载。
+  // Disable Service Worker installation because a hidden 0x0 Virtual Display
+  // can otherwise suspend page loading.
   static final UserScript _noSwScript = UserScript(
     source: WebPanelPageProbe.disableServiceWorker,
     injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
@@ -897,7 +898,7 @@ class _ConnectionsPageState extends State<ConnectionsPage>
   }
 }
 
-// ─── 加载动画遮罩 ──────────────────────────────────────────────────────────────
+// Loading overlay
 
 class _LoadingOverlay extends StatefulWidget {
   final bool isDark;

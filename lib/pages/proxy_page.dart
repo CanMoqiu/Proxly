@@ -71,7 +71,7 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
   bool _webViewReady = false;
   bool _coreSettingsImportInProgress = false;
 
-  // 代理页内视图切换：proxies ↔ rules
+  // Select the SPA route shown inside the proxy WebView.
   bool _showingRules = false;
 
   bool _updating = false;
@@ -81,7 +81,7 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
 
   static const _prefLocalStorage = ZashboardSettingsImportService.preferenceKey;
 
-  // 在 Vue 初始化前注入 localStorage 的 UserScript
+  // Inject persisted localStorage before Vue initializes.
   UserScript? _restoreUserScript;
   UserScript? _connectionUserScript;
   UserScript? _themeUserScript;
@@ -121,8 +121,8 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
     }
   }
 
-  /// 在 AT_DOCUMENT_START 屏蔽 navigator.serviceWorker，
-  /// 防止 Service Worker 在隐藏的 WebView（Virtual Display 0×0）中安装时挂起页面加载。
+  // Disable Service Worker installation at document start because a hidden 0x0
+  // Virtual Display can otherwise suspend page loading.
   static final UserScript _noSwScript = UserScript(
     source: WebPanelPageProbe.disableServiceWorker,
     injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
@@ -254,7 +254,7 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
     );
   }
 
-  /// 移除所有 UserScript 后重新注入：SW 屏蔽脚本 + localStorage 恢复脚本。
+  // Reinstall both scripts after clearing the WebView's existing UserScripts.
   Future<void> _reapplyUserScripts() async {
     if (_webViewController == null) return;
     await _webViewController!.removeAllUserScripts();
@@ -300,9 +300,8 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
     return UnmodifiableListView(scripts);
   }
 
-  /// 从 SharedPreferences 读取已保存的 localStorage，
-  /// 构建一个在 Vue 初始化之前（AT_DOCUMENT_START）注入数据的 UserScript。
-  /// 使用 base64 编码规避 JSON 中特殊字符对 JS 字符串的干扰。
+  // Read persisted localStorage and build a script that injects it before Vue
+  // initializes. Base64 avoids escaping JSON characters inside a JS string.
   Future<void> _buildRestoreScript() async {
     final prefs = await SharedPreferences.getInstance();
     var raw = prefs.getString(_prefLocalStorage);
@@ -363,7 +362,8 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
 
   Future<void> _startLocalServerImpl() async {
     final generation = ++_serverGeneration;
-    // 先构建恢复脚本，确保 WebView 创建时可立即注入
+    // Build the restore script before creating the WebView so it is available
+    // at the first document start.
     await _buildRestoreScript();
     if (!mounted || generation != _serverGeneration) return;
     _isDark = ProxlyApp.resolvedThemeIsDark(context);
@@ -463,7 +463,7 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
     WebPanelSync.instance.unregisterWebView(this);
     ConnectionSettingsStore.instance
         .removeListener(_handleConnectionSettingsChanged);
-    _saveLocalStorage(); // 关闭页面时保存
+    _saveLocalStorage(); // Persist the page state before closing it.
     _assetServer?.close();
     _fileServer?.close();
     super.dispose();
@@ -564,8 +564,8 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
     if (state == AppLifecycleState.resumed &&
         _webViewReady &&
         _webViewController != null) {
-      // Bug 2：asTab 模式下只有用户正在看代理标签时才重载，
-      // 停留在其他标签时前台化不应触发 WebView 重载，避免产生无效 API 请求消耗订阅流量。
+      // In tab mode, reload only while the proxy tab is visible. Reloading a
+      // hidden tab on resume would create unnecessary API requests.
       if (!widget.asTab || WebPanelSync.instance.proxyTabActive) {
         setState(() => _webViewReady = false);
         _webViewController!.reload();
@@ -573,7 +573,7 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
     }
   }
 
-  /// 把当前 WebView 的 localStorage 全部导出并存入 SharedPreferences
+  // Export the current WebView localStorage to SharedPreferences.
   Future<void> _saveLocalStorage() async {
     if (_webViewController == null) return;
     try {
@@ -590,7 +590,7 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
       """,
       );
       if (result == null) return;
-      // JS 返回值已是 Dart 原生字符串类型，直接转换
+      // The JavaScript bridge already returns a Dart string in this case.
       final raw = result is String ? result : result.toString();
       if (raw.isEmpty || raw == 'null') return;
       final sanitized =
@@ -603,8 +603,8 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
     }
   }
 
-  /// 控制台关闭后，把最新的 SharedPreferences 数据注入到代理页已有的 WebView，
-  /// 无需整页重载，用户不会看到加载动画。
+  // Inject the latest SharedPreferences values into the existing proxy WebView
+  // after the console closes, avoiding a full-page reload.
   Future<void> _reloadFromPrefs() async {
     if (_needsRecovery || _panelLoad.error != null) {
       await _recoverPanel();
@@ -677,7 +677,7 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
       }catch(e){}})();
       """,
       );
-      // 同步更新 UserScript，下次重载时依然生效
+      // Keep the UserScript in sync so the values survive the next reload.
       await _restoreConnectionStateInPage();
       await _buildRestoreScript();
       await _reapplyUserScripts();
@@ -699,7 +699,7 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
     );
   }
 
-  /// 在代理页内切换 proxies / rules 视图（SPA 哈希路由，不触发页面重载）
+  // Switch the proxies/rules SPA route without reloading the page.
   void _toggleView() {
     setState(() => _showingRules = !_showingRules);
     final hash = _showingRules ? '#/rules' : '#/proxies';
@@ -708,7 +708,7 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
     );
   }
 
-  /// 注入 JS，拦截 POST /upgrade/ui 并转给 Flutter 处理
+  // Inject JavaScript that forwards POST /upgrade/ui to Flutter.
   void _injectInterceptor() {
     _webViewController?.evaluateJavascript(
       source: r"""
@@ -740,8 +740,9 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
     );
   }
 
-  /// 从本地 JSON 文件导入 Zashboard 配置。
-  /// 只合并非冲突偏好，Proxly 管理的后端、主题和连接页布局保持不变。
+  // Import Zashboard preferences from a local JSON file. Only non-conflicting
+  // values are merged so Proxly-controlled backend, theme, and layout settings
+  // remain unchanged.
   Future<void> _importZashboardConfig() async {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
@@ -775,7 +776,7 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
       return;
     }
 
-    // 1. 只合并不会和 Proxly 管理项冲突的 Zashboard 偏好。
+    // Merge only Zashboard preferences that do not conflict with Proxly-managed values.
     final sanitized =
         await ZashboardSettingsImportService.instance.importSnapshot(raw);
     if (sanitized == null) {
@@ -786,7 +787,7 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
       _showImportSnack('没有可导入的非冲突配置', success: false);
       return;
     }
-    // 2. 重建 UserScript，确保刷新后在 Vue 初始化前恢复导入的配置。
+    // Rebuild the UserScript so imported values are restored before Vue initializes.
     await _buildRestoreScript();
     await _reapplyUserScripts();
 
@@ -796,7 +797,7 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
       success: true,
     );
 
-    // 3. 广播刷新全部存活的代理、连接和独立控制台 WebView。
+    // Refresh every live proxy, connection, and standalone console WebView.
     final reloadResult = await WebPanelSync.instance.reloadAllWebViews();
     if (mounted && !reloadResult.succeeded) {
       _showImportSnack(
@@ -914,7 +915,7 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
         _updateFailed = true;
         _updateMessage = '更新失败：$e';
       });
-      // 4 秒后自动清除错误提示
+      // Clear the error message after a short delay.
       Future.delayed(const Duration(seconds: 4), () {
         if (mounted) setState(() => _updateFailed = false);
       });
@@ -972,7 +973,7 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
         ),
         centerTitle: true,
         actions: [
-          // 导入 Zashboard 配置文件
+          // Import Zashboard configuration.
           IconButton(
             icon: Icon(
               Icons.file_download_outlined,
@@ -1006,11 +1007,11 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
                   overScrollMode: OverScrollMode.NEVER,
                   mixedContentMode: MixedContentMode.MIXED_CONTENT_NEVER_ALLOW,
                   useShouldOverrideUrlLoading: true,
-                  // 切换为 Virtual Display 渲染，减少 GPU 合成层，解决掉帧问题
+                  // Use Virtual Display rendering to reduce GPU composition overhead.
                   useHybridComposition: false,
-                  // 确保硬件加速渲染
+                  // Keep hardware-accelerated rendering enabled.
                   hardwareAcceleration: true,
-                  // 关闭不需要的功能，降低后台开销
+                  // Disable features that are not needed by the embedded panel.
                   supportZoom: false,
                   geolocationEnabled: false,
                   safeBrowsingEnabled: true,
@@ -1107,7 +1108,7 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
               ),
             ),
 
-            // 下载更新进度条
+            // Download progress.
             if (_updating)
               Positioned(
                 bottom: 24,
@@ -1151,7 +1152,7 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
                 ),
               ),
 
-            // 更新失败提示条
+            // Update failure message.
             if (_updateFailed)
               Positioned(
                 bottom: 24,
@@ -1178,8 +1179,8 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
       ),
     );
 
-    // 控制台（asTab:false）用 PopScope 拦截系统返回，确保 localStorage
-    // 保存完成后再 pop，避免 HomePage 调用 reload() 时读到旧数据
+    // The pushed console uses PopScope so localStorage is saved before popping;
+    // otherwise HomePage could reload stale values.
     if (!widget.asTab) {
       return PopScope(
         canPop: AppPlatform.isIOS,
@@ -1197,7 +1198,7 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
   }
 }
 
-// ─── 加载动画遮罩 ──────────────────────────────────────────────────────────────
+// Loading overlay
 
 class _LoadingOverlay extends StatefulWidget {
   final bool isDark;
