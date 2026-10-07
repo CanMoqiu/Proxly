@@ -17,7 +17,7 @@ Windows 可修改代码、运行 Dart/Widget 测试；iOS 原生编译由 GitHub
 
 ## 手动打包
 
-1. Android 与 iOS 已在 `main` 同步开发，默认分支提供 `ios-selfsign.yml` 手动工作流。
+1. Android 与 iOS 已在 `main` 同步开发，默认分支提供 `mobile-builds.yml` 手动工作流。
 2. 在 GitHub 的 **Actions → Proxly Android and iOS builds → Run workflow** 中，`ref` 填写要构建的分支、标签或完整提交 SHA，`platform` 选择 `ios`。
 3. 等待 iPhone 模拟器 WebView 集成测试和 iOS 构建完成。任务不会因为普通推送自动运行。`platform=both` 同时构建 Android，`platform=android` 只构建 Android；正式发布选择 `android_build_type=release`。
 4. 下载 `proxly-ios-unsigned-<运行序号>` Artifact，解压得到 `.ipa`、`.ipa.sha256` 和 `build-info-ios.json`。
@@ -25,14 +25,14 @@ Windows 可修改代码、运行 Dart/Widget 测试；iOS 原生编译由 GitHub
 也可以通过 GitHub CLI 发起，例如：
 
 ```powershell
-gh workflow run ios-selfsign.yml --ref main -f ref=main -f platform=ios
-gh run list --workflow ios-selfsign.yml --limit 5
+gh workflow run mobile-builds.yml --ref main -f ref=main -f platform=ios
+gh run list --workflow mobile-builds.yml --limit 5
 gh run download <运行编号> -n proxly-ios-unsigned-<运行序号> -D .\dist\ios
 ```
 
 同时构建 APK 和 IPA 时使用 `-f platform=both -f android_build_type=release`。Android 产物为 `proxly-android-release-<运行序号>`，包含已签名 APK、SHA-256 和构建信息。需要独立测试包时选择 `android_build_type=debug`，其包名为 `top.canmoqiu.proxly.debug`，可与正式版并存，配置独立保存。签名配置和旧版迁移步骤见 [双端构建说明](mobile-builds.zh-CN.md)。
 
-运行编号（run ID）与运行序号（run number）不同，可在 Actions 页面或 `gh run view` 中确认。Artifact 保留 14 天。私有仓库使用自己的 Actions 额度；额度不足时先处理 GitHub 的构建限制，工作流不会修改计费或仓库可见性。
+运行编号（run ID）与运行序号（run number）不同，可在 Actions 页面或 `gh run view` 中确认。Artifact 保留 14 天。公开仓库的 Actions 额度与并发限制以 GitHub 当前政策为准；额度或并发不足时先处理 GitHub 的构建限制，工作流不会修改计费或仓库可见性。
 
 工作流只需要仓库读取权限，不需要 Apple 账号、证书或描述文件，也不发布 Release。输入的 `ref` 应是你信任的代码，因为构建会执行该版本的脚本。
 
@@ -69,4 +69,4 @@ Zashboard 更新仍执行摘要、大小和归档路径检查。iOS 安装完成
 
 构建成功不等于真机验收通过。模拟器验证本地 HTTP/WebSocket、WKWebView、Keychain 和导航恢复，不代替实际路由器及 iOS 27 真机测试。反馈问题时请提供机型、iOS 版本、自签工具、`build-info-ios.json` 中的提交 SHA、操作步骤与截图。不要包含控制器密钥、SSH 密码或签名证书。构建失败时查看 `ios-build-logs-*` 或 `android-build-logs-*` Artifact。
 
-更新检测需能公开读取发布信息。当前仓库保持私有，未登录的应用无法读取版本；可从关于页的更新日志打开浏览器，登录有权限的 GitHub 账号后手动下载安装包。
+更新检测通过公开的 GitHub Releases 获取版本信息。应用可直接读取公开版本；iOS 用户点击更新后仍需下载 IPA 并使用自己的签名方式安装。

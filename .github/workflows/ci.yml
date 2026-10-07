@@ -1,0 +1,66 @@
+name: Proxly CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      FLUTTER_VERSION: 3.47.5
+      FLUTTER_ROOT: ${{ github.workspace }}/../flutter-sdk-3.47.5
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Cache Flutter and dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.FLUTTER_ROOT }}
+            ~/.pub-cache
+          key: ci-${{ runner.os }}-${{ runner.arch }}-${{ env.FLUTTER_VERSION }}-${{ hashFiles('pubspec.lock') }}
+          restore-keys: |
+            ci-${{ runner.os }}-${{ runner.arch }}-${{ env.FLUTTER_VERSION }}-
+
+      - name: Install Flutter
+        run: |
+          if [ ! -x "$FLUTTER_ROOT/bin/flutter" ]; then
+            git clone \
+              --depth 1 \
+              --branch "$FLUTTER_VERSION" \
+              https://github.com/flutter/flutter.git \
+              "$FLUTTER_ROOT"
+          fi
+
+          echo "$FLUTTER_ROOT/bin" >> "$GITHUB_PATH"
+          "$FLUTTER_ROOT/bin/flutter" config --no-analytics
+          "$FLUTTER_ROOT/bin/flutter" --version
+
+      - name: Install dependencies
+        run: flutter pub get --enforce-lockfile
+
+      - name: Test packaging scripts
+        run: python3 -m unittest discover -s scripts -p 'test_*.py'
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Test
+        run: flutter test

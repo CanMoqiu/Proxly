@@ -9,7 +9,7 @@
 - `android_build_type`：默认 `release` 使用固定正式签名；`debug` 生成独立 `.debug` 包名的测试包。
 
 ```powershell
-gh workflow run ios-selfsign.yml --ref main -f ref=main -f platform=both -f android_build_type=release
+gh workflow run mobile-builds.yml --ref main -f ref=main -f platform=both -f android_build_type=release
 ```
 
 工作流只有仓库读取权限，不自动发布 Release。产物保留 14 天：`proxly-android-release-<序号>` 与 `proxly-ios-unsigned-<序号>`，各含安装包、SHA-256 和平台构建信息。正式安装包名为 `Proxly-Android-26.6.apk` / `Proxly-iOS-26.6.ipa`；测试版本保留第三位版本号，文件名均不含内部构建号。失败日志保存在 `android-build-logs-*` / `ios-build-logs-*`。
