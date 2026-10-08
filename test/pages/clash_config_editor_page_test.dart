@@ -4,7 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:proxly/l10n/app_locale.dart';
-import 'package:proxly/pages/clash_config_files_page.dart';
+import 'package:proxly/pages/clash_config_editor_page.dart';
+import 'package:proxly/widgets/yaml_file_dialogs.dart';
 import 'package:proxly/services/clash_config_file_service.dart';
 import 'package:re_editor/re_editor.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -565,25 +566,6 @@ tail: true''');
     expect(find.text('Directory: /etc/openclash/config'), findsOneWidget);
   });
 
-  testWidgets('configuration import matches the proxy page icon',
-      (tester) async {
-    SharedPreferences.setMockInitialValues({'app_language': 'en'});
-    await AppLocaleController.instance.load();
-    await tester.pumpWidget(
-      AppLocaleScope(
-        controller: AppLocaleController.instance,
-        child: const MaterialApp(home: ClashConfigFilesPage()),
-      ),
-    );
-    await tester.pump();
-    final importIcon = tester.widget<Icon>(
-      find.byIcon(Icons.file_download_outlined),
-    );
-    expect(importIcon.size, 22);
-    expect(find.byIcon(Icons.arrow_downward_rounded), findsNothing);
-    await tester.pumpWidget(const SizedBox.shrink());
-  });
-
   for (final entry in {
     'LF': 'mode: rule\n# 中文\n',
     'CRLF': 'mode: rule\r\n# 中文\r\n',
@@ -768,6 +750,9 @@ tail: true''');
     expect(find.textContaining('重启 OpenClash 后生效'), findsNothing);
 
     await tester.tap(find.byIcon(Icons.arrow_back_rounded));
+    await tester.pumpAndSettle();
+    expect(find.text('立即重启'), findsOneWidget);
+    await tester.tap(find.text('稍后'));
     await tester.pumpAndSettle();
     expect(editorResult, isTrue);
   });
@@ -1116,108 +1101,6 @@ tail: true''');
     final painter = paint.painter! as YamlLineNumberPainter;
     expect(painter.verticalOffset, closeTo(38, 0.1));
     expect(painter.cursorLine, 6);
-  });
-
-  testWidgets('configuration tile follows swipes and shows active SVG',
-      (tester) async {
-    SharedPreferences.setMockInitialValues({'app_language': 'en'});
-    await AppLocaleController.instance.load();
-    const file = ClashConfigFile(path: '/etc/openclash/config/current.yaml');
-    var opened = false;
-    var opens = 0;
-    var renames = 0;
-
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: StatefulBuilder(
-            builder: (context, setState) {
-              return Center(
-                child: SizedBox(
-                  width: 320,
-                  child: SwipeConfigFileTile(
-                    file: file,
-                    active: true,
-                    open: opened,
-                    busy: false,
-                    backgroundColor: Colors.white,
-                    textColor: Colors.black,
-                    hintColor: Colors.grey,
-                    onOpen: () {
-                      if (opened) {
-                        setState(() => opened = false);
-                      } else {
-                        opens++;
-                      }
-                    },
-                    onRename: () {
-                      renames++;
-                      setState(() => opened = false);
-                    },
-                    onExport: () => setState(() => opened = false),
-                    onSwipeStart: () => setState(() => opened = false),
-                    onSwipeOpen: () => setState(() => opened = true),
-                    onSwipeClose: () => setState(() => opened = false),
-                  ),
-                ),
-              );
-            },
-          ),
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-    expect(find.byKey(ValueKey('active_${file.path}')), findsOneWidget);
-    expect(find.text(file.displayPath), findsNothing);
-    expect(find.byIcon(Icons.chevron_right_rounded), findsOneWidget);
-    expect(
-      tester.getCenter(find.byKey(ValueKey('active_${file.path}'))).dx,
-      lessThan(tester.getCenter(find.text(file.name)).dx),
-    );
-    expect(
-      tester.getCenter(find.byIcon(Icons.chevron_right_rounded)).dx,
-      greaterThan(tester.getCenter(find.text(file.name)).dx),
-    );
-    expect(find.byIcon(Icons.arrow_upward_rounded), findsOneWidget);
-
-    final tile = find.byKey(ValueKey('swipe_file_${file.path}'));
-    final gesture = await tester.startGesture(tester.getCenter(tile));
-    await gesture.moveBy(const Offset(-60, 0));
-    await gesture.moveBy(const Offset(-24, 0));
-    await tester.pump();
-    final movingTransform = tester.widget<Transform>(
-      find.byKey(ValueKey('swipe_offset_${file.path}')),
-    );
-    expect(movingTransform.transform.getTranslation().x, lessThan(-15));
-    await gesture.moveBy(const Offset(-30, 0));
-    await gesture.up();
-    await tester.pumpAndSettle();
-    expect(opened, isTrue);
-    expect(find.text('Rename'), findsOneWidget);
-    expect(find.text('Export'), findsOneWidget);
-
-    await tester.tap(tile);
-    await tester.pumpAndSettle();
-    expect(opened, isFalse);
-    expect(opens, 0);
-
-    await tester.drag(tile, const Offset(-110, 0));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(ValueKey('rename_${file.path}')));
-    await tester.pumpAndSettle();
-    expect(renames, 1);
-    expect(opened, isFalse);
-
-    await tester.drag(tile, const Offset(-110, 0));
-    await tester.pumpAndSettle();
-    expect(opened, isTrue);
-    await tester.drag(tile, const Offset(140, 0));
-    await tester.pumpAndSettle();
-    expect(opened, isFalse);
-
-    await tester.drag(tile, const Offset(0, -50));
-    await tester.pumpAndSettle();
-    expect(opened, isFalse);
   });
 
   testWidgets('mobile selection toolbar exposes native editing actions',

@@ -5,6 +5,8 @@ import 'package:flutter_svg/flutter_svg.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:proxly/l10n/app_locale.dart';
 import 'package:proxly/pages/home_page.dart';
+import 'package:proxly/widgets/dashboard/home_app_bar.dart';
+import 'package:proxly/widgets/dashboard/clash_traffic_card.dart';
 import 'package:proxly/services/clash_service.dart';
 import 'package:proxly/services/openclash_restart_coordinator.dart';
 import 'package:proxly/widgets/adaptive_ui.dart';
@@ -28,7 +30,7 @@ void main() {
               foregroundColor: Colors.black,
               dividerColor: Colors.black12,
               onConsolePressed: () {},
-              onControlCenterPressed: () {},
+              onCustomizePressed: () {},
             ),
           ),
         ),
@@ -37,18 +39,19 @@ void main() {
     await tester.pump();
   }
 
-  testWidgets('console is hidden by default and control center stays visible',
+  testWidgets(
+      'console is hidden by default and dashboard customization stays visible',
       (tester) async {
     await pumpHeader(tester, showConsoleButton: false);
 
     expect(find.byKey(const ValueKey('home_console_button')), findsNothing);
     expect(
-      find.byKey(const ValueKey('home_control_center_button')),
+      find.byKey(const ValueKey('home_customize_button')),
       findsOneWidget,
     );
 
     final controlCenterButton = tester.widget<IconButton>(
-      find.byKey(const ValueKey('home_control_center_button')),
+      find.byKey(const ValueKey('home_customize_button')),
     );
     expect(
       controlCenterButton.style?.overlayColor
@@ -63,7 +66,7 @@ void main() {
     final consoleButton = find.byKey(const ValueKey('home_console_button'));
     expect(consoleButton, findsOneWidget);
     expect(
-      find.byKey(const ValueKey('home_control_center_button')),
+      find.byKey(const ValueKey('home_customize_button')),
       findsOneWidget,
     );
 
@@ -105,14 +108,15 @@ void main() {
       AppLocaleScope(
         controller: AppLocaleController.instance,
         child: MaterialApp(
-          home: HomePage(restartCoordinator: coordinator),
+          home: HomePage(restartCoordinator: coordinator, autoLoad: false),
         ),
       ),
     );
     await tester.pump();
 
     expect(find.text('重启中'), findsOneWidget);
-    expect(find.byType(CircularProgressIndicator), findsNothing);
+    expect(find.byKey(const ValueKey('dashboard_activity_indicator')),
+        findsOneWidget);
 
     await tester.pumpWidget(const SizedBox());
     gate.complete();
@@ -151,14 +155,14 @@ void main() {
             ),
             child: child!,
           ),
-          home: HomePage(restartCoordinator: coordinator),
+          home: HomePage(restartCoordinator: coordinator, autoLoad: false),
         ),
       ),
     );
     await tester.pump();
 
-    final scrollView = tester.widget<SingleChildScrollView>(
-      find.byType(SingleChildScrollView),
+    final scrollView = tester.widget<ReorderableListView>(
+      find.byType(ReorderableListView),
     );
     expect(
       find.byWidgetPredicate(
@@ -168,7 +172,7 @@ void main() {
     );
     expect(find.byType(RefreshIndicator), findsNothing);
     expect(scrollView.padding, const EdgeInsets.fromLTRB(16, 16, 16, 42));
-    expect((scrollView.padding! as EdgeInsets).bottom, lessThan(80));
+    expect(scrollView.padding!.bottom, lessThan(80));
     expect(scrollView.physics, isA<ClampingScrollPhysics>());
 
     await tester.pumpWidget(const SizedBox());

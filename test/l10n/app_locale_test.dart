@@ -4,6 +4,32 @@ import 'package:proxly/l10n/app_locale.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
+  testWidgets('dashboard and file management labels are translated',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({'app_language': 'en'});
+    await AppLocaleController.instance.load();
+    for (final text in [
+      'Clash 状态',
+      '当前 YAML',
+      'Clash 操作',
+      '快捷设置',
+      '自定义首页',
+      '完成',
+      '拖动手柄排序，关闭开关隐藏卡片',
+      '恢复默认',
+      '编辑配置',
+      '文件管理',
+      '导出当前内容',
+      '选择要编辑的文件，不改变当前运行配置。',
+      '当前 YAML 配置有未保存修改，继续前要保存吗？',
+      '覆盖已有配置？',
+      '卡片已隐藏，点击右上角自定义首页以恢复。',
+    ]) {
+      expect(tr(text), isNot(matches(RegExp(r'[\u4e00-\u9fff]'))),
+          reason: text);
+    }
+  });
+
   group('system language resolution', () {
     test('maps every Chinese locale to simplified Chinese', () {
       for (final locale in const [

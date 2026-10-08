@@ -195,6 +195,32 @@ String _languageLabel(AppLanguage language) => switch (language) {
     };
 
 const _english = <String, String>{
+  'Clash 状态': 'Clash status',
+  '当前 YAML': 'Current YAML',
+  'Clash 操作': 'Clash actions',
+  '快捷设置': 'Quick settings',
+  '自定义首页': 'Customize dashboard',
+  '拖动手柄排序，关闭开关隐藏卡片': 'Drag to reorder; turn off a switch to hide a card',
+  '拖动排序': 'Drag to reorder',
+  '恢复默认': 'Reset layout',
+  '卡片已隐藏，点击右上角自定义首页以恢复。':
+      'Cards are hidden. Customize the dashboard to restore them.',
+  '读取首页布局失败': 'Could not load the dashboard layout',
+  '保存首页布局失败，请重试': 'Could not save the dashboard layout. Please try again.',
+  '暂无订阅流量': 'No subscription traffic available',
+  '编辑配置': 'Edit configuration',
+  '文件管理': 'File actions',
+  '文件操作': 'File operation',
+  '完成': 'Done',
+  '选择要编辑的文件，不改变当前运行配置。':
+      'Choose a file to edit. The running configuration stays unchanged.',
+  '当前 YAML 配置有未保存修改，继续前要保存吗？':
+      'This YAML file has unsaved changes. Save before continuing?',
+  '导出当前内容': 'Export current content',
+  '选择 YAML 或上传新配置开始编辑':
+      'Choose a YAML file or upload a configuration to start editing',
+  '覆盖已有配置？': 'Overwrite existing configuration?',
+  '覆盖': 'Overwrite',
   '版本': 'Version',
   '前往 GitHub 发布页下载 IPA，自签后手动安装。':
       'Download the IPA from GitHub Releases, then sign and install it manually.',

@@ -1,14 +1,10 @@
 import 'dart:async';
 import 'dart:collection';
-import 'dart:io';
 import 'dart:isolate';
 import 'dart:math' as math;
-import 'dart:typed_data';
 
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 import 'package:re_editor/re_editor.dart';
 import 'package:re_highlight/languages/yaml.dart';
 import 'package:re_highlight/styles/atom-one-dark.dart';
@@ -20,709 +16,26 @@ import '../services/openclash_restart_coordinator.dart';
 import '../theme/app_theme.dart';
 import '../widgets/adaptive_ui.dart';
 import '../widgets/app_feedback.dart';
+import '../widgets/yaml_file_dialogs.dart';
+import '../widgets/yaml_file_actions.dart';
+import '../widgets/yaml_config_picker.dart';
 
 enum _ExitChoice { cancel, discard, save }
 
-class YamlRestartAfterSaveDialog extends StatelessWidget {
-  const YamlRestartAfterSaveDialog({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text(tr('确认重启 OpenClash')),
-      content: Text(tr('配置已保存，是否立即重启 OpenClash 使修改生效？')),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(false),
-          child: AdaptiveSingleLineText(tr('稍后')),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.of(context).pop(true),
-          child: AdaptiveSingleLineText(tr('立即重启')),
-        ),
-      ],
-    );
-  }
-}
-
-class _PickedFileTooLargeException implements Exception {
-  const _PickedFileTooLargeException();
-}
-
-class ClashConfigFilesPage extends StatefulWidget {
-  const ClashConfigFilesPage({super.key});
-
-  @override
-  State<ClashConfigFilesPage> createState() => _ClashConfigFilesPageState();
-}
-
-class _ClashConfigFilesPageState extends State<ClashConfigFilesPage>
-    with TransientFeedbackStateMixin<ClashConfigFilesPage> {
-  final _restartCoordinator = OpenClashRestartCoordinator.instance;
-  List<ClashConfigFile> _files = [];
-  bool _loadingFiles = false;
-  bool _uploading = false;
-  bool _restarting = false;
-  bool _errorNeedsSettings = false;
-  String? _activeConfigPath;
-  String? _openSwipePath;
-  String? _busyFilePath;
-  String? _error;
-  String? _message;
-
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _refreshFiles());
-  }
-
-  @override
-  void dispose() {
-    disposeTransientFeedback();
-    super.dispose();
-  }
-
-  void _clearOperationFeedback() {
-    cancelFeedbackClear('file_operation');
-    _errorNeedsSettings = false;
-    _error = null;
-    _message = null;
-  }
-
-  void _scheduleOperationFeedback({required bool isError}) {
-    scheduleFeedbackClear(
-      'file_operation',
-      isError: isError,
-      clear: () => setState(() {
-        _errorNeedsSettings = false;
-        _error = null;
-        _message = null;
-      }),
-    );
-  }
-
-  Future<void> _refreshFiles() async {
-    cancelFeedbackClear('file_operation');
-    setState(() {
-      _loadingFiles = true;
-      _errorNeedsSettings = false;
-      _error = null;
-      _message = null;
-    });
-    try {
-      final files = await ClashConfigFileService.listFiles();
-      ClashActiveConfig? activeConfig;
-      try {
-        activeConfig = await ClashConfigFileService.getActiveConfig();
-      } catch (_) {
-        activeConfig = null;
-      }
-      if (!mounted) return;
-      setState(() {
-        _files = files;
-        _activeConfigPath = ClashConfigFileService.matchActiveConfigPath(
-          files,
-          activeConfig,
-        );
-        _message = files.isEmpty ? '没有找到 YAML 配置文件，可上传新配置。' : null;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _error = _formatError('读取配置列表', e));
-      _scheduleOperationFeedback(isError: true);
-    } finally {
-      if (mounted) setState(() => _loadingFiles = false);
-    }
-  }
-
-  Future<void> _openFile(ClashConfigFile file) async {
-    if (_consumeOpenSwipe()) return;
-    final changed = await Navigator.push<bool>(
-      context,
-      MaterialPageRoute(builder: (_) => ClashConfigEditorPage(file: file)),
-    );
-    if (!mounted) return;
-    if (changed == true) {
-      await _promptRestartAfterSave(file);
-    }
-  }
-
-  Future<void> _promptRestartAfterSave(ClashConfigFile file) async {
-    cancelFeedbackClear('file_operation');
-    setState(() {
-      _errorNeedsSettings = false;
-      _error = null;
-      _message = '已保存 ${file.name}';
-    });
-    final restart = await showDialog<bool>(
-      context: context,
-      builder: (_) => const YamlRestartAfterSaveDialog(),
-    );
-    if (!mounted) return;
-    if (restart != true) {
-      _scheduleOperationFeedback(isError: false);
-      return;
-    }
-
-    setState(() {
-      _restarting = true;
-      _message = '正在重启 OpenClash...';
-    });
-    final result = await _restartCoordinator.restart(
-      reason: OpenClashRestartReason.yamlEditor,
-    );
-    if (!mounted) return;
-    setState(() {
-      _restarting = false;
-      if (result.success) {
-        _message = 'OpenClash 重启成功';
-      } else {
-        _message = null;
-        _error = _formatError(
-          '重启 OpenClash',
-          result.error ?? '未知错误',
-        );
-      }
-    });
-    _scheduleOperationFeedback(isError: !result.success);
-  }
-
-  Future<void> _uploadConfig() async {
-    if (_consumeOpenSwipe()) return;
-    final FilePickerResult? result;
-    try {
-      result = await FilePicker.platform.pickFiles(
-        type: FileType.any,
-        withData: false,
-        withReadStream: true,
-        dialogTitle: tr('选择 YAML 配置文件'),
-      );
-    } on PlatformException catch (e) {
-      _showSnack('打开文件选择器失败：${e.message ?? e.code}', success: false);
-      return;
-    } catch (e) {
-      _showSnack('打开文件选择器失败：$e', success: false);
-      return;
-    }
-    if (result == null || result.files.isEmpty) return;
-    if (!mounted) return;
-
-    final picked = result.files.first;
-    if (!ClashConfigFileService.isYamlPath(picked.name)) {
-      _showSnack('请选择 .yaml 或 .yml 文件', success: false);
-      return;
-    }
-    if (picked.size > ClashConfigFileService.maxConfigBytes) {
-      _showSnack('文件超过 5 MB 限制', success: false);
-      return;
-    }
-    late final Uint8List bytes;
-    try {
-      final readBytes = await _readPickedFileBytes(picked);
-      if (readBytes == null) {
-        _showSnack('读取本地文件失败', success: false);
-        return;
-      }
-      bytes = readBytes;
-    } on _PickedFileTooLargeException {
-      _showSnack('文件超过 5 MB 限制', success: false);
-      return;
-    } catch (e) {
-      _showSnack('读取本地文件失败：$e', success: false);
-      return;
-    }
-
-    final fileName = await _showFileNameDialog(initialValue: picked.name);
-    if (fileName == null) return;
-    late final String normalizedPath;
-    try {
-      normalizedPath = ClashConfigFileService.uploadPathForFileName(fileName);
-    } catch (_) {
-      _showSnack('文件名无效，请输入 .yaml 或 .yml 文件名', success: false);
-      return;
-    }
-
-    setState(() {
-      _uploading = true;
-      _clearOperationFeedback();
-    });
-    try {
-      await ClashConfigFileService.writeFileBytes(
-        normalizedPath,
-        Uint8List.fromList(bytes),
-      );
-      if (!mounted) return;
-      final uploaded = ClashConfigFile(path: normalizedPath);
-      setState(() {
-        if (!_files.any((file) => file.path == normalizedPath)) {
-          _files = [..._files, uploaded]
-            ..sort((a, b) => a.path.compareTo(b.path));
-        }
-        _message = '已上传 ${uploaded.name}';
-      });
-      _scheduleOperationFeedback(isError: false);
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _error = _formatError('上传', e));
-      _scheduleOperationFeedback(isError: true);
-    } finally {
-      if (mounted) setState(() => _uploading = false);
-    }
-  }
-
-  Future<Uint8List?> _readPickedFileBytes(PlatformFile picked) async {
-    final directBytes = picked.bytes;
-    if (directBytes != null) return directBytes;
-
-    final stream = picked.readStream;
-    if (stream != null) {
-      final builder = BytesBuilder(copy: false);
-      await for (final chunk in stream) {
-        if (builder.length + chunk.length >
-            ClashConfigFileService.maxConfigBytes) {
-          throw const _PickedFileTooLargeException();
-        }
-        builder.add(chunk);
-      }
-      return builder.takeBytes();
-    }
-
-    final path = picked.path;
-    if (path == null) return null;
-    final file = File(path);
-    if (await file.length() > ClashConfigFileService.maxConfigBytes) {
-      throw const _PickedFileTooLargeException();
-    }
-    return file.readAsBytes();
-  }
-
-  Future<String?> _showFileNameDialog({
-    required String initialValue,
-  }) {
-    return showDialog<String>(
-      context: context,
-      builder: (_) => YamlUploadFileNameDialog(initialValue: initialValue),
-    );
-  }
-
-  Future<void> _renameConfig(ClashConfigFile file) async {
-    _closeOpenSwipe();
-    final fileName = await showDialog<String>(
-      context: context,
-      builder: (_) => YamlFileNameDialog(
-        title: '重命名',
-        confirmText: '确认',
-        description: '所在目录：${file.directory}',
-        initialValue: file.name,
-        fieldKey: const ValueKey('yaml_rename_file_name'),
-        showFieldTitle: false,
-      ),
-    );
-    if (!mounted || fileName == null || fileName == file.name) return;
-
-    setState(() {
-      _busyFilePath = file.path;
-      _clearOperationFeedback();
-    });
-    try {
-      final renamed = await ClashConfigFileService.renameFile(
-        file.path,
-        fileName,
-        updateActiveReference: _activeConfigPath == file.path,
-      );
-      if (!mounted) return;
-      setState(() {
-        _files = [
-          for (final existing in _files)
-            if (existing.path == file.path) renamed else existing,
-        ]..sort((a, b) => a.path.compareTo(b.path));
-        if (_activeConfigPath == file.path) {
-          _activeConfigPath = renamed.path;
-        }
-        _message = '已重命名为 ${renamed.name}';
-      });
-      _scheduleOperationFeedback(isError: false);
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _error = _formatError('重命名', e));
-      _scheduleOperationFeedback(isError: true);
-    } finally {
-      if (mounted) setState(() => _busyFilePath = null);
-    }
-  }
-
-  Future<void> _exportConfig(ClashConfigFile file) async {
-    _closeOpenSwipe();
-    setState(() {
-      _busyFilePath = file.path;
-      _clearOperationFeedback();
-    });
-    try {
-      final bytes = await ClashConfigFileService.readFileBytes(file.path);
-      final outputPath = await FilePicker.platform.saveFile(
-        dialogTitle: tr('导出配置'),
-        fileName: file.name,
-        type: FileType.custom,
-        allowedExtensions: const ['yaml', 'yml'],
-        bytes: bytes,
-      );
-      if (!mounted || outputPath == null) return;
-      setState(() => _message = '已导出 ${file.name}');
-      _scheduleOperationFeedback(isError: false);
-    } on PlatformException catch (e) {
-      if (!mounted) return;
-      setState(
-        () => _error = _formatError('导出', e.message ?? e.code),
-      );
-      _scheduleOperationFeedback(isError: true);
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _error = _formatError('导出', e));
-      _scheduleOperationFeedback(isError: true);
-    } finally {
-      if (mounted) setState(() => _busyFilePath = null);
-    }
-  }
-
-  bool _consumeOpenSwipe() {
-    if (_openSwipePath == null) return false;
-    setState(() => _openSwipePath = null);
-    return true;
-  }
-
-  void _closeOpenSwipe() {
-    if (_openSwipePath != null) setState(() => _openSwipePath = null);
-  }
-
-  void _openSwipe(ClashConfigFile file) {
-    if (_openSwipePath != file.path) {
-      setState(() => _openSwipePath = file.path);
-    }
-  }
-
-  void _handleBack() {
-    if (_consumeOpenSwipe()) return;
-    Navigator.of(context).pop();
-  }
-
-  String _formatError(String action, Object error) {
-    _errorNeedsSettings = error is SshPasswordRequiredException;
-    if (error is SshPasswordRequiredException) {
-      return '请先在设置页填写 SSH 密码';
-    }
-    return '$action失败：$error';
-  }
-
-  void _showSnack(String message, {required bool success}) {
-    if (!mounted) return;
-    AppFeedback.showSnackBar(
-      context,
-      tr(message),
-      tone: success ? AppFeedbackTone.success : AppFeedbackTone.error,
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    AppLocaleScope.watch(context);
-    final palette = AppPalette.of(context);
-    final bgColor = palette.pageBackground;
-    final cardBg = palette.surface;
-    final cardBorder = palette.border;
-    final textColor = palette.textPrimary;
-    final hintColor = palette.textSecondary;
-
-    return PopScope(
-      canPop: _openSwipePath == null,
-      onPopInvokedWithResult: (didPop, result) {
-        if (!didPop) _closeOpenSwipe();
-      },
-      child: Scaffold(
-        backgroundColor: bgColor,
-        appBar: AppBar(
-          backgroundColor: bgColor,
-          elevation: 0,
-          scrolledUnderElevation: 0,
-          leading: IconButton(
-            icon: Icon(Icons.arrow_back_rounded, color: textColor),
-            onPressed: _handleBack,
-          ),
-          title: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: _closeOpenSwipe,
-            child: AdaptiveSingleLineText(
-              tr('Clash 配置文件'),
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-                color: textColor,
-              ),
-            ),
-          ),
-          centerTitle: true,
-          actions: [
-            IconButton(
-              tooltip: tr('上传配置'),
-              icon: _uploading || _restarting
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : Icon(
-                      Icons.file_download_outlined,
-                      color: textColor,
-                      size: 22,
-                    ),
-              onPressed: _uploading || _restarting ? null : _uploadConfig,
-            ),
-          ],
-          bottom: PreferredSize(
-            preferredSize: const Size.fromHeight(0.5),
-            child: Container(height: 0.5, color: cardBorder),
-          ),
-        ),
-        body: NotificationListener<ScrollStartNotification>(
-          onNotification: (notification) {
-            if (notification.metrics.axis == Axis.vertical) {
-              _closeOpenSwipe();
-            }
-            return false;
-          },
-          child: GestureDetector(
-            behavior: HitTestBehavior.translucent,
-            onTap: _closeOpenSwipe,
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(16, 18, 16, 32),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  if (_error != null)
-                    _InfoBanner(
-                      message: _error!,
-                      color: palette.error,
-                      actionLabel: _errorNeedsSettings ? '去设置' : null,
-                      onAction: _errorNeedsSettings
-                          ? () {
-                              if (!_consumeOpenSwipe()) {
-                                Navigator.of(context).pop();
-                              }
-                            }
-                          : null,
-                    ),
-                  if (_message != null)
-                    _InfoBanner(
-                      message: _message!,
-                      color: palette.success,
-                    ),
-                  _FileListCard(
-                    files: _files,
-                    loading: _loadingFiles,
-                    activeConfigPath: _activeConfigPath,
-                    openSwipePath: _openSwipePath,
-                    busyFilePath: _busyFilePath,
-                    cardBg: cardBg,
-                    cardBorder: cardBorder,
-                    textColor: textColor,
-                    hintColor: hintColor,
-                    onRefresh: () {
-                      if (!_consumeOpenSwipe()) _refreshFiles();
-                    },
-                    onOpen: _openFile,
-                    onRename: _renameConfig,
-                    onExport: _exportConfig,
-                    onSwipeOpen: _openSwipe,
-                    onSwipeClose: _closeOpenSwipe,
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class YamlUploadFileNameDialog extends StatelessWidget {
-  final String initialValue;
-
-  const YamlUploadFileNameDialog({super.key, required this.initialValue});
-
-  @override
-  Widget build(BuildContext context) {
-    return YamlFileNameDialog(
-      title: '上传新配置',
-      confirmText: '上传',
-      description: '上传目录：${ClashConfigFileService.defaultUploadDirectory}',
-      initialValue: initialValue,
-      fieldKey: const ValueKey('yaml_upload_file_name'),
-      contentKey: const ValueKey('yaml_upload_dialog_content'),
-    );
-  }
-}
-
-class YamlFileNameDialog extends StatefulWidget {
-  final String title;
-  final String confirmText;
-  final String description;
-  final String initialValue;
-  final Key fieldKey;
-  final Key? contentKey;
-  final bool showFieldTitle;
-
-  const YamlFileNameDialog({
-    super.key,
-    required this.title,
-    required this.confirmText,
-    required this.description,
-    required this.initialValue,
-    required this.fieldKey,
-    this.contentKey,
-    this.showFieldTitle = true,
-  });
-
-  @override
-  State<YamlFileNameDialog> createState() => _YamlFileNameDialogState();
-}
-
-class _YamlFileNameDialogState extends State<YamlFileNameDialog> {
-  late final TextEditingController _controller;
-  String? _errorText;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = TextEditingController(text: widget.initialValue);
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  void _submit() {
-    final candidate = _controller.text.trim();
-    final validationError = _uploadFileNameError(candidate);
-    if (validationError != null) {
-      setState(() => _errorText = validationError);
-      return;
-    }
-    Navigator.of(context).pop(candidate);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Dialog(
-      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
-      child: SafeArea(
-        minimum: const EdgeInsets.all(20),
-        child: ConstrainedBox(
-          key: widget.contentKey,
-          constraints: const BoxConstraints(maxWidth: 360),
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  tr(widget.title),
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
-                const SizedBox(height: 18),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (widget.showFieldTitle) ...[
-                      Text(
-                        tr('文件名'),
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: Theme.of(context).colorScheme.onSurface,
-                        ),
-                      ),
-                      const SizedBox(height: 3),
-                    ],
-                    Text(
-                      tr(widget.description),
-                      style: TextStyle(
-                        fontSize: 11,
-                        height: 1.35,
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    TextField(
-                      key: widget.fieldKey,
-                      controller: _controller,
-                      autofocus: true,
-                      autocorrect: false,
-                      enableSuggestions: false,
-                      textInputAction: TextInputAction.done,
-                      onSubmitted: (_) => _submit(),
-                      onChanged: (_) {
-                        if (_errorText != null) {
-                          setState(() => _errorText = null);
-                        }
-                      },
-                      decoration: InputDecoration(
-                        hintText: tr('请输入文件名'),
-                        errorText: _errorText == null ? null : tr(_errorText!),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 18),
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextButton(
-                        onPressed: () => Navigator.of(context).pop(),
-                        child: AdaptiveSingleLineText(tr('取消')),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: FilledButton(
-                        onPressed: _submit,
-                        child: AdaptiveSingleLineText(tr(widget.confirmText)),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-String? _uploadFileNameError(String value) {
-  if (value.isEmpty) return '文件名不能为空';
-  if (value == '.' || value == '..') return '文件名不能是 . 或 ..';
-  if (value.contains('/') ||
-      value.contains('\\') ||
-      RegExp(r'[\x00-\x1F\x7F]').hasMatch(value)) {
-    return '文件名不能包含路径分隔符或控制字符';
-  }
-  if (!ClashConfigFileService.isYamlPath(value)) {
-    return '文件名需以 .yaml 或 .yml 结尾';
-  }
-  return null;
-}
-
 class ClashConfigEditorPage extends StatefulWidget {
-  final ClashConfigFile file;
+  final ClashConfigFile? file;
+  final Future<List<ClashConfigFile>> Function()? listFiles;
+  final YamlFileActions? fileActions;
+  final OpenClashRestartCoordinator? restartCoordinator;
   final Future<String> Function(String path)? readFile;
   final Future<void> Function(String path, String content)? writeFile;
 
   const ClashConfigEditorPage({
     super.key,
-    required this.file,
+    this.file,
+    this.listFiles,
+    this.fileActions,
+    this.restartCoordinator,
     this.readFile,
     this.writeFile,
   });
@@ -751,6 +64,10 @@ class _ClashConfigEditorPageState extends State<ClashConfigEditorPage>
   final _editorFocusNode = FocusNode();
   late final SelectionToolbarController _selectionToolbarController;
 
+  ClashConfigFile? _file;
+  bool _managing = false;
+  late final YamlFileActions _fileActions;
+  late final OpenClashRestartCoordinator _restartCoordinator;
   bool _loading = true;
   bool _fileLoaded = false;
   bool _saving = false;
@@ -767,6 +84,10 @@ class _ClashConfigEditorPageState extends State<ClashConfigEditorPage>
   @override
   void initState() {
     super.initState();
+    _file = widget.file;
+    _fileActions = widget.fileActions ?? YamlFileActions();
+    _restartCoordinator =
+        widget.restartCoordinator ?? OpenClashRestartCoordinator.instance;
     _editorHorizontalScrollController =
         YamlDocumentHorizontalScrollController();
     _editorVerticalScrollController = ScrollController();
@@ -784,7 +105,7 @@ class _ClashConfigEditorPageState extends State<ClashConfigEditorPage>
         return YamlEditorSelectionToolbar(
           anchors: anchors,
           controller: controller,
-          editable: _fileLoaded && !_loading && !_saving,
+          editable: _fileLoaded && !_loading && !_saving && !_managing,
           focusNode: _editorFocusNode,
           onDismiss: onDismiss,
         );
@@ -870,14 +191,23 @@ class _ClashConfigEditorPageState extends State<ClashConfigEditorPage>
   }
 
   Future<void> _loadFile() async {
+    if (!mounted) return;
+    final file = _file;
+    if (file == null) {
+      setState(() => _loading = false);
+      return;
+    }
     setState(() {
+      _fileLoaded = false;
+      _dirty = false;
+      _setEditorText('');
       _loading = true;
       _clearEditorFeedback();
     });
     try {
       final content =
           await (widget.readFile ?? ClashConfigFileService.readFile)(
-        widget.file.path,
+        _file!.path,
       );
       if (!mounted) return;
       setState(() {
@@ -904,7 +234,7 @@ class _ClashConfigEditorPageState extends State<ClashConfigEditorPage>
     });
     try {
       await (widget.writeFile ?? ClashConfigFileService.writeTextFile)(
-        widget.file.path,
+        _file!.path,
         _editorController.text,
       );
       if (!mounted) return true;
@@ -912,7 +242,7 @@ class _ClashConfigEditorPageState extends State<ClashConfigEditorPage>
         _savedText = _editorController.text;
         _dirty = false;
         _savedDuringSession = true;
-        _message = '已保存 ${widget.file.name}';
+        _message = '已保存 ${_file!.name}';
       });
       _scheduleEditorFeedback(isError: false);
       return true;
@@ -926,18 +256,14 @@ class _ClashConfigEditorPageState extends State<ClashConfigEditorPage>
     }
   }
 
-  Future<void> _handleExit() async {
-    if (_saving) return;
-    if (!_dirty) {
-      if (mounted) Navigator.of(context).pop(_savedDuringSession);
-      return;
-    }
+  Future<bool> _confirmPendingChanges() async {
+    if (!_dirty) return true;
 
     final choice = await showDialog<_ExitChoice>(
       context: context,
       builder: (context) => AlertDialog(
         title: Text(tr('保存修改？')),
-        content: Text(tr('当前 YAML 配置有未保存修改，退出前要保存吗？')),
+        content: Text(tr('当前 YAML 配置有未保存修改，继续前要保存吗？')),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(_ExitChoice.cancel),
@@ -955,21 +281,121 @@ class _ClashConfigEditorPageState extends State<ClashConfigEditorPage>
       ),
     );
 
-    if (!mounted || choice == null || choice == _ExitChoice.cancel) return;
-    if (choice == _ExitChoice.discard) {
-      Navigator.of(context).pop(_savedDuringSession);
-      return;
+    if (!mounted || choice == null || choice == _ExitChoice.cancel) {
+      return false;
     }
-
-    final saved = await _saveFile();
-    if (mounted && saved) Navigator.of(context).pop(true);
+    if (choice == _ExitChoice.discard) return true;
+    return _saveFile();
   }
+
+  Future<void> _handleExit() async {
+    if (_saving || _managing) return;
+    setState(() => _managing = true);
+    try {
+      if (!await _confirmPendingChanges() || !mounted) return;
+      if (_savedDuringSession) {
+        final restart = await showDialog<bool>(
+            context: context,
+            builder: (_) => const YamlRestartAfterSaveDialog());
+        if (!mounted || restart == null) return;
+        if (restart) {
+          setState(() => _message = '正在重启 OpenClash...');
+          final result = await _restartCoordinator.restart(
+              reason: OpenClashRestartReason.yamlEditor);
+          if (!mounted) return;
+          if (!result.success) {
+            setState(() {
+              _message = null;
+              _error = _formatError('重启 OpenClash', result.error ?? '未知错误');
+            });
+            return;
+          }
+        }
+      }
+      if (mounted) Navigator.of(context).pop(_savedDuringSession);
+    } finally {
+      if (mounted) setState(() => _managing = false);
+    }
+  }
+
+  Future<void> _manage(Future<void> Function() action) async {
+    if (_loading || _saving || _managing) return;
+    _dismissKeyboard();
+    setState(() {
+      _managing = true;
+      _clearEditorFeedback();
+    });
+    try {
+      await action();
+    } catch (error) {
+      if (mounted) {
+        setState(() => _error = _formatError('文件操作', error));
+        _scheduleEditorFeedback(isError: true);
+      }
+    } finally {
+      if (mounted) setState(() => _managing = false);
+    }
+  }
+
+  Future<void> _chooseFile() => _manage(() async {
+        final files =
+            await (widget.listFiles ?? ClashConfigFileService.listFiles)();
+        if (!mounted) return;
+        if (files.isEmpty) {
+          setState(() => _message = '没有找到 YAML 配置文件，可上传新配置。');
+          return;
+        }
+        final selected = await showModalBottomSheet<ClashConfigFile>(
+            context: context,
+            showDragHandle: true,
+            isScrollControlled: true,
+            builder: (_) => YamlConfigPickerSheet(
+                files: files, activePath: _file?.path, activate: false));
+        if (!mounted || selected == null || selected.path == _file?.path) {
+          return;
+        }
+        if (!await _confirmPendingChanges() || !mounted) return;
+        _file = selected;
+        await _loadFile();
+      });
+
+  Future<void> _uploadFile() => _manage(() async {
+        if (!await _confirmPendingChanges() || !mounted) return;
+        final uploaded = await _fileActions.upload(context);
+        if (!mounted || uploaded == null) return;
+        _file = uploaded;
+        _savedDuringSession = true;
+        await _loadFile();
+      });
+
+  Future<void> _renameFile() => _manage(() async {
+        final file = _file;
+        if (file == null) return;
+        final renamed = await _fileActions.rename(context, file);
+        if (!mounted || renamed == null) return;
+        setState(() {
+          _file = renamed;
+          _message = '已重命名为 ${renamed.name}';
+        });
+        _scheduleEditorFeedback(isError: false);
+      });
+
+  Future<void> _exportFile() => _manage(() async {
+        final file = _file;
+        if (file == null || !_fileLoaded) return;
+        if (await _fileActions.export(context, file, _editorController.text) &&
+            mounted) {
+          setState(() => _message = '已导出 ${file.name}');
+          _scheduleEditorFeedback(isError: false);
+        }
+      });
 
   String _formatError(String action, Object error) {
     if (error is SshPasswordRequiredException) {
       return '请先在设置页填写 SSH 密码';
     }
-    return '$action失败：$error';
+    final detail = error is FormatException ? error.message : error;
+    return '$action失败：$detail';
   }
 
   @override
@@ -981,9 +407,13 @@ class _ClashConfigEditorPageState extends State<ClashConfigEditorPage>
         keyboardInset > 0 ? keyboardInset : systemBottomInset;
 
     return PopScope(
-      // iOS edge-back is available for clean documents. Dirty documents keep
-      // the explicit back action so the save/discard prompt cannot be bypassed.
-      canPop: AppPlatform.isIOS && !_dirty && !_saving,
+      // Dirty or saved sessions use the explicit back action so neither the
+      // save/discard choice nor the restart reminder can be bypassed on iOS.
+      canPop: AppPlatform.isIOS &&
+          !_dirty &&
+          !_saving &&
+          !_managing &&
+          !_savedDuringSession,
       onPopInvokedWithResult: (didPop, result) {
         if (!didPop) _handleExit();
       },
@@ -1007,13 +437,21 @@ class _ClashConfigEditorPageState extends State<ClashConfigEditorPage>
             ),
             onPressed: _handleExit,
           ),
-          title: AdaptiveSingleLineText(
-            widget.file.name,
-            style: const TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w600,
-              color: _YamlEditorSurface._text,
-            ),
+          title: TextButton(
+            key: const ValueKey('yaml_editor_file_picker'),
+            onPressed: _loading || _saving || _managing ? null : _chooseFile,
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Flexible(
+                  child: Text(_file?.name ?? tr('选择 YAML 配置'),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: _YamlEditorSurface._text))),
+              const Icon(Icons.expand_more_rounded,
+                  size: 18, color: _YamlEditorSurface._text),
+            ]),
           ),
           centerTitle: true,
           actions: [
@@ -1021,8 +459,34 @@ class _ClashConfigEditorPageState extends State<ClashConfigEditorPage>
               dirty: _dirty,
               loading: _loading,
               saving: _saving,
-              enabled: _fileLoaded,
+              enabled: _fileLoaded && !_managing,
               onSave: _saveFile,
+            ),
+            PopupMenuButton<String>(
+              key: const ValueKey('yaml_editor_file_actions'),
+              tooltip: tr('文件管理'),
+              enabled: !_saving && !_loading && !_managing,
+              onSelected: (action) {
+                switch (action) {
+                  case 'upload':
+                    unawaited(_uploadFile());
+                  case 'rename':
+                    unawaited(_renameFile());
+                  case 'export':
+                    unawaited(_exportFile());
+                }
+              },
+              itemBuilder: (_) => [
+                PopupMenuItem(value: 'upload', child: Text(tr('上传新配置'))),
+                PopupMenuItem(
+                    value: 'rename',
+                    enabled: _file != null,
+                    child: Text(tr('重命名'))),
+                PopupMenuItem(
+                    value: 'export',
+                    enabled: _fileLoaded,
+                    child: Text(tr('导出当前内容'))),
+              ],
             ),
           ],
           bottom: PreferredSize(
@@ -1044,6 +508,13 @@ class _ClashConfigEditorPageState extends State<ClashConfigEditorPage>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                if (_file == null && !_loading)
+                  _InfoBanner(
+                      message: '选择 YAML 或上传新配置开始编辑',
+                      color: AppPalette.dark.textSecondary,
+                      actionLabel: '上传',
+                      onAction: _managing ? null : _uploadFile,
+                      compact: true),
                 if (_error != null)
                   _InfoBanner(
                     message: _error!,
@@ -1067,7 +538,7 @@ class _ClashConfigEditorPageState extends State<ClashConfigEditorPage>
                     focusNode: _editorFocusNode,
                     toolbarController: _selectionToolbarController,
                     loading: _loading,
-                    enabled: _fileLoaded && !_saving,
+                    enabled: _fileLoaded && !_saving && !_managing,
                     cursorLine: _cursorLine,
                   ),
                 ),
@@ -2634,396 +2105,6 @@ class _ShortcutDivider extends StatelessWidget {
       height: 52,
       margin: const EdgeInsets.symmetric(horizontal: 4),
       color: _YamlEditorSurface._border,
-    );
-  }
-}
-
-class _FileListCard extends StatelessWidget {
-  final List<ClashConfigFile> files;
-  final bool loading;
-  final String? activeConfigPath;
-  final String? openSwipePath;
-  final String? busyFilePath;
-  final Color cardBg;
-  final Color cardBorder;
-  final Color textColor;
-  final Color hintColor;
-  final VoidCallback onRefresh;
-  final ValueChanged<ClashConfigFile> onOpen;
-  final ValueChanged<ClashConfigFile> onRename;
-  final ValueChanged<ClashConfigFile> onExport;
-  final ValueChanged<ClashConfigFile> onSwipeOpen;
-  final VoidCallback onSwipeClose;
-
-  const _FileListCard({
-    required this.files,
-    required this.loading,
-    required this.activeConfigPath,
-    required this.openSwipePath,
-    required this.busyFilePath,
-    required this.cardBg,
-    required this.cardBorder,
-    required this.textColor,
-    required this.hintColor,
-    required this.onRefresh,
-    required this.onOpen,
-    required this.onRename,
-    required this.onExport,
-    required this.onSwipeOpen,
-    required this.onSwipeClose,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    AppLocaleScope.watch(context);
-    return Container(
-      clipBehavior: Clip.antiAlias,
-      decoration: BoxDecoration(
-        color: cardBg,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: cardBorder, width: 0.5),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 10, 8, 0),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    tr('已发现 ${files.length} 个 YAML 文件'),
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: textColor,
-                    ),
-                  ),
-                ),
-                IconButton(
-                  tooltip: tr('刷新列表'),
-                  icon: loading
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : Icon(Icons.refresh_rounded, color: textColor),
-                  onPressed: loading ? null : onRefresh,
-                ),
-              ],
-            ),
-          ),
-          if (files.isEmpty && !loading)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 6, 16, 16),
-              child: Text(
-                tr('只扫描 Clash/OpenClash 目录下的 config 文件夹。'),
-                style: TextStyle(fontSize: 12, color: hintColor),
-              ),
-            ),
-          if (files.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            ListView.separated(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: files.length,
-              separatorBuilder: (_, __) =>
-                  Divider(height: 0, color: cardBorder),
-              itemBuilder: (context, index) {
-                final file = files[index];
-                return SwipeConfigFileTile(
-                  key: ValueKey('config_file_${file.path}'),
-                  file: file,
-                  active: activeConfigPath == file.path,
-                  open: openSwipePath == file.path,
-                  busy: busyFilePath == file.path,
-                  backgroundColor: cardBg,
-                  textColor: textColor,
-                  hintColor: hintColor,
-                  onOpen: () => onOpen(file),
-                  onRename: () => onRename(file),
-                  onExport: () => onExport(file),
-                  onSwipeStart: onSwipeClose,
-                  onSwipeOpen: () => onSwipeOpen(file),
-                  onSwipeClose: onSwipeClose,
-                );
-              },
-            ),
-            const SizedBox(height: 4),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class SwipeConfigFileTile extends StatefulWidget {
-  static const actionWidth = 144.0;
-
-  final ClashConfigFile file;
-  final bool active;
-  final bool open;
-  final bool busy;
-  final Color backgroundColor;
-  final Color textColor;
-  final Color hintColor;
-  final VoidCallback onOpen;
-  final VoidCallback onRename;
-  final VoidCallback onExport;
-  final VoidCallback onSwipeStart;
-  final VoidCallback onSwipeOpen;
-  final VoidCallback onSwipeClose;
-
-  const SwipeConfigFileTile({
-    super.key,
-    required this.file,
-    required this.active,
-    required this.open,
-    required this.busy,
-    required this.backgroundColor,
-    required this.textColor,
-    required this.hintColor,
-    required this.onOpen,
-    required this.onRename,
-    required this.onExport,
-    required this.onSwipeStart,
-    required this.onSwipeOpen,
-    required this.onSwipeClose,
-  });
-
-  @override
-  State<SwipeConfigFileTile> createState() => _SwipeConfigFileTileState();
-}
-
-class _SwipeConfigFileTileState extends State<SwipeConfigFileTile>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _controller;
-  Animation<double>? _animation;
-  double _offset = 0;
-  double _dragStartOffset = 0;
-
-  @override
-  void initState() {
-    super.initState();
-    _offset = widget.open ? -SwipeConfigFileTile.actionWidth : 0;
-    _controller = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 180),
-    )..addListener(() {
-        final animation = _animation;
-        if (animation != null && mounted) {
-          setState(() => _offset = animation.value);
-        }
-      });
-  }
-
-  @override
-  void didUpdateWidget(covariant SwipeConfigFileTile oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (widget.open != oldWidget.open) {
-      _animateTo(widget.open ? -SwipeConfigFileTile.actionWidth : 0);
-    }
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  void _animateTo(double target) {
-    _controller.stop();
-    _animation = Tween<double>(begin: _offset, end: target).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic),
-    );
-    _controller.forward(from: 0);
-  }
-
-  void _handleDragStart(DragStartDetails details) {
-    if (widget.busy) return;
-    _controller.stop();
-    _dragStartOffset = _offset;
-    if (!widget.open) widget.onSwipeStart();
-  }
-
-  void _handleDragUpdate(DragUpdateDetails details) {
-    if (widget.busy) return;
-    setState(() {
-      _offset = (_offset + details.delta.dx)
-          .clamp(-SwipeConfigFileTile.actionWidth, 0)
-          .toDouble();
-    });
-  }
-
-  void _handleDragEnd(DragEndDetails details) {
-    if (widget.busy) return;
-    final velocity = details.primaryVelocity ?? 0;
-    final startedOpen =
-        _dragStartOffset.abs() > SwipeConfigFileTile.actionWidth / 2;
-    final distanceThreshold =
-        SwipeConfigFileTile.actionWidth * (startedOpen ? 0.65 : 0.35);
-    final shouldOpen = velocity < -450 ||
-        (velocity <= 450 && _offset.abs() > distanceThreshold);
-    if (shouldOpen) {
-      widget.onSwipeOpen();
-      _animateTo(-SwipeConfigFileTile.actionWidth);
-    } else {
-      widget.onSwipeClose();
-      _animateTo(0);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final primary = Theme.of(context).colorScheme.primary;
-    return SizedBox(
-      key: ValueKey('swipe_file_${widget.file.path}'),
-      height: 58,
-      child: ClipRect(
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            IgnorePointer(
-              ignoring: !widget.open,
-              child: ExcludeSemantics(
-                excluding: !widget.open,
-                child: Align(
-                  alignment: Alignment.centerRight,
-                  child: SizedBox(
-                    width: SwipeConfigFileTile.actionWidth,
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: _SwipeAction(
-                            key: ValueKey('rename_${widget.file.path}'),
-                            color: const Color(0xFF626A78),
-                            icon: Icons.drive_file_rename_outline_rounded,
-                            label: tr('重命名'),
-                            enabled: !widget.busy,
-                            onPressed: widget.onRename,
-                          ),
-                        ),
-                        Expanded(
-                          child: _SwipeAction(
-                            key: ValueKey('export_${widget.file.path}'),
-                            color: primary,
-                            icon: Icons.arrow_upward_rounded,
-                            label: tr('导出'),
-                            enabled: !widget.busy,
-                            onPressed: widget.onExport,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-            Transform.translate(
-              key: ValueKey('swipe_offset_${widget.file.path}'),
-              offset: Offset(_offset, 0),
-              child: Material(
-                color: widget.backgroundColor,
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: widget.onOpen,
-                  onHorizontalDragStart: _handleDragStart,
-                  onHorizontalDragUpdate: _handleDragUpdate,
-                  onHorizontalDragEnd: _handleDragEnd,
-                  onHorizontalDragCancel: () => _animateTo(
-                      widget.open ? -SwipeConfigFileTile.actionWidth : 0),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Row(
-                      children: [
-                        if (widget.active)
-                          SvgPicture.asset(
-                            'assets/icons/file-check.svg',
-                            key: ValueKey('active_${widget.file.path}'),
-                            width: 22,
-                            height: 22,
-                            semanticsLabel: tr('正在使用'),
-                            colorFilter: ColorFilter.mode(
-                              primary,
-                              BlendMode.srcIn,
-                            ),
-                          )
-                        else
-                          Icon(
-                            Icons.description_outlined,
-                            color: widget.hintColor,
-                          ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Text(
-                            widget.file.name,
-                            maxLines: 1,
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: widget.textColor,
-                            ),
-                          ),
-                        ),
-                        if (widget.busy)
-                          const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        else
-                          Icon(
-                            Icons.chevron_right_rounded,
-                            size: 18,
-                            color: widget.hintColor,
-                          ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _SwipeAction extends StatelessWidget {
-  final Color color;
-  final IconData icon;
-  final String label;
-  final bool enabled;
-  final VoidCallback onPressed;
-
-  const _SwipeAction({
-    super.key,
-    required this.color,
-    required this.icon,
-    required this.label,
-    required this.enabled,
-    required this.onPressed,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: color,
-      child: InkWell(
-        onTap: enabled ? onPressed : null,
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, size: 18, color: Colors.white),
-            const SizedBox(height: 2),
-            AdaptiveSingleLineText(
-              label,
-              style: const TextStyle(fontSize: 11, color: Colors.white),
-            ),
-          ],
-        ),
-      ),
     );
   }
 }
