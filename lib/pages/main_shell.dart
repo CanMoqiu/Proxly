@@ -115,8 +115,6 @@ class _MainShellState extends State<MainShell> with RouteAware {
         if (_connectionsTabMode == 'native') {
           await ClashDataHub.instance.refresh(force: true);
         }
-      } else if (index == 0) {
-        await ClashDataHub.instance.refresh(force: true);
       }
     } catch (_) {
       // Panel errors/retry are owned by the page; navigation remains usable.
@@ -125,7 +123,8 @@ class _MainShellState extends State<MainShell> with RouteAware {
 
   List<Widget> get _pages {
     return [
-      HomePage(showConsoleButton: _showConsoleButton),
+      HomePage(
+          showConsoleButton: _showConsoleButton, active: _currentIndex == 0),
       const ProxyPage(asTab: true),
       if (_connectionsTabMode == 'native')
         const NativeConnectionsPage()

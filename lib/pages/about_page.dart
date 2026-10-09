@@ -321,7 +321,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 24, 16, 48),
         children: [
-          // App identity
+          // ── App 标识 ──
           Center(
             child: Column(
               children: [
@@ -447,7 +447,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
           ),
           const SizedBox(height: 28),
 
-          // Links
+          // ── 链接 ──
           _SectionTitle('使用与支持', textColor),
           const SizedBox(height: 10),
           ClipRRect(
@@ -525,7 +525,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
           ),
           const SizedBox(height: 24),
 
-          // Open-source license
+          // ── 开源协议 ──
           _SectionTitle('开源协议', textColor),
           const SizedBox(height: 10),
           Container(
@@ -590,7 +590,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
           ),
           const SizedBox(height: 12),
 
-          // Third-party dependencies
+          // ── 第三方依赖 ──
           _SectionTitle('开源致谢', textColor),
           const SizedBox(height: 10),
           Container(
@@ -627,7 +627,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
           ),
           const SizedBox(height: 28),
 
-          // Disclaimer
+          // ── 底部声明 ──
           Center(
             child: Text(
               tr('Proxly 与 Clash / OpenClash / Mihomo 项目无官方关联'),
@@ -641,7 +641,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
   }
 }
 
-// Supporting widgets
+// ─── 小组件 ────────────────────────────────────────────────────────────────────
 
 class _SectionTitle extends StatelessWidget {
   final String text;

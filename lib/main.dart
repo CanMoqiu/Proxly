@@ -25,8 +25,7 @@ class ProxlyApp extends StatefulWidget {
   final bool showSetupWizard;
   const ProxlyApp({super.key, this.showSetupWizard = false});
 
-  // Keep the theme mode in shared state so child pages can read it without
-  // maintaining local copies.
+  // 静态变量，供子页面同步读取，无需本地副本
   static ThemeMode activeThemeMode = ThemeMode.system;
 
   static void toggleThemeOf(BuildContext context) {
@@ -157,14 +156,14 @@ class _ProxlyAppState extends State<ProxlyApp> with WidgetsBindingObserver {
           ),
         );
       },
-      // Show the setup wizard on first launch when no controller address is configured.
+      // 首次启动（未配置地址）显示设置向导，否则直接进入主界面
       home:
           widget.showSetupWizard ? const SetupWizardPage() : const MainShell(),
     );
   }
 }
 
-// Theme toggle bubble
+// ─── 悬浮主题切换球 ────────────────────────────────────────────────────────────
 
 class _FloatingThemeBall extends StatefulWidget {
   const _FloatingThemeBall();
@@ -210,8 +209,13 @@ class _FloatingThemeBallState extends State<_FloatingThemeBall> {
       left: pos.dx,
       top: pos.dy,
       child: GestureDetector(
-        onTap: () => ProxlyApp.toggleThemeOf(context),
+        key: const ValueKey('floating_theme_ball'),
+        onTap: () {
+          HapticFeedback.selectionClick();
+          ProxlyApp.toggleThemeOf(context);
+        },
         onLongPressStart: (d) {
+          HapticFeedback.mediumImpact();
           setState(() {
             _isDragging = true;
             _posAtDragStart = _pos!;

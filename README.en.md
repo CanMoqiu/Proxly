@@ -24,12 +24,13 @@ Proxly does not contain the Clash or Mihomo proxy core and does not supply proxy
 
 | Area | Function |
 | --- | --- |
+| Home dashboard | Reorder, show, and hide cards with a locally saved layout; retains the existing runtime overview structure |
 | Runtime overview | Reads the core version, online state, live speeds, cumulative traffic, active connections, and proxy-provider traffic information |
 | Proxy panel | Uses the bundled Zashboard to display proxy nodes, proxy groups, and rules, and synchronizes the web pages after app theme, language, or controller changes |
 | Connections | Provides a native connection list and a mobile Zashboard view for connection metadata, proxy chains, and matched rules |
-| Control center | Exposes OpenClash run mode, proxy mode, region bypass, domain sniffing, DNS rule handling, and streaming auto-selection settings |
+| Home quick settings | Exposes OpenClash run mode, proxy mode, region bypass, domain sniffing, DNS rule handling, and streaming auto-selection settings |
 | Maintenance | Restarts OpenClash, flushes the Clash DNS cache, and closes all current proxy connections |
-| YAML management | Lists, reads, edits, and uploads `.yaml` / `.yml` files over SSH/SFTP and changes the active OpenClash configuration |
+| YAML management | Switches the active configuration in a bottom sheet; selects, edits, uploads, renames, exports, and deletes YAML within the editor using the existing SSH/SFTP checks |
 | Zashboard settings | Imports structurally validated and conflict-filtered Zashboard JSON settings, then reloads the active proxy, connection, and console WebViews |
 | Updates | Checks application and Zashboard releases on GitHub; Android updates use APK assets; iOS opens GitHub Releases for manual installation; panel updates require a release archive with a SHA-256 digest |
 | Interface | Supports Simplified Chinese, English, and system, light, or dark theme modes |

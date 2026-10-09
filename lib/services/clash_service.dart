@@ -439,11 +439,15 @@ class ClashService {
   }
 
   Future<void> closeConnection(String id) async {
-    if (_config == null) return;
-    final uri = Uri.parse('http://${_config!.host}/connections/$id');
-    await _client
-        .delete(uri, headers: _config!.headers)
-        .timeout(const Duration(seconds: 5));
+    await ensureConfigLoaded();
+    final config = _requireControllerConfig();
+    final uri = Uri.parse(
+        'http://${config.host}/connections/${Uri.encodeComponent(id)}');
+    final response = await _sendControllerRequest(
+      () => _client.delete(uri, headers: config.headers),
+      timeout: const Duration(seconds: 5),
+    );
+    _ensureControllerSuccess(response);
   }
 
   Future<void> closeAllConnections() async {
@@ -465,7 +469,7 @@ class ClashService {
   Future<Map<String, String>> getVersionInfo() async {
     final data = await _get('/version', (d) => d);
     final coreVersion = (data['version'] as String?) ?? '--';
-    // Some modified OpenClash cores expose additional OpenClash-specific fields.
+    // 查找 OpenClash 专有字段（部分修改版内核附带）
     final openclashVersion = data['openclash_version'] as String? ??
         data['clash_version'] as String?;
     final isMeta = data['meta'] as bool? ?? false;

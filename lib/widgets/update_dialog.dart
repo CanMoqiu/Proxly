@@ -1,4 +1,5 @@
 import '../l10n/app_locale.dart';
+// lib/widgets/update_dialog.dart
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
@@ -16,7 +17,7 @@ enum _Stage { available, downloading, done }
 class UpdateDialog extends StatefulWidget {
   final UpdateInfo info;
 
-  /// Whether the dialog was opened by an automatic update check.
+  /// 自动检测触发时为 true，显示自动更新提醒管理操作；手动检查时为 false
   final bool autoTriggered;
   const UpdateDialog({
     super.key,
@@ -30,7 +31,7 @@ class UpdateDialog extends StatefulWidget {
 
 class _UpdateDialogState extends State<UpdateDialog> {
   _Stage _stage = _Stage.available;
-  double _progress = 0; // 0.0 to 1.0; -1 means indeterminate.
+  double _progress = 0; // 0.0~1.0；-1 表示不确定
   final _cancelled = ValueNotifier(false);
 
   @override
@@ -53,8 +54,7 @@ class _UpdateDialogState extends State<UpdateDialog> {
       }
       return;
     }
-    // Android 8+ requires the "install unknown apps" permission before opening
-    // the package installer.
+    // Android 8+ 需要"安装未知应用"特殊权限
     if (Platform.isAndroid) {
       final status = await Permission.requestInstallPackages.status;
       if (!status.isGranted) {
@@ -83,7 +83,7 @@ class _UpdateDialogState extends State<UpdateDialog> {
       await UpdateService.instance.installApk(file);
     } catch (e) {
       if (!mounted) return;
-      if (_cancelled.value) return; // Cancellation is user-driven; do not show an error.
+      if (_cancelled.value) return; // 用户主动取消，无需提示
       AppFeedback.showSnackBar(
         context,
         tr('下载失败：$e'),
@@ -159,7 +159,7 @@ class _UpdateDialogState extends State<UpdateDialog> {
                   TextButton(
                     onPressed: () async {
                       Navigator.of(dialogCtx).pop();
-                      // Open this app's dedicated "install unknown apps" settings page.
+                      // 直接跳转到本应用的"安装未知应用"专属设置页
                       await Permission.requestInstallPackages.request();
                     },
                     style: TextButton.styleFrom(
@@ -228,9 +228,9 @@ class _UpdateDialogState extends State<UpdateDialog> {
           color: textColor,
         ),
       ),
-      // Leave enough space around the dialog for the release notes to remain readable.
+      // insetPadding 控制弹窗距屏幕边缘的距离，留出足够空间显示内容
       insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
-      // Keep the content area tall enough for the release notes and actions.
+      // contentPadding 收紧，让内容区域更高
       contentPadding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
       content: _stage == _Stage.available
           ? _AvailableContent(
@@ -311,7 +311,7 @@ class _AvailableContent extends StatelessWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final palette = AppPalette.of(context);
 
-    // Match Markdown rendering to the app theme.
+    // 构建 Markdown 样式，与整体主题保持一致
     final mdStyle = MarkdownStyleSheet(
       p: TextStyle(fontSize: 13, color: hintColor, height: 1.5),
       h1: TextStyle(
@@ -366,16 +366,16 @@ class _AvailableContent extends StatelessWidget {
 
     return ConstrainedBox(
       constraints: BoxConstraints(
-        // Limit the notes to half the screen so the action buttons remain visible.
+        // 最大高度为屏幕高度的 50%，确保有足够空间滚动
         maxHeight: MediaQuery.of(context).size.height * 0.50,
       ),
       child: Markdown(
         data: body!.trim(),
         styleSheet: mdStyle,
-        // Let Markdown use its own scroll view instead of measuring the full document.
+        // shrinkWrap: false 让 Markdown 内部使用自己的 ScrollView
         shrinkWrap: false,
         padding: const EdgeInsets.only(bottom: 12),
-        // Keep links inert here so accidental taps cannot leave the update dialog.
+        // 不在内容内处理链接点击，防止误操作
         onTapLink: (_, __, ___) {},
       ),
     );

@@ -8,9 +8,14 @@ import '../theme/app_theme.dart';
 import '../utils/traffic_formatter.dart';
 import '../widgets/adaptive_ui.dart';
 import '../widgets/connection_detail_sheet.dart';
+import '../widgets/app_feedback.dart';
 
 class NativeConnectionsPage extends StatefulWidget {
-  const NativeConnectionsPage({super.key});
+  final Future<ClashRealtimeSnapshot> Function()? loadSnapshot;
+  final Future<void> Function(String)? closeConnection;
+
+  const NativeConnectionsPage(
+      {super.key, this.loadSnapshot, this.closeConnection});
 
   @override
   State<NativeConnectionsPage> createState() => _NativeConnectionsPageState();
@@ -36,6 +41,7 @@ class _NativeConnectionsPageState extends State<NativeConnectionsPage>
   String _filterIp = '';
   int _lastSnapshotSequence = 0;
   final ClashDataHub _dataHub = ClashDataHub.instance;
+  final Set<String> _closingConnections = {};
 
   @override
   void initState() {
@@ -105,7 +111,7 @@ class _NativeConnectionsPageState extends State<NativeConnectionsPage>
 
   Future<void> _performFetch({required bool force}) async {
     try {
-      if (!ClashService.instance.isConfigured) {
+      if (widget.loadSnapshot == null && !ClashService.instance.isConfigured) {
         if (mounted) {
           setState(() {
             _loading = false;
@@ -114,7 +120,8 @@ class _NativeConnectionsPageState extends State<NativeConnectionsPage>
         }
         return;
       }
-      final snapshot = await _dataHub.refresh(force: force);
+      final snapshot =
+          await (widget.loadSnapshot?.call() ?? _dataHub.refresh(force: force));
       _applyRealtimeSnapshot(snapshot);
     } catch (e) {
       if (mounted) {
@@ -130,6 +137,27 @@ class _NativeConnectionsPageState extends State<NativeConnectionsPage>
     final snapshot = _dataHub.snapshot;
     if (snapshot == null || !mounted) return;
     _applyRealtimeSnapshot(snapshot);
+  }
+
+  Future<void> _closeConnection(String id) async {
+    if (!_closingConnections.add(id)) return;
+    setState(() {});
+    try {
+      await (widget.closeConnection ??
+          ClashService.instance.closeConnection)(id);
+      _dataHub.removeConnection(id);
+      if (mounted) {
+        setState(() => _connections =
+            _connections.where((entry) => entry.id != id).toList());
+      }
+    } catch (_) {
+      if (mounted) {
+        AppFeedback.showSnackBar(context, tr('关闭连接失败，请检查网络和 Token 后重试'),
+            tone: AppFeedbackTone.error);
+      }
+    } finally {
+      if (mounted) setState(() => _closingConnections.remove(id));
+    }
   }
 
   void _applyRealtimeSnapshot(ClashRealtimeSnapshot snapshot) {
@@ -457,7 +485,7 @@ class _NativeConnectionsPageState extends State<NativeConnectionsPage>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Source IP, connection time, and close action.
+                // 第一行：来源 IP + 连接时间 + 关闭
                 Row(
                   children: [
                     GestureDetector(
@@ -479,32 +507,36 @@ class _NativeConnectionsPageState extends State<NativeConnectionsPage>
                     const SizedBox(width: 8),
                     GestureDetector(
                       behavior: HitTestBehavior.opaque,
-                      onTap: () {
-                        ClashService.instance
-                            .closeConnection(c.id)
-                            .catchError((_) {});
-                        _dataHub.removeConnection(c.id);
-                      },
+                      key: ValueKey('close_connection_${c.id}'),
+                      onTap: _closingConnections.contains(c.id)
+                          ? () {}
+                          : () => _closeConnection(c.id),
                       child: Padding(
                         padding: const EdgeInsets.all(4),
-                        child: Icon(
-                          Icons.close,
-                          size: 14,
-                          color: textSecondary,
-                        ),
+                        child: _closingConnections.contains(c.id)
+                            ? const SizedBox(
+                                width: 14,
+                                height: 14,
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 2))
+                            : Icon(
+                                Icons.close,
+                                size: 14,
+                                color: textSecondary,
+                              ),
                       ),
                     ),
                   ],
                 ),
                 const SizedBox(height: 2),
-                // Destination host.
+                // 第二行：目标主机
                 Text(
                   c.host,
                   style: TextStyle(fontSize: 12, color: textPrimary),
                   overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(height: 2),
-                // Proxy chain.
+                // 第三行：代理链路
                 Text(
                   () {
                     if (_chainFullDisplay) return c.chain;
@@ -516,7 +548,7 @@ class _NativeConnectionsPageState extends State<NativeConnectionsPage>
                   overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(height: 2),
-                // Rule, speed, and cumulative traffic.
+                // 第四行：规则 + 速度 + 累计流量
                 Row(
                   children: [
                     Expanded(

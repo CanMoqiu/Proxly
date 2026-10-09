@@ -347,7 +347,7 @@ class WebPanelService {
       await _downloadArchive(info, zipFile, onProgress);
       onProgress(0.80);
 
-      // Validate the complete archive before extracting anything to the staging directory.
+      // 第二步：完整验证归档，再解压到暂存目录。
       final bytes = await zipFile.readAsBytes();
       final archive = ZipDecoder().decodeBytes(bytes);
       onProgress(0.85);
@@ -369,7 +369,7 @@ class WebPanelService {
         }
       }
 
-      // Require index.html so an incomplete archive cannot replace the active panel.
+      // 验证 index.html 存在，确保解压结果有效
       if (!File('${stagingDir.path}/index.html').existsSync()) {
         throw Exception(tr('解压后未找到 index.html，发布包格式有误'));
       }
@@ -391,7 +391,7 @@ class WebPanelService {
         rethrow;
       }
 
-      // Persist the version and resource path only after activation succeeds.
+      // 第三步：持久化版本号和安装路径
       final prefs = await SharedPreferences.getInstance();
       final oldPath = prefs.getString(_prefPath);
       await prefs.setString(_prefVersion, info.tag);
@@ -405,14 +405,13 @@ class WebPanelService {
           final oldDir = Directory(oldPath);
           if (oldDir.existsSync()) await oldDir.delete(recursive: true);
         } catch (_) {
-          // The new panel is already active, so old-cache cleanup is best-effort.
+          // 新面板已经安全切换，旧缓存清理失败不影响本次更新。
         }
       }
 
       onProgress(1.0);
     } catch (_) {
-      // Remove partial files after download or extraction failures so they cannot
-      // be reused by a later update attempt.
+      // 下载或解压失败时清理残留文件
       if (zipFile.existsSync()) await zipFile.delete();
       if (stagingDir.existsSync()) await stagingDir.delete(recursive: true);
       if (switched) {
@@ -675,7 +674,7 @@ class WebPanelControllerBridge {
   }
 }
 
-/// Serves downloaded panel resources to InAppWebView over localhost.
+/// 本地 HTTP 文件服务器，供 InAppWebView 加载已下载的面板版本
 class FileHttpServer {
   HttpServer? _server;
   final String rootPath;
@@ -735,7 +734,7 @@ class FileHttpServer {
       request.response.headers.set('Access-Control-Allow-Origin', '*');
       await request.response.addStream(File(resolvedFile).openRead());
     } else {
-      // Fall back to index.html for unknown SPA routes.
+      // SPA 路由兜底：未知路径统一返回 index.html
       final index = File('$root${Platform.pathSeparator}index.html');
       if (index.existsSync()) {
         request.response.headers
@@ -1249,10 +1248,8 @@ class WebPanelSync {
   /// Whether the connections tab is currently visible in WebView mode.
   bool connectionsTabActive = false;
 
-  /// Whether the proxy tab is currently active.
-  ///
-  /// MainShell updates this state when tabs change so ProxyPage can decide
-  /// whether lifecycle-triggered reloads should be handled.
+  /// Bug 2：记录代理标签是否是当前活跃标签。
+  /// 由 MainShell 在切换标签时维护，ProxyPage 据此决定是否响应生命周期重载。
   bool proxyTabActive = false;
 
   void register({

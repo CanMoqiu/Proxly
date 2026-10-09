@@ -376,9 +376,11 @@ class ClashConfigFileService {
       if (file.path == activeFile.path) return file.path;
     }
 
-    final sameName =
-        files.where((file) => file.name == activeFile.name).toList();
-    return sameName.length == 1 ? sameName.single.path : null;
+    final identity = _configPathIdentity(activeFile.path);
+    final aliases = files
+        .where((file) => _configPathIdentity(file.path) == identity)
+        .toList();
+    return aliases.length == 1 ? aliases.single.path : null;
   }
 
   static String normalizeConfigFilePath(String path) {
@@ -538,7 +540,6 @@ class ClashConfigFileService {
   static Future<ClashConfigFile> renameFile(
     String sourcePath,
     String fileName, {
-    required bool updateActiveReference,
     String? password,
   }) async {
     final safeSource = normalizeConfigFilePath(sourcePath);
@@ -547,14 +548,42 @@ class ClashConfigFileService {
 
     final settings = await loadSettings(passwordOverride: password);
     try {
-      await SshService.runText(
+      return await SshService.withClient(
         settings.host,
         settings.password,
-        _renameConfigCommand(
-          safeSource,
-          safeTarget,
-          updateActiveReference: updateActiveReference,
-        ),
+        (client) async {
+          final sftp = await _withTimeout(client.sftp(), 'SFTP init');
+          try {
+            final attrs = await _withTimeout(
+                sftp.stat(safeSource, followLink: false), 'SFTP stat');
+            if (!attrs.isFile) {
+              throw FormatException(tr('只能重命名配置目录中的普通 YAML 文件'));
+            }
+            return await renameWithActiveConfig(
+              sourcePath: safeSource,
+              fileName: fileName,
+              resolvePath: (path) =>
+                  _withTimeout(sftp.absolute(path), 'SFTP realpath'),
+              loadActiveConfig: () async {
+                final result = await _withTimeout(
+                    SshService.runCommandOnClient(
+                        client, _activeConfigCommand()),
+                    'Read active configuration');
+                return parseActiveConfigOutput(result.stdout);
+              },
+              rename: (source, target, updateActiveReference) async {
+                await _withTimeout(
+                    SshService.runCommandOnClient(
+                        client,
+                        _renameConfigCommand(source, target,
+                            updateActiveReference: updateActiveReference)),
+                    'Rename configuration');
+              },
+            );
+          } finally {
+            sftp.close();
+          }
+        },
         username: settings.username,
         port: settings.port,
         operationTimeout: const Duration(seconds: 30),
@@ -572,7 +601,98 @@ class ClashConfigFileService {
       }
       rethrow;
     }
-    return ClashConfigFile(path: safeTarget);
+  }
+
+  /// Mutation checks use remote identities on the same SSH connection, rather
+  /// than the display-only path aliases or a filename match from the picker.
+  static Future<ClashConfigFile> renameWithActiveConfig({
+    required String sourcePath,
+    required String fileName,
+    required Future<String> Function(String) resolvePath,
+    required Future<ClashActiveConfig> Function() loadActiveConfig,
+    required Future<void> Function(String, String, bool) rename,
+  }) async {
+    final safeSource = normalizeConfigFilePath(sourcePath);
+    final safeName = normalizeUploadFileName(fileName);
+    final source = normalizeConfigFilePath(await resolvePath(safeSource));
+    final target = renamePathForFileName(source, safeName);
+    if (source == target) return ClashConfigFile(path: source);
+    final active = await loadActiveConfig();
+    final activePath = active.file?.path ?? active.subscription?.generatedPath;
+    if (activePath == null) {
+      throw FormatException(tr('无法确认当前运行配置，请刷新连接后重试重命名'));
+    }
+    final activeIdentity = normalizeConfigFilePath(
+        await resolvePath(normalizeConfigFilePath(activePath)));
+    final isActive = source == activeIdentity;
+    if (isActive && active.subscriptionMode) {
+      throw FormatException(tr('不能重命名当前运行的订阅配置，请先切换到其他配置'));
+    }
+    await rename(source, target, isActive);
+    return ClashConfigFile(path: target);
+  }
+
+  static Future<void> deleteFile(String path, {String? password}) async {
+    final safePath = normalizeConfigFilePath(path);
+    final settings = await loadSettings(passwordOverride: password);
+    await SshService.withClient(settings.host, settings.password,
+        (client) async {
+      final sftp = await _withTimeout(client.sftp(), 'SFTP init');
+      try {
+        final sourceAttrs = await _withTimeout(
+            sftp.stat(safePath, followLink: false), 'SFTP stat');
+        if (!sourceAttrs.isFile) {
+          throw FormatException(tr('只能删除配置目录中的普通 YAML 文件'));
+        }
+        await deleteInactiveConfigFile(
+          path: safePath,
+          loadActiveConfig: () async {
+            final result = await _withTimeout(
+                SshService.runCommandOnClient(client, _activeConfigCommand()),
+                'Read active configuration');
+            return parseActiveConfigOutput(result.stdout);
+          },
+          resolvePath: (path) =>
+              _withTimeout(sftp.absolute(path), 'SFTP realpath'),
+          removeFile: (path) async {
+            final attrs = await _withTimeout(
+                sftp.stat(path, followLink: false), 'SFTP stat');
+            if (!attrs.isFile) {
+              throw FormatException(tr('只能删除配置目录中的普通 YAML 文件'));
+            }
+            await _withTimeout(sftp.remove(path), 'SFTP remove');
+          },
+        );
+      } finally {
+        sftp.close();
+      }
+    }, username: settings.username, port: settings.port);
+  }
+
+  /// Resolves both identities before deleting one inactive YAML. Callers supply
+  /// operations bound to the same remote connection; lookup failures fail closed.
+  static Future<void> deleteInactiveConfigFile({
+    required String path,
+    required Future<ClashActiveConfig> Function() loadActiveConfig,
+    required Future<String> Function(String) resolvePath,
+    required Future<void> Function(String) removeFile,
+  }) async {
+    final safePath = normalizeConfigFilePath(path);
+    final resolvedPath = normalizeConfigFilePath(await resolvePath(safePath));
+    final active = await loadActiveConfig();
+    final activePath = active.file?.path ?? active.subscription?.generatedPath;
+    if (activePath == null) {
+      throw FormatException(tr('无法确认当前运行配置，请刷新连接后重试删除'));
+    }
+    final safeActivePath = normalizeConfigFilePath(activePath);
+    // Resolve directory aliases too, so an alternate spelling cannot bypass
+    // protection of the active local or subscription-generated configuration.
+    final resolvedActivePath =
+        normalizeConfigFilePath(await resolvePath(safeActivePath));
+    if (resolvedPath == resolvedActivePath) {
+      throw FormatException(tr('不能删除当前运行配置，请先切换到其他配置'));
+    }
+    await removeFile(resolvedPath);
   }
 
   static String _directoryOf(String path) {
@@ -754,7 +874,7 @@ $activeUpdate
       value.startsWith('http://') || value.startsWith('https://');
 
   static String _configPathIdentity(String path) {
-    final normalized = normalizeRemotePath(path).toLowerCase();
+    final normalized = normalizeRemotePath(path);
     for (final root in const ['/etc/openclash/config/', '/openclash/config/']) {
       if (normalized.startsWith(root)) {
         return 'openclash:${normalized.substring(root.length)}';

@@ -195,6 +195,61 @@ String _languageLabel(AppLanguage language) => switch (language) {
     };
 
 const _english = <String, String>{
+  '只能重命名配置目录中的普通 YAML 文件':
+      'Only regular YAML files in configuration directories can be renamed',
+  '无法确认当前运行配置，请刷新连接后重试重命名':
+      'Could not identify the active configuration. Refresh the connection before retrying the rename',
+  '不能重命名当前运行的订阅配置，请先切换到其他配置':
+      'Switch to another configuration before renaming the active subscription file',
+  '关闭连接失败，请检查网络和 Token 后重试':
+      'Could not close the connection. Check the network and token, then retry',
+  '应用结果未确认，请检查 OpenClash 状态后重试':
+      'The result could not be confirmed. Check the OpenClash state before retrying',
+  '删除配置': 'Delete configuration',
+  '删除配置文件？': 'Delete configuration file?',
+  '删除': 'Delete',
+  '此操作无法撤销。': 'This cannot be undone.',
+  '未保存的修改也会丢弃。': 'Unsaved changes will also be discarded.',
+  '只能删除配置目录中的普通 YAML 文件':
+      'Only regular YAML files in configuration directories can be deleted',
+  '无法确认当前运行配置，请刷新连接后重试删除':
+      'Could not identify the active configuration. Refresh the connection before retrying deletion',
+  '不能删除当前运行配置，请先切换到其他配置':
+      'Switch to another configuration before deleting the active file',
+  '运行状态': 'Runtime status',
+  '当前配置': 'Current configuration',
+  '正在检查当前配置...': 'Checking the active configuration...',
+  '运行操作': 'Runtime actions',
+  '长按卡片拖动排序，关闭开关隐藏卡片':
+      'Long-press a card to reorder; turn its switch off to hide it',
+  '无法确认当前配置；若修改了运行配置，请稍后手动重启 OpenClash':
+      'Could not identify the active configuration. Restart OpenClash manually if you changed it.',
+  'Clash 状态': 'Clash status',
+  '当前 YAML': 'Current YAML',
+  'Clash 操作': 'Clash actions',
+  '快捷设置': 'Quick settings',
+  '自定义首页': 'Customize dashboard',
+  '拖动手柄排序，关闭开关隐藏卡片': 'Drag to reorder; turn off a switch to hide a card',
+  '拖动排序': 'Drag to reorder',
+  '恢复默认': 'Reset layout',
+  '卡片已隐藏，点击右上角自定义首页以恢复。':
+      'Cards are hidden. Customize the dashboard to restore them.',
+  '读取首页布局失败': 'Could not load the dashboard layout',
+  '保存首页布局失败，请重试': 'Could not save the dashboard layout. Please try again.',
+  '暂无订阅流量': 'No subscription traffic available',
+  '编辑配置': 'Edit configuration',
+  '文件管理': 'File actions',
+  '文件操作': 'File operation',
+  '完成': 'Done',
+  '选择要编辑的文件，不改变当前运行配置。':
+      'Choose a file to edit. The running configuration stays unchanged.',
+  '当前 YAML 配置有未保存修改，继续前要保存吗？':
+      'This YAML file has unsaved changes. Save before continuing?',
+  '导出当前内容': 'Export current content',
+  '选择 YAML 或上传新配置开始编辑':
+      'Choose a YAML file or upload a configuration to start editing',
+  '覆盖已有配置？': 'Overwrite existing configuration?',
+  '覆盖': 'Overwrite',
   '版本': 'Version',
   '前往 GitHub 发布页下载 IPA，自签后手动安装。':
       'Download the IPA from GitHub Releases, then sign and install it manually.',
@@ -567,7 +622,6 @@ const _english = <String, String>{
   '远端地址': 'Remote address',
   '运行概览': 'Overview',
   '运行中': 'Running',
-  '运行状态': 'Status',
   '在 GitHub Releases 查看所有版本': 'View all versions on GitHub Releases',
   '在 GitHub 查看完整功能说明': 'View the full feature guide on GitHub',
   '暂无活跃连接': 'No active connections',
@@ -818,6 +872,9 @@ String? _dynamicEnglish(String source) {
   }
   if ((match = RegExp(r'^已导出 (.+)$').firstMatch(source)) != null) {
     return 'Exported ${match![1]}';
+  }
+  if ((match = RegExp(r'^已删除 (.+)$').firstMatch(source)) != null) {
+    return 'Deleted ${match!.group(1)}';
   }
   if ((match = RegExp(r'^已发现 (\d+) 个 YAML 文件$').firstMatch(source)) != null) {
     return 'Found ${match![1]} YAML files';

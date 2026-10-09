@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -20,6 +23,148 @@ void main() {
     streamUnlockSupported: true,
     rawRunMode: 'fake-ip',
   );
+
+  for (final scenario in [
+    'timeout',
+    'socket',
+    'incomplete',
+    'busy',
+    'unreachable'
+  ]) {
+    test('reconciles uncertain remote changes: $scenario', () async {
+      final commands = <String>[];
+      final requests = <http.Request>[];
+      var current = original;
+      final service = OpenClashQuickSettingsService(
+          clashService: ClashService.forTesting(
+              config: const ClashConfig(host: '192.168.1.1:9090', token: ''),
+              client: MockClient((request) async {
+                requests.add(request);
+                return http.Response('{"mode":"rule"}', 200);
+              })),
+          delay: (_) async {},
+          transactionIdFactory: () => 'uncertain-$scenario',
+          commandRunner: (command) async {
+            commands.add(command);
+            if (_isApplyCommand(command)) {
+              current = original.copyWith(snifferEnabled: true);
+              expect(command, contains(r'"$$" > "$tx.owner"'));
+              expect(command, contains(r'> "$tx.ready"'));
+              if (scenario == 'incomplete') return '';
+              if (scenario == 'socket') {
+                throw const SocketException('lost');
+              }
+              throw TimeoutException('SSH operation timed out');
+            }
+            if (_isRollbackCommand(command)) {
+              expect(command.indexOf('kill -0'),
+                  lessThan(command.indexOf('uci import')));
+              expect(command.indexOf(r'[ ! -f "$tx.ready" ]'),
+                  lessThan(command.indexOf('uci import')));
+              if (scenario == 'busy') return 'PROXLY_ROLLBACK=busy\n';
+              if (scenario == 'unreachable') {
+                throw const SocketException('offline');
+              }
+              current = original;
+              return 'PROXLY_RUNTIME_PATH=/etc/openclash/config.yaml\nPROXLY_ROLLBACK=success\n';
+            }
+            if (_isLoadCommand(command)) return _settingsOutput(current);
+            return '';
+          });
+      final result = await service.applyChange(
+          original: original,
+          desired: original.copyWith(snifferEnabled: true),
+          key: OpenClashQuickSettingKey.sniffer);
+      final uncertain = ['busy', 'unreachable'].contains(scenario);
+      expect(result.success, isFalse);
+      expect(result.rollbackAttempted, isTrue);
+      expect(result.rollbackSucceeded, !uncertain);
+      expect(result.stateUncertain, uncertain);
+      expect(commands.where(_isRollbackCommand), hasLength(1));
+      expect(requests.where((request) => request.method == 'PUT'),
+          hasLength(uncertain ? 0 : 1));
+      expect(current.snifferEnabled, uncertain);
+    });
+  }
+
+  test('remote recovery refuses a live writer and preserves failed backups',
+      () async {
+    final shell = Platform.environment['PROXLY_TEST_SHELL'] ?? 'sh';
+    late String rollback;
+    final service = OpenClashQuickSettingsService(
+        clashService: _clashService(() => original.proxyMode),
+        transactionIdFactory: () => 'shell-recovery',
+        commandRunner: (command) async {
+          if (_isApplyCommand(command)) throw TimeoutException('lost reply');
+          if (_isRollbackCommand(command)) {
+            rollback = command.replaceFirst(
+                "tx='/tmp/proxly_quick_shell-recovery/state'",
+                r'tx="$1/transaction/state"');
+            return 'PROXLY_ROLLBACK=busy\n';
+          }
+          if (_isLoadCommand(command)) return _settingsOutput(original);
+          return '';
+        });
+    await service.applyChange(
+        original: original,
+        desired: original.copyWith(proxyMode: OpenClashProxyMode.global),
+        key: OpenClashQuickSettingKey.proxyMode);
+    for (final scenario in ['busy', 'partial', 'stopped', 'restore-failed']) {
+      final root =
+          await Directory.systemTemp.createTemp('proxly-recovery-test-');
+      addTearDown(() async {
+        if (await root.exists()) await root.delete(recursive: true);
+      });
+      final result = await Process.run(shell, [
+        '-c',
+        r'''
+set -eu
+fixture="$1"
+scenario="$2"
+mkdir "$fixture/transaction"
+printf 'backup\n' > "$fixture/transaction/state.uci"
+printf '42\n' > "$fixture/transaction/state.pid"
+if [ "$scenario" = busy ]; then
+  printf '%s\n' "$$" > "$fixture/transaction/state.owner"
+else
+  printf '2147483647\n' > "$fixture/transaction/state.owner"
+fi
+if [ "$scenario" != partial ]; then
+  printf 'ready\n' > "$fixture/transaction/state.ready"
+fi
+uci() {
+  printf 'mutation\n' >> "$fixture/mutations"
+  [ "$scenario" != restore-failed ]
+}
+pidof() { printf '42\n'; }
+''' +
+            rollback,
+        'sh',
+        root.path.replaceAll('\\', '/'),
+        scenario
+      ]);
+      final mutated = await File('${root.path}/mutations').exists();
+      expect(mutated, ['stopped', 'restore-failed'].contains(scenario),
+          reason: '${result.stdout}\n${result.stderr}');
+      if (scenario == 'stopped') {
+        expect(result.exitCode, 0);
+        expect(result.stdout, contains('PROXLY_ROLLBACK=success'));
+        expect(
+            await File('${root.path}/transaction/state.uci').exists(), isFalse);
+      } else {
+        expect(
+            await File('${root.path}/transaction/state.uci').exists(), isTrue);
+        expect(
+            '${result.stdout}${result.stderr}',
+            contains(
+                'PROXLY_ROLLBACK=${scenario == 'restore-failed' ? 'failed' : scenario == 'partial' ? 'unconfirmed' : 'busy'}'));
+      }
+    }
+  },
+      skip: Platform.isWindows &&
+              !Platform.environment.containsKey('PROXLY_TEST_SHELL')
+          ? 'POSIX shell test runs in CI or with PROXLY_TEST_SHELL'
+          : false);
 
   test('loads persisted values and prefers live runtime values', () async {
     final service = OpenClashQuickSettingsService(
