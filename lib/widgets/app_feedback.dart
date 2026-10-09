@@ -63,6 +63,7 @@ abstract final class AppFeedback {
     BuildContext context,
     String message, {
     AppFeedbackTone tone = AppFeedbackTone.info,
+    bool dismissOnRouteChange = true,
   }) {
     final palette = AppPalette.of(context);
     final accent = switch (tone) {
@@ -106,7 +107,7 @@ abstract final class AppFeedback {
     );
 
     final route = ModalRoute.of(context);
-    if (route is PageRoute<dynamic>) {
+    if (dismissOnRouteChange && route is PageRoute<dynamic>) {
       final animation = route.animation;
       void handleRouteStatus(AnimationStatus status) {
         if (status == AnimationStatus.reverse ||

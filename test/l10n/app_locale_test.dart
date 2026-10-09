@@ -4,6 +4,48 @@ import 'package:proxly/l10n/app_locale.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
+  testWidgets('dashboard and file management labels are translated',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({'app_language': 'en'});
+    await AppLocaleController.instance.load();
+    for (final text in [
+      '运行状态',
+      '当前配置',
+      '正在检查当前配置...',
+      '运行操作',
+      '快捷设置',
+      '自定义首页',
+      '完成',
+      '长按卡片拖动排序，关闭开关隐藏卡片',
+      '无法确认当前配置；若修改了运行配置，请稍后手动重启 OpenClash',
+      '恢复默认',
+      '编辑配置',
+      '文件管理',
+      '删除配置',
+      '删除配置文件？',
+      '删除',
+      '此操作无法撤销。',
+      '未保存的修改也会丢弃。',
+      '只能删除配置目录中的普通 YAML 文件',
+      '只能重命名配置目录中的普通 YAML 文件',
+      '无法确认当前运行配置，请刷新连接后重试重命名',
+      '不能重命名当前运行的订阅配置，请先切换到其他配置',
+      '关闭连接失败，请检查网络和 Token 后重试',
+      '应用结果未确认，请检查 OpenClash 状态后重试',
+      '无法确认当前运行配置，请刷新连接后重试删除',
+      '不能删除当前运行配置，请先切换到其他配置',
+      '已删除 config.yaml',
+      '导出当前内容',
+      '选择要编辑的文件，不改变当前运行配置。',
+      '当前 YAML 配置有未保存修改，继续前要保存吗？',
+      '覆盖已有配置？',
+      '卡片已隐藏，点击右上角自定义首页以恢复。',
+    ]) {
+      expect(tr(text), isNot(matches(RegExp(r'[\u4e00-\u9fff]'))),
+          reason: text);
+    }
+  });
+
   group('system language resolution', () {
     test('maps every Chinese locale to simplified Chinese', () {
       for (final locale in const [

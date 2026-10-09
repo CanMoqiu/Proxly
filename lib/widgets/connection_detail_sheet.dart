@@ -67,7 +67,7 @@ class ConnectionDetailSheet extends StatelessWidget {
             : conn.inboundIp)
         : '';
 
-    // Prefer API-reported speeds and fall back to the polling estimate when unavailable.
+    // 优先使用 API 实时速度，无数据时降级为轮询计算值
     final effectiveUpSpeed = conn.apiUpSpeed > 0 ? conn.apiUpSpeed : upSpeed;
     final effectiveDownSpeed =
         conn.apiDownSpeed > 0 ? conn.apiDownSpeed : downSpeed;
@@ -114,7 +114,7 @@ class ConnectionDetailSheet extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Hostname, protocol, and type badges.
+                  // 主机名 + 协议/类型徽章
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -142,7 +142,7 @@ class ConnectionDetailSheet extends StatelessWidget {
                   ),
                   const SizedBox(height: 10),
 
-                  // Traffic statistics.
+                  // 流量统计行
                   Row(
                     children: [
                       Icon(Icons.arrow_upward, size: 11, color: textSecondary),
@@ -186,7 +186,7 @@ class ConnectionDetailSheet extends StatelessWidget {
                   ),
                   const SizedBox(height: 18),
 
-                  // Proxy chain.
+                  // 代理链路区块
                   _SectionLabel('代理链路', textSecondary),
                   const SizedBox(height: 8),
                   Container(
@@ -201,8 +201,7 @@ class ConnectionDetailSheet extends StatelessWidget {
                       children: List.generate(conn.chainList.length, (i) {
                         final isLast = i == conn.chainList.length - 1;
                         final dotColor = isLast ? nodeColor : textSecondary;
-                        // providerChains follows chainList order, so use the matching
-                        // provider name.
+                        // 当前节点对应的 provider 名（顺序与 chainList 一致）
                         final providerIdx = conn.providerChains.length > i
                             ? conn.providerChains.reversed.toList()[i]
                             : '';
@@ -295,7 +294,7 @@ class ConnectionDetailSheet extends StatelessWidget {
                   ),
                   const SizedBox(height: 14),
 
-                  // Connection details.
+                  // 连接信息区块
                   _SectionLabel('连接信息', textSecondary),
                   const SizedBox(height: 8),
                   Container(

@@ -8,6 +8,40 @@ import 'package:proxly/services/clash_service.dart';
 import 'package:proxly/services/connection_settings_store.dart';
 
 void main() {
+  group('close individual connection', () {
+    for (final code in [204, 401, 500]) {
+      test('validates HTTP $code before reporting success', () async {
+        final service = ClashService.forTesting(
+            config: const ClashConfig(
+                host: '192.168.1.1:9090', token: 'test-token'),
+            client: MockClient((request) async {
+              expect(request.method, 'DELETE');
+              expect(request.url.pathSegments.last, 'id/with?characters');
+              expect(request.headers['Authorization'], 'Bearer test-token');
+              return http.Response('', code);
+            }));
+        final close = service.closeConnection('id/with?characters');
+        if (code == 204) {
+          await close;
+        } else {
+          await expectLater(
+              close,
+              throwsA(isA<ClashControllerException>()
+                  .having((e) => e.statusCode, 'status', code)));
+        }
+      });
+    }
+    test('transport failures remain actionable', () async {
+      final service = ClashService.forTesting(
+          config: const ClashConfig(host: '192.168.1.1:9090', token: ''),
+          client:
+              MockClient((_) async => throw http.ClientException('offline')));
+      await expectLater(
+          service.closeConnection('id'),
+          throwsA(isA<ClashControllerException>().having(
+              (e) => e.kind, 'kind', ClashControllerFailureKind.unreachable)));
+    });
+  });
   group('ProviderTraffic remaining quota', () {
     test('calculates a shrinking remaining value and percentage', () {
       const traffic = ProviderTraffic(name: 'provider', used: 25, total: 100);

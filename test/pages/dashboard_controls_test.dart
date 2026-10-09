@@ -4,14 +4,171 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:proxly/app_route_observer.dart';
 import 'package:proxly/l10n/app_locale.dart';
-import 'package:proxly/pages/clash_control_center_page.dart';
+import 'package:proxly/pages/clash_config_editor_page.dart';
+import 'package:proxly/services/clash_config_file_service.dart';
+import 'package:proxly/widgets/dashboard/dashboard_controls.dart';
 import 'package:proxly/services/openclash_quick_settings_service.dart';
 import 'package:proxly/services/openclash_restart_coordinator.dart';
 import 'package:proxly/theme/app_theme.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
-  testWidgets('control center adapts to a narrow English layout',
+  testWidgets(
+      'inactive dashboard does not poll and slow refreshes cannot overlap',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({'app_language': 'en'});
+    await AppLocaleController.instance.load();
+    final service = _FakeQuickSettingsService();
+    var configLoads = 0;
+    final configGate = Completer<ClashActiveConfig>();
+    Future<void> pump(bool active) async {
+      await tester.pumpWidget(AppLocaleScope(
+          controller: AppLocaleController.instance,
+          child: MaterialApp(
+              home: DashboardControls(
+                  active: active,
+                  quickSettingsService: service,
+                  loadActiveConfig: () {
+                    configLoads++;
+                    return configGate.future;
+                  },
+                  builder: (_, cards) => Scaffold(
+                      body: SingleChildScrollView(
+                          child: cards.quickSettings))))));
+      await tester.pump();
+    }
+
+    await pump(false);
+    await tester.pump(const Duration(seconds: 15));
+    expect(service.loadCount, 0);
+    expect(configLoads, 0);
+    service.loadGate = Completer<void>();
+    await pump(true);
+    await tester.pump(const Duration(seconds: 16));
+    expect(service.loadCount, 1);
+    expect(configLoads, 1);
+    service.loadGate!.complete();
+    configGate.complete(const ClashActiveConfig(file: null));
+    await tester.pump();
+    await pump(false);
+    await tester.pump(const Duration(seconds: 16));
+    expect(service.loadCount, 1);
+    expect(configLoads, 1);
+    await pump(true);
+    final foregroundLoads = service.loadCount;
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    await tester.pump(const Duration(seconds: 16));
+    expect(service.loadCount, foregroundLoads);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    expect(service.loadCount, foregroundLoads + 1);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets(
+      'current YAML opens the editor directly and activation uses a bottom sheet confirmation',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({'app_language': 'en'});
+    await AppLocaleController.instance.load();
+    const file = ClashConfigFile(path: '/etc/openclash/config/current.yaml');
+    const other = ClashConfigFile(path: '/etc/openclash/config/other.yaml');
+    var activations = 0;
+    await tester.pumpWidget(AppLocaleScope(
+        controller: AppLocaleController.instance,
+        child: MaterialApp(
+            home: DashboardControls(
+                quickSettingsService: _FakeQuickSettingsService(),
+                loadActiveConfig: () async =>
+                    const ClashActiveConfig(file: file),
+                listFiles: () async => [file, other],
+                activateConfig: (_) async {
+                  activations++;
+                },
+                editorBuilder: (selected) => ClashConfigEditorPage(
+                    file: selected, readFile: (_) async => 'mode: rule'),
+                builder: (_, cards) => Scaffold(body: cards.currentYaml)))));
+    await tester.pumpAndSettle();
+    expect(find.text('current.yaml'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('current_config_switch')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+    expect(find.byType(BottomSheet), findsOneWidget);
+    await tester.tap(find.text('other.yaml'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+    expect(find.text('Switch the active configuration?'), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(find.text('current.yaml'), findsOneWidget);
+    expect(activations, 0);
+    await tester.tap(find.byKey(const ValueKey('current_config_edit')));
+    await tester.pumpAndSettle();
+    expect(find.byType(ClashConfigEditorPage), findsOneWidget);
+    expect(
+        tester
+            .widget<ClashConfigEditorPage>(find.byType(ClashConfigEditorPage))
+            .file
+            ?.path,
+        file.path);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets(
+      'configuration activation persists before restart and verifies the selected file',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({'app_language': 'en'});
+    await AppLocaleController.instance.load();
+    const original =
+        ClashConfigFile(path: '/etc/openclash/config/original.yaml');
+    const selected =
+        ClashConfigFile(path: '/etc/openclash/config/selected.yaml');
+    var active = original;
+    final events = <String>[];
+    final coordinator = OpenClashRestartCoordinator(
+        restartCommand: (_) async {
+          events.add('restart');
+        },
+        healthProbe: () async {},
+        delay: (_) async {},
+        initialWait: Duration.zero,
+        requiredHealthyChecks: 1,
+        terminalStateDuration: Duration.zero);
+    addTearDown(coordinator.dispose);
+    await tester.pumpWidget(AppLocaleScope(
+        controller: AppLocaleController.instance,
+        child: MaterialApp(
+            home: DashboardControls(
+                quickSettingsService: _FakeQuickSettingsService(),
+                restartCoordinator: coordinator,
+                listFiles: () async => [original, selected],
+                loadActiveConfig: () async {
+                  events.add('read:${active.name}');
+                  return ClashActiveConfig(file: active);
+                },
+                activateConfig: (path) async {
+                  events.add('activate:$path');
+                  active = selected;
+                },
+                builder: (_, cards) => Scaffold(body: cards.currentYaml)))));
+    await tester.pumpAndSettle();
+    events.clear();
+    await tester.tap(find.byKey(const ValueKey('current_config_switch')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+    await tester.tap(find.text('selected.yaml'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+    expect(events, isEmpty);
+    await tester.tap(find.text('Switch and restart'));
+    await tester.pumpAndSettle();
+    expect(events.take(2), ['activate:${selected.path}', 'restart']);
+    expect(events.skip(2), contains('read:selected.yaml'));
+    expect(find.text('selected.yaml'), findsOneWidget);
+    expect(coordinator.isBusy, isFalse);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('dashboard controls adapt to a narrow English layout',
       (tester) async {
     SharedPreferences.setMockInitialValues({'app_language': 'en'});
     await AppLocaleController.instance.load();
@@ -35,15 +192,15 @@ void main() {
               ),
               child: child!,
             ),
-            home: const ClashControlCenterPage(autoLoad: false),
+            home: const _DashboardHarness(autoLoad: false),
           ),
         ),
       );
       await tester.pump();
 
-      expect(find.text('Clash Control Center'), findsOneWidget);
-      expect(find.text('Maintenance'), findsOneWidget);
-      expect(find.text('OpenClash quick settings'), findsOneWidget);
+      expect(find.text('Dashboard'), findsOneWidget);
+      expect(find.text('Runtime actions'), findsOneWidget);
+      expect(find.text('Quick settings'), findsOneWidget);
       expect(find.text('Clear DNS cache'), findsOneWidget);
       expect(find.text('Close connections'), findsOneWidget);
       expect(find.byTooltip('Refresh quick settings'), findsNothing);
@@ -56,22 +213,21 @@ void main() {
         findsOneWidget,
       );
 
-      final maintenanceY = tester.getTopLeft(find.text('Maintenance')).dy;
-      final quickSettingsY =
-          tester.getTopLeft(find.text('OpenClash quick settings')).dy;
+      final maintenanceY = tester.getTopLeft(find.text('Runtime actions')).dy;
+      final quickSettingsY = tester.getTopLeft(find.text('Quick settings')).dy;
       expect(maintenanceY, lessThan(quickSettingsY));
       await tester.scrollUntilVisible(
-        find.text('YAML configuration files'),
+        find.text('Edit configuration'),
         350,
         scrollable: find.byType(Scrollable).first,
       );
-      expect(find.text('Active configuration'), findsOneWidget);
-      expect(find.text('YAML configuration files'), findsOneWidget);
+      expect(find.text('Current configuration'), findsOneWidget);
+      expect(find.text('Edit configuration'), findsOneWidget);
       expect(tester.takeException(), isNull);
     }
   });
 
-  testWidgets('quick settings stay between maintenance and configuration',
+  testWidgets('control cards retain maintenance button geometry and shared theme',
       (tester) async {
     SharedPreferences.setMockInitialValues({'app_language': 'en'});
     await AppLocaleController.instance.load();
@@ -87,17 +243,14 @@ void main() {
         controller: AppLocaleController.instance,
         child: MaterialApp(
           theme: AppTheme.light(),
-          home: const ClashControlCenterPage(autoLoad: false),
+          home: const _DashboardHarness(autoLoad: false),
         ),
       ),
     );
 
-    final maintenanceY = tester.getTopLeft(find.text('Maintenance')).dy;
-    final quickSettingsY =
-        tester.getTopLeft(find.text('OpenClash quick settings')).dy;
-    final activeConfigY =
-        tester.getTopLeft(find.text('Active configuration')).dy;
-    final yamlY = tester.getTopLeft(find.text('YAML configuration files')).dy;
+    final maintenanceY = tester.getTopLeft(find.text('Runtime actions')).dy;
+    final quickSettingsY = tester.getTopLeft(find.text('Quick settings')).dy;
+    final activeConfigY = tester.getTopLeft(find.text('Current configuration')).dy;
     final restartY =
         tester.getTopLeft(find.byKey(const ValueKey('maintenance_restart'))).dy;
     final dnsY = tester
@@ -143,7 +296,6 @@ void main() {
     }
     expect(maintenanceY, lessThan(quickSettingsY));
     expect(quickSettingsY, lessThan(activeConfigY));
-    expect(activeConfigY, lessThan(yamlY));
   });
 
   testWidgets('control center uses ordinary scroll without pull refresh',
@@ -155,7 +307,7 @@ void main() {
       AppLocaleScope(
         controller: AppLocaleController.instance,
         child: const MaterialApp(
-          home: ClashControlCenterPage(autoLoad: false),
+          home: _DashboardHarness(autoLoad: false),
         ),
       ),
     );
@@ -181,7 +333,7 @@ void main() {
       AppLocaleScope(
         controller: AppLocaleController.instance,
         child: const MaterialApp(
-          home: ClashControlCenterPage(autoLoad: false),
+          home: _DashboardHarness(autoLoad: false),
         ),
       ),
     );
@@ -233,7 +385,7 @@ void main() {
               body: TextButton(
                 onPressed: () => Navigator.of(context).push(
                   MaterialPageRoute(
-                    builder: (_) => ClashControlCenterPage(
+                    builder: (_) => _DashboardHarness(
                       quickSettingsService: service,
                       restartCoordinator: coordinator,
                     ),
@@ -335,7 +487,7 @@ void main() {
         AppLocaleScope(
           controller: AppLocaleController.instance,
           child: MaterialApp(
-            home: ClashControlCenterPage(quickSettingsService: service),
+            home: _DashboardHarness(quickSettingsService: service),
           ),
         ),
       );
@@ -351,7 +503,7 @@ void main() {
       expect(service.lastKey, target.key, reason: target.name);
       expect(
         find.byKey(
-          const ValueKey('control_center_app_bar_activity_indicator'),
+          const ValueKey('dashboard_activity_indicator'),
         ),
         findsOneWidget,
         reason: target.name,
@@ -380,7 +532,7 @@ void main() {
       AppLocaleScope(
         controller: AppLocaleController.instance,
         child: MaterialApp(
-          home: ClashControlCenterPage(quickSettingsService: service),
+          home: _DashboardHarness(quickSettingsService: service),
         ),
       ),
     );
@@ -396,7 +548,7 @@ void main() {
     expect(find.text('Applying setting...'), findsNothing);
     expect(
       find.byKey(
-        const ValueKey('control_center_app_bar_activity_indicator'),
+        const ValueKey('dashboard_activity_indicator'),
       ),
       findsOneWidget,
     );
@@ -419,7 +571,7 @@ void main() {
     expect(find.text('Proxy mode updated'), findsNothing);
     expect(
       find.byKey(
-        const ValueKey('control_center_app_bar_activity_indicator'),
+        const ValueKey('dashboard_activity_indicator'),
       ),
       findsNothing,
     );
@@ -442,7 +594,7 @@ void main() {
               body: TextButton(
                 onPressed: () => Navigator.of(context).push(
                   MaterialPageRoute(
-                    builder: (_) => ClashControlCenterPage(
+                    builder: (_) => _DashboardHarness(
                       quickSettingsService: service,
                     ),
                   ),
@@ -464,7 +616,7 @@ void main() {
     expect(service.loadCount, 2);
 
     unawaited(
-      Navigator.of(tester.element(find.byType(ClashControlCenterPage))).push(
+      Navigator.of(tester.element(find.byType(_DashboardHarness))).push(
         MaterialPageRoute(
           builder: (_) => const Scaffold(body: Text('covered')),
         ),
@@ -495,7 +647,7 @@ void main() {
         controller: AppLocaleController.instance,
         child: MaterialApp(
           navigatorObservers: [shellRouteObserver],
-          home: ClashControlCenterPage(quickSettingsService: service),
+          home: _DashboardHarness(quickSettingsService: service),
         ),
       ),
     );
@@ -534,7 +686,7 @@ void main() {
         controller: AppLocaleController.instance,
         child: MaterialApp(
           navigatorObservers: [shellRouteObserver],
-          home: ClashControlCenterPage(quickSettingsService: service),
+          home: _DashboardHarness(quickSettingsService: service),
         ),
       ),
     );
@@ -563,7 +715,7 @@ void main() {
       AppLocaleScope(
         controller: AppLocaleController.instance,
         child: MaterialApp(
-          home: ClashControlCenterPage(quickSettingsService: service),
+          home: _DashboardHarness(quickSettingsService: service),
         ),
       ),
     );
@@ -597,7 +749,7 @@ void main() {
       AppLocaleScope(
         controller: AppLocaleController.instance,
         child: MaterialApp(
-          home: ClashControlCenterPage(quickSettingsService: service),
+          home: _DashboardHarness(quickSettingsService: service),
         ),
       ),
     );
@@ -636,7 +788,7 @@ void main() {
       AppLocaleScope(
         controller: AppLocaleController.instance,
         child: MaterialApp(
-          home: ClashControlCenterPage(
+          home: _DashboardHarness(
             autoLoad: false,
             restartCoordinator: coordinator,
           ),
@@ -647,7 +799,7 @@ void main() {
     expect(find.text('Restarting OpenClash...'), findsOneWidget);
     expect(
       find.byKey(
-        const ValueKey('control_center_app_bar_activity_indicator'),
+        const ValueKey('dashboard_activity_indicator'),
       ),
       findsOneWidget,
     );
@@ -669,7 +821,7 @@ void main() {
       AppLocaleScope(
         controller: AppLocaleController.instance,
         child: MaterialApp(
-          home: ClashControlCenterPage(
+          home: _DashboardHarness(
             autoLoad: false,
             restartCoordinator: coordinator,
           ),
@@ -749,4 +901,40 @@ class _FakeQuickSettingsService extends OpenClashQuickSettingsService {
     streamUnlockSupported: true,
     rawRunMode: 'fake-ip',
   );
+}
+
+class _DashboardHarness extends StatelessWidget {
+  final bool autoLoad;
+  final OpenClashQuickSettingsService? quickSettingsService;
+  final OpenClashRestartCoordinator? restartCoordinator;
+  const _DashboardHarness(
+      {this.autoLoad = true,
+      this.quickSettingsService,
+      this.restartCoordinator});
+  @override
+  Widget build(BuildContext context) => DashboardControls(
+        autoLoad: autoLoad,
+        quickSettingsService: quickSettingsService,
+        restartCoordinator: restartCoordinator,
+        builder: (context, cards) => Scaffold(
+          appBar: AppBar(title: const Text('Dashboard'), actions: [
+            if (cards.activityLabel != null)
+              const SizedBox(
+                  key: ValueKey('dashboard_activity_indicator'),
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2)),
+          ]),
+          body: ListView(
+              physics: const ClampingScrollPhysics(),
+              padding: const EdgeInsets.all(16),
+              children: [
+                cards.operations,
+                const SizedBox(height: 12),
+                cards.quickSettings,
+                const SizedBox(height: 12),
+                cards.currentYaml,
+              ]),
+        ),
+      );
 }

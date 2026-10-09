@@ -89,6 +89,7 @@ class OpenClashQuickSettingApplyResult {
   final bool rollbackSucceeded;
   final bool changesPersisted;
   final bool canRetry;
+  final bool stateUncertain;
 
   const OpenClashQuickSettingApplyResult._({
     required this.success,
@@ -100,6 +101,7 @@ class OpenClashQuickSettingApplyResult {
     required this.rollbackSucceeded,
     required this.changesPersisted,
     required this.canRetry,
+    this.stateUncertain = false,
   });
 
   const OpenClashQuickSettingApplyResult.success(
@@ -125,6 +127,7 @@ class OpenClashQuickSettingApplyResult {
     required bool rollbackSucceeded,
     bool changesPersisted = false,
     bool canRetry = false,
+    bool stateUncertain = false,
   }) : this._(
          success: false,
          settings: settings,
@@ -135,6 +138,7 @@ class OpenClashQuickSettingApplyResult {
          rollbackSucceeded: rollbackSucceeded,
          changesPersisted: changesPersisted,
          canRetry: canRetry,
+         stateUncertain: stateUncertain,
        );
 }
 
@@ -351,10 +355,9 @@ class OpenClashQuickSettingsService {
       rollbackSucceeded = rollbackMarker == 'success';
       rollbackAttempted =
           rollbackSucceeded || rollbackMarker == 'failed' || prepared;
-      final unconfirmedTransaction =
-          error is SshCommandException &&
-          applyStarted &&
-          rollbackMarker == null;
+      // A timeout or transport failure can lose the completion marker even
+      // after the router has written settings. Reconcile all unconfirmed runs.
+      final unconfirmedTransaction = applyStarted && rollbackMarker == null;
 
       if ((prepared || unconfirmedTransaction) && !rollbackSucceeded) {
         rollbackAttempted = true;
@@ -363,9 +366,11 @@ class OpenClashQuickSettingsService {
             _rollbackCommand(transaction: transaction, key: key),
             operationTimeout: _operationTimeoutFor(key),
           );
+          runtimePath ??= _marker(rollbackOutput, 'PROXLY_RUNTIME_PATH');
           rollbackSucceeded =
               _marker(rollbackOutput, 'PROXLY_ROLLBACK') == 'success';
         } catch (rollbackError) {
+          runtimePath ??= _runtimePathMarker(rollbackError);
           rollbackSucceeded = _rollbackMarker(rollbackError) == 'success';
         }
       }
@@ -416,6 +421,7 @@ class OpenClashQuickSettingsService {
         rollbackAttempted: rollbackAttempted,
         rollbackSucceeded: rollbackSucceeded,
         changesPersisted: persistenceCompleted && !rollbackSucceeded,
+        stateUncertain: unconfirmedTransaction && !rollbackSucceeded,
       );
     }
   }
@@ -749,7 +755,7 @@ class OpenClashQuickSettingsService {
   static String _cleanupCommand(String transaction) =>
       "rm -f '$transaction.uci' '$transaction.runtime' "
       "'$transaction.runtime_path' '$transaction.proxy_mode' "
-      "'$transaction.pid' '$transaction.http'; "
+      "'$transaction.pid' '$transaction.http' '$transaction.owner' '$transaction.ready'; "
       "rmdir '${transaction.substring(0, transaction.lastIndexOf('/'))}' 2>/dev/null || true";
 
   static String _proxyModeBody(OpenClashQuickSettings desired) =>
@@ -878,6 +884,7 @@ set_overwrite() {
 }
 
 [ -f "\$tx.uci" ] || fail backup_missing
+printf '%s\n' "\$\$" > "\$tx.owner"
 $body
 uci commit openclash || fail persist_failed
 printf 'PROXLY_PERSISTED=1\n'
@@ -1364,6 +1371,7 @@ uses_runtime='__USES_RUNTIME__'
 uses_firewall='__USES_FIREWALL__'
 uses_proxy='__USES_PROXY__'
 __CREATE_TX__
+printf '%s\n' "$$" > "$tx.owner"
 armed=0
 
 current_pid() {
@@ -1371,7 +1379,7 @@ current_pid() {
 }
 
 cleanup() {
-  rm -f "$tx.uci" "$tx.runtime" "$tx.runtime_path" "$tx.proxy_mode" "$tx.pid" "$tx.http"
+  rm -f "$tx.uci" "$tx.runtime" "$tx.runtime_path" "$tx.proxy_mode" "$tx.pid" "$tx.http" "$tx.owner" "$tx.ready"
 rmdir "${tx%/*}" 2>/dev/null || true
 }
 
@@ -1456,6 +1464,7 @@ if [ "$uses_proxy" = '1' ]; then
   printf '%s' '__OLD_PROXY_MODE__' > "$tx.proxy_mode"
 fi
 
+printf 'ready\n' > "$tx.ready"
 armed=1
 trap rollback_on_exit EXIT
 __APPLY_BODY__
@@ -1473,6 +1482,21 @@ uses_runtime='__USES_RUNTIME__'
 uses_firewall='__USES_FIREWALL__'
 uses_proxy='__USES_PROXY__'
 
+# Closing SSH does not guarantee that the router's shell has stopped. Never
+# restore its backup while that shell can still finish a pending mutation.
+owner="$(cat "$tx.owner" 2>/dev/null)"
+case "$owner" in
+  ''|*[!0-9]*) echo 'PROXLY_ROLLBACK=unconfirmed'; exit 0 ;;
+esac
+if kill -0 "$owner" 2>/dev/null; then
+  echo 'PROXLY_ROLLBACK=busy'
+  exit 0
+fi
+if [ ! -f "$tx.ready" ]; then
+  echo 'PROXLY_ROLLBACK=unconfirmed'
+  exit 0
+fi
+
 current_pid() {
   pidof clash 2>/dev/null | tr ' ' '\n' | sort -n | tr '\n' ' ' | sed 's/ *$//'
 }
@@ -1484,6 +1508,7 @@ if [ "$ok" = '1' ]; then
 fi
 if [ "$uses_runtime" = '1' ]; then
   runtime_path="$(cat "$tx.runtime_path" 2>/dev/null)"
+  printf 'PROXLY_RUNTIME_PATH=%s\n' "$runtime_path"
   cp -f "$tx.runtime" "$runtime_path" >/dev/null 2>&1 || ok=0
 fi
 if [ "$uses_firewall" = '1' ]; then
@@ -1503,9 +1528,9 @@ if [ "$uses_firewall" = '1' ]; then
 fi
 pid_before="$(cat "$tx.pid" 2>/dev/null)"
 [ -n "$pid_before" ] && [ "$pid_before" = "$(current_pid)" ] || ok=0
-rm -f "$tx.uci" "$tx.runtime" "$tx.runtime_path" "$tx.proxy_mode" "$tx.pid" "$tx.http"
-rmdir "${tx%/*}" 2>/dev/null || true
 if [ "$ok" = '1' ]; then
+  rm -f "$tx.uci" "$tx.runtime" "$tx.runtime_path" "$tx.proxy_mode" "$tx.pid" "$tx.http" "$tx.owner" "$tx.ready"
+  rmdir "${tx%/*}" 2>/dev/null || true
   echo 'PROXLY_ROLLBACK=success'
   exit 0
 fi

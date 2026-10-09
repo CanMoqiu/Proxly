@@ -13,9 +13,8 @@ import '../widgets/adaptive_ui.dart';
 import '../widgets/app_feedback.dart';
 import 'main_shell.dart';
 
-/// Guides first-time users through the Clash controller connection setup.
-///
-/// main.dart shows this page when `clash_host` is absent from SharedPreferences.
+/// 首次启动引导页：帮助新用户快速完成 Clash 连接配置。
+/// 当 SharedPreferences 中 clash_host 为空时，由 main.dart 展示此页。
 class SetupWizardPage extends StatefulWidget {
   const SetupWizardPage({super.key});
 
@@ -198,8 +197,7 @@ class _SetupWizardPageState extends State<SetupWizardPage>
       );
       await ClashService.instance.loadConfig();
       if (!mounted) return;
-      // Replace the route stack after saving the configuration so the setup page
-      // cannot be revisited with the back button.
+      // 配置保存完成，替换路由栈，进入主界面
       Navigator.of(
         context,
       ).pushReplacement(MaterialPageRoute(builder: (_) => const MainShell()));
@@ -276,7 +274,7 @@ class _SetupWizardPageState extends State<SetupWizardPage>
           ],
         ),
       ),
-      // Step indicator
+      // 步骤指示器
       bottomNavigationBar: Container(
         height: 36,
         color: bgColor,
@@ -301,7 +299,7 @@ class _SetupWizardPageState extends State<SetupWizardPage>
   }
 }
 
-// Step 1: Welcome
+// ─── 第一步：欢迎页 ────────────────────────────────────────────────────────────
 
 class _WelcomePage extends StatelessWidget {
   final VoidCallback onNext;
@@ -480,7 +478,7 @@ class _Highlight {
   });
 }
 
-// Step 2: Connection settings
+// ─── 第二步：连接配置页 ────────────────────────────────────────────────────────
 
 class _ConfigPage extends StatelessWidget {
   final TextEditingController hostController;
@@ -586,7 +584,7 @@ class _ConfigPage extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(height: 18),
-                        // Address and secret input
+                        // ── 地址 + 密钥输入卡片 ──────────────────────────────────────────────
                         Container(
                           decoration: BoxDecoration(
                             color: cardBg,
@@ -718,7 +716,7 @@ class _ConfigPage extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(height: 12),
-                        // Test connection
+                        // ── 测试连接 ─────────────────────────────────────────────────────────
                         GestureDetector(
                           onTap: testing ? null : onTest,
                           child: Container(
@@ -750,7 +748,7 @@ class _ConfigPage extends StatelessWidget {
                             ),
                           ),
                         ),
-                        // Connection test result
+                        // ── 测试结果提示 ─────────────────────────────────────────────────────
                         if (testResult != null) ...[
                           const SizedBox(height: 10),
                           Container(
@@ -897,7 +895,7 @@ class _WizardNavButtons extends StatelessWidget {
   }
 }
 
-// Step 3: Feature preferences
+// ─── 第三步：功能偏好 ────────────────────────────────────────────────────────
 
 class _PreferencesPage extends StatelessWidget {
   final bool saving;
@@ -1064,7 +1062,7 @@ class _PreferenceSection extends StatelessWidget {
   }
 }
 
-// Outbound link mode selector
+// ─── 出站链路模式选择按钮 ──────────────────────────────────────────────────────
 
 class _ModeButton extends StatelessWidget {
   final String label;
