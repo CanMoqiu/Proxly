@@ -1,3 +1,4 @@
+import '../widgets/app_popup.dart';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -70,10 +71,10 @@ class SshHostTrustService {
     final context = rootNavigatorKey.currentContext;
     if (context == null) return false;
     final changed = previous != null;
-    final accepted = await showDialog<bool>(
+    final accepted = await AppPopup.dialog<bool>(
       context: context,
       barrierDismissible: false,
-      builder: (dialogContext) => AlertDialog(
+      builder: (dialogContext) => AppDialog(
         title: Text(tr(changed ? 'SSH 身份指纹已变化' : '确认 SSH 设备身份')),
         content: SingleChildScrollView(
           child: Column(
@@ -104,11 +105,11 @@ class SshHostTrustService {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
+            onPressed: () => AppPopup.close(dialogContext, false),
             child: Text(tr('取消')),
           ),
           FilledButton(
-            onPressed: () => Navigator.of(dialogContext).pop(true),
+            onPressed: () => AppPopup.close(dialogContext, true),
             child: Text(tr(changed ? '信任新指纹并继续' : '信任并继续')),
           ),
         ],

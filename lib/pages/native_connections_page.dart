@@ -1,3 +1,5 @@
+import '../widgets/app_popup.dart';
+import '../services/connection_feedback.dart';
 import '../l10n/app_locale.dart';
 import 'package:flutter/material.dart';
 import 'dart:async';
@@ -127,7 +129,7 @@ class _NativeConnectionsPageState extends State<NativeConnectionsPage>
       if (mounted) {
         setState(() {
           _loading = false;
-          _error = '错误：$e';
+          _error = ConnectionFeedback.forError(e);
         });
       }
     }
@@ -339,33 +341,31 @@ class _NativeConnectionsPageState extends State<NativeConnectionsPage>
               ),
             ),
           ),
-          PopupMenuButton<String>(
+          IconButton(
             tooltip: tr('排序'),
             icon: Icon(Icons.sort_rounded, color: textSecondary, size: 20),
-            initialValue: _connSortBy,
-            onSelected: (v) => setState(() => _connSortBy = v),
-            itemBuilder: (_) => [
-              for (final e in const [
-                ('time_desc', '时间 新→旧'),
-                ('time_asc', '时间 旧→新'),
-                ('down_desc', '下载量'),
-                ('up_desc', '上传量'),
-                ('down_speed_desc', '下载速度'),
-                ('up_speed_desc', '上传速度'),
-              ])
-                PopupMenuItem(
-                  value: e.$1,
-                  child: AdaptiveSingleLineText(
-                    tr(e.$2),
-                    alignment: Alignment.centerLeft,
-                    textAlign: TextAlign.left,
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: _connSortBy == e.$1 ? chainColor : textPrimary,
-                    ),
-                  ),
-                ),
-            ],
+            onPressed: () async {
+              final value = await AppPopup.sheet<String>(
+                  context: context,
+                  builder: (_) => AppOptionsSheet<String>(
+                        title: tr('排序'),
+                        selectedValue: _connSortBy,
+                        options: [
+                          for (final entry in const [
+                            ('time_desc', '时间 新→旧'),
+                            ('time_asc', '时间 旧→新'),
+                            ('down_desc', '下载量'),
+                            ('up_desc', '上传量'),
+                            ('down_speed_desc', '下载速度'),
+                            ('up_speed_desc', '上传速度'),
+                          ])
+                            AppSheetOption(value: entry.$1, label: tr(entry.$2))
+                        ],
+                      ));
+              if (mounted && value != null && value != _connSortBy) {
+                setState(() => _connSortBy = value);
+              }
+            },
           ),
         ],
         bottom: PreferredSize(
@@ -465,10 +465,8 @@ class _NativeConnectionsPageState extends State<NativeConnectionsPage>
         final upSpeed = _connUpSpeed[c.id] ?? 0;
         final downSpeed = _connDownSpeed[c.id] ?? 0;
         return GestureDetector(
-          onTap: () => showModalBottomSheet(
+          onTap: () => AppPopup.sheet(
             context: context,
-            isScrollControlled: true,
-            backgroundColor: Colors.transparent,
             builder: (_) => ConnectionDetailSheet(
               conn: c,
               upSpeed: upSpeed,

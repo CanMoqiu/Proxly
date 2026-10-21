@@ -1,3 +1,4 @@
+import '../widgets/app_popup.dart';
 import '../l10n/app_locale.dart';
 import '../widgets/app_feedback.dart';
 import 'dart:async';
@@ -22,11 +23,14 @@ import '../services/app_platform.dart';
 import '../services/panel_load_monitor.dart';
 import '../services/web_panel_page_probe.dart';
 import '../widgets/panel_error_view.dart';
+import '../widgets/panel_connection_gate.dart';
+import '../services/controller_connection_state.dart';
 import '../services/web_panel_update_session.dart';
 import '../services/zashboard_config_validator.dart';
 import '../services/zashboard_settings_import_service.dart';
+import '../services/zashboard_core_settings.dart';
+import '../widgets/zashboard_import_sheet.dart';
 import '../theme/app_theme.dart';
-import '../widgets/adaptive_ui.dart';
 
 class ProxyPage extends StatefulWidget {
   final bool asTab;
@@ -46,8 +50,18 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
   }
 
   Future<void> _recoverPanel() async {
+    if (ControllerConnectionState.instance.phase ==
+        ControllerConnectionPhase.restarting) {
+      return;
+    }
     try {
       await _restartLocalServer();
+      if (mounted &&
+          _controllerBridge?.isCurrentConnection == false &&
+          ControllerConnectionState.instance.phase !=
+              ControllerConnectionPhase.restarting) {
+        await _restartLocalServer();
+      }
     } catch (_) {
       // The load monitor presents the failure and a retry button.
     }
@@ -71,6 +85,7 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
   String _panelLanguage = '';
   bool _webViewReady = false;
   bool _coreSettingsImportInProgress = false;
+  bool _importingSettings = false;
 
   // 代理页内视图切换：proxies ↔ rules
   bool _showingRules = false;
@@ -389,6 +404,7 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
       hostname: endpoint.hostname,
       port: endpoint.port,
       token: settings.token,
+      connectionState: ControllerConnectionState.instance,
     );
     AssetHttpServer? assetServer;
     FileHttpServer? fileServer;
@@ -751,12 +767,55 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
     );
   }
 
-  /// 从本地 JSON 文件导入 Zashboard 配置。
-  /// 只合并非冲突偏好，Proxly 管理的后端、主题和连接页布局保持不变。
+  Future<void> _chooseSettingsImport() async {
+    if (_importingSettings || !_webViewReady) return;
+    setState(() => _importingSettings = true);
+    final generation = _serverGeneration;
+    try {
+      final source = await AppPopup.sheet<ZashboardImportSource>(
+          context: context, builder: (_) => const ZashboardImportSheet());
+      if (!mounted || source == null || generation != _serverGeneration) return;
+      if (source == ZashboardImportSource.file) {
+        await _importZashboardConfig();
+      } else {
+        final bridge = _controllerBridge;
+        if (bridge == null) return;
+        final raw = await ZashboardCoreSettings.read(Uri.parse(
+            'http://127.0.0.1:$_serverPort${bridge.secondaryPath}/storage/zashboard'));
+        if (!mounted || generation != _serverGeneration) return;
+        final confirmed = await AppPopup.dialog<bool>(
+            context: context,
+            builder: (context) => AppDialog(
+                  title: Text(tr('从内核导入')),
+                  content: Text(tr('将合并内核中保存的 Zashboard 配置，覆盖同名面板设置。')),
+                  actions: [
+                    TextButton(
+                        onPressed: () => AppPopup.close(context, false),
+                        child: Text(tr('取消'))),
+                    FilledButton(
+                        onPressed: () => AppPopup.close(context, true),
+                        child: Text(tr('导入配置'))),
+                  ],
+                ));
+        if (confirmed == true && mounted && generation == _serverGeneration) {
+          await _applyImportedSettings(raw);
+        }
+      }
+    } catch (error) {
+      _showImportSnack(
+          error is FormatException ? error.message : '导入失败，请检查连接或文件格式后重试。',
+          success: false);
+    } finally {
+      if (mounted) setState(() => _importingSettings = false);
+    }
+  }
+
+  /// Imports data only; a .js extension never grants permission to execute code.
   Future<void> _importZashboardConfig() async {
+    final generation = _serverGeneration;
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
-      allowedExtensions: ['json'],
+      allowedExtensions: ['json', 'js'],
       withReadStream: true,
     );
     if (result == null || result.files.isEmpty) return;
@@ -781,12 +840,17 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
       return;
     }
 
+    if (!mounted || generation != _serverGeneration) return;
     if (_webViewController == null) {
       _showImportSnack('面板尚未加载，请稍后再试', success: false);
       return;
     }
 
-    // 1. 只合并不会和 Proxly 管理项冲突的 Zashboard 偏好。
+    await _applyImportedSettings(raw);
+  }
+
+  Future<void> _applyImportedSettings(String raw) async {
+    // Both sources share the same secret filtering and managed preferences.
     final sanitized =
         await ZashboardSettingsImportService.instance.importSnapshot(raw);
     if (sanitized == null) {
@@ -844,9 +908,9 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
   }
 
   Future<bool> _confirmNativeUpdate() async {
-    final confirmed = await showDialog<bool>(
+    final confirmed = await AppPopup.dialog<bool>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
+      builder: (dialogContext) => AppDialog(
         title: Text(tr('确认更新 Zashboard？')),
         content: Text(
           tr(
@@ -857,12 +921,12 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: AdaptiveSingleLineText(tr('取消')),
+            onPressed: () => AppPopup.close(dialogContext, false),
+            child: Text(tr('取消')),
           ),
           FilledButton(
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: AdaptiveSingleLineText(tr('继续更新')),
+            onPressed: () => AppPopup.close(dialogContext, true),
+            child: Text(tr('继续更新')),
           ),
         ],
       ),
@@ -985,13 +1049,22 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
         actions: [
           // 导入 Zashboard 配置文件
           IconButton(
-            icon: Icon(
-              Icons.file_download_outlined,
-              color: textColor,
-              size: 22,
-            ),
+            icon: _importingSettings
+                ? SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: textColor),
+                  )
+                : Icon(
+                    Icons.file_download_outlined,
+                    color: textColor,
+                    size: 22,
+                  ),
             tooltip: tr('导入配置'),
-            onPressed: _importZashboardConfig,
+            onPressed: _webViewReady && !_importingSettings
+                ? _chooseSettingsImport
+                : null,
           ),
         ],
         bottom: PreferredSize(
@@ -1101,20 +1174,30 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
               ),
 
             Positioned.fill(
-              child: IgnorePointer(
-                ignoring: _webViewReady,
-                child: AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 260),
-                  switchInCurve: Curves.easeOut,
-                  switchOutCurve: Curves.easeOut,
-                  child: _webViewReady
-                      ? const SizedBox.shrink(
-                          key: ValueKey('proxy_panel_ready'))
-                      : _panelLoad.error != null
-                          ? PanelErrorView(
-                              message: _panelLoad.error!,
-                              onRetry: () => unawaited(_recoverPanel()))
-                          : _LoadingOverlay(isDark: _isDark, bgColor: bgColor),
+              child: PanelConnectionGate(
+                isActive: () =>
+                    !widget.asTab || WebPanelSync.instance.proxyTabActive,
+                onRetry: _recoverPanel,
+                onUnavailable: () => _needsRecovery = true,
+                child: IgnorePointer(
+                  ignoring: _webViewReady,
+                  child: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 260),
+                    switchInCurve: Curves.easeOut,
+                    switchOutCurve: Curves.easeOut,
+                    child: _webViewReady
+                        ? const SizedBox.shrink(
+                            key: ValueKey('proxy_panel_ready'))
+                        : _panelLoad.error != null
+                            ? PanelErrorView(
+                                message: _panelLoad.error!,
+                                isActive: () =>
+                                    !widget.asTab ||
+                                    WebPanelSync.instance.proxyTabActive,
+                                onRetry: _recoverPanel)
+                            : _LoadingOverlay(
+                                isDark: _isDark, bgColor: bgColor),
+                  ),
                 ),
               ),
             ),

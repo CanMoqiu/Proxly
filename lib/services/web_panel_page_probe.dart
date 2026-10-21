@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
+import 'connection_feedback.dart';
 
 class WebPanelPageProbe {
   WebPanelPageProbe._();
@@ -32,21 +33,27 @@ class WebPanelPageProbe {
         .timeout(const Duration(seconds: 22));
     final value = result?.value;
     if (value is Map && value['state'] == 'ready') return;
+    throw StateError(failureMessage(value));
+  }
+
+  static String failureMessage(dynamic value) {
     if (value is Map && value['state'] == 'api') {
-      throw StateError('控制器连接失败 (HTTP ${value['status']})，请检查地址和 Token');
+      final status = value['status'];
+      if (status == 401 || status == 403) {
+        return ConnectionFeedback.authenticationFailed;
+      }
+      if (status == 502 || status == 503 || status == 504) {
+        return ConnectionFeedback.routerUnavailable;
+      }
+      return '控制器请求失败，请检查地址、端口及 Clash 运行状态。';
     }
     if (value is Map && value['state'] == 'network') {
-      throw StateError('面板无法连接本地服务或控制器，请重试');
+      return ConnectionFeedback.routerUnavailable;
     }
-    throw StateError('面板脚本未能完成初始化，请重试');
+    return '面板脚本未能完成初始化，请重试';
   }
 
   static String readinessScript(String secondaryPath) => '''
-const deadline = Date.now() + 10000;
-while (!document.querySelector('#app-content') && Date.now() < deadline) {
-  await new Promise(resolve => setTimeout(resolve, 100));
-}
-if (!document.querySelector('#app-content')) return {state: 'app_timeout'};
 const controller = new AbortController();
 const timer = setTimeout(() => controller.abort(), 8000);
 try {
@@ -55,11 +62,16 @@ try {
   });
   if (!response.ok) return {state: 'api', status: response.status};
   const data = await response.json();
-  return {state: typeof data.version === 'string' ? 'ready' : 'invalid_response'};
+  if (typeof data.version !== 'string') return {state: 'invalid_response'};
 } catch (_) {
   return {state: 'network'};
 } finally {
   clearTimeout(timer);
 }
+const deadline = Date.now() + 10000;
+while (!document.querySelector('#app-content') && Date.now() < deadline) {
+  await new Promise(resolve => setTimeout(resolve, 100));
+}
+return {state: document.querySelector('#app-content') ? 'ready' : 'app_timeout'};
 ''';
 }

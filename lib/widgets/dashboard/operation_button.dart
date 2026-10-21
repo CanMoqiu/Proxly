@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../adaptive_ui.dart';
+import 'dashboard_button_style.dart';
 
 class DashboardOperationButton extends StatelessWidget {
   static const _warningFill = Color(0xFFD97706);
@@ -7,7 +8,6 @@ class DashboardOperationButton extends StatelessWidget {
   final String label;
   final IconData icon;
   final bool warning;
-  final bool loading;
   final bool enabled;
   final VoidCallback onTap;
 
@@ -16,7 +16,6 @@ class DashboardOperationButton extends StatelessWidget {
     required this.label,
     required this.icon,
     this.warning = false,
-    required this.loading,
     required this.enabled,
     required this.onTap,
   });
@@ -24,7 +23,7 @@ class DashboardOperationButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final style = warning
-        ? ButtonStyle(
+        ? DashboardButtonStyle.action.copyWith(
             backgroundColor: WidgetStateProperty.resolveWith((states) =>
                 states.contains(WidgetState.disabled)
                     ? _warningFill.withValues(alpha: 0.42)
@@ -34,21 +33,12 @@ class DashboardOperationButton extends StatelessWidget {
                     ? Colors.white.withValues(alpha: 0.68)
                     : Colors.white),
           )
-        : null;
+        : DashboardButtonStyle.action;
 
     return FilledButton.icon(
       onPressed: enabled ? onTap : null,
       style: style,
-      icon: loading
-          ? SizedBox(
-              width: 16,
-              height: 16,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                color: Colors.white,
-              ),
-            )
-          : Icon(icon, size: 18),
+      icon: Icon(icon, size: DashboardButtonStyle.iconSize),
       label: AdaptiveSingleLineText(label),
     );
   }

@@ -17,6 +17,7 @@ enum OpenClashProxyMode { rule, global, direct }
 enum OpenClashAreaBypass { mainland, overseas, disabled }
 
 enum OpenClashQuickSettingKey {
+  baseMode,
   runVariant,
   proxyMode,
   areaBypass,
@@ -242,8 +243,10 @@ class OpenClashQuickSettingsService {
     if (_matches(key, original, desired)) {
       return OpenClashQuickSettingApplyResult.success(original);
     }
-    if (key == OpenClashQuickSettingKey.runVariant) {
-      return _applyRunVariantWithRestart(original: original, desired: desired);
+    if (_requiresRestart(key)) {
+      return _applyRunModeWithRestart(
+        original: original, desired: desired, key: key,
+      );
     }
 
     final transaction = OpenClashScriptSafety.transactionPath(
@@ -426,20 +429,21 @@ class OpenClashQuickSettingsService {
     }
   }
 
-  Future<OpenClashQuickSettingApplyResult> _applyRunVariantWithRestart({
+  Future<OpenClashQuickSettingApplyResult> _applyRunModeWithRestart({
     required OpenClashQuickSettings original,
     required OpenClashQuickSettings desired,
+    required OpenClashQuickSettingKey key,
   }) async {
     final operationId = _transactionIdFactory();
     var latest = original;
-    _trace(operationId, OpenClashQuickSettingKey.runVariant, 'start');
+    _trace(operationId, key, 'start');
 
     try {
       final capabilities = await _probeCapabilities();
-      _validateCapabilities(capabilities, OpenClashQuickSettingKey.runVariant);
+      _validateCapabilities(capabilities, key);
       _trace(
         operationId,
-        OpenClashQuickSettingKey.runVariant,
+        key,
         'capabilities',
         'version=${capabilities.version.isEmpty ? 'unknown' : capabilities.version}',
       );
@@ -448,7 +452,7 @@ class OpenClashQuickSettingsService {
       final detail = _stageDetail(stage, _errorDetail(error));
       _trace(
         operationId,
-        OpenClashQuickSettingKey.runVariant,
+        key,
         'failure',
         detail,
       );
@@ -465,9 +469,9 @@ class OpenClashQuickSettingsService {
     final restartResult = await _restartCoordinator.restart(
       reason: OpenClashRestartReason.quickSetting,
       beforeRestart: () async {
-        _trace(operationId, OpenClashQuickSettingKey.runVariant, 'persist');
+        _trace(operationId, key, 'persist');
         final output = await _run(
-          _runVariantPersistCommand(
+          _runModePersistCommand(
             transaction: OpenClashScriptSafety.transactionPath(
               'run_mode',
               operationId,
@@ -481,16 +485,18 @@ class OpenClashQuickSettingsService {
         }
       },
       verify: () async {
-        _trace(operationId, OpenClashQuickSettingKey.runVariant, 'verify');
+        _trace(operationId, key, 'verify');
         latest = await load();
-        if (!_matches(OpenClashQuickSettingKey.runVariant, latest, desired)) {
+        // Both controls share en_mode; verify the preserved half as well.
+        if (latest.baseMode != desired.baseMode ||
+            latest.runVariant != desired.runVariant) {
           throw const _QuickApplyException('verification_failed');
         }
       },
     );
 
     if (restartResult.success) {
-      _trace(operationId, OpenClashQuickSettingKey.runVariant, 'success');
+      _trace(operationId, key, 'success');
       return OpenClashQuickSettingApplyResult.success(latest);
     }
 
@@ -508,7 +514,7 @@ class OpenClashQuickSettingsService {
         ? error.code
         : 'restart_failed';
     final detail = _stageDetail(stage, _errorDetail(error));
-    _trace(operationId, OpenClashQuickSettingKey.runVariant, 'failure', detail);
+    _trace(operationId, key, 'failure', detail);
 
     try {
       latest = await load();
@@ -599,7 +605,7 @@ class OpenClashQuickSettingsService {
     if (!capabilities.coreRunning) {
       throw const _QuickApplyException('core_offline');
     }
-    if (key == OpenClashQuickSettingKey.runVariant &&
+    if (_requiresRestart(key) &&
         !capabilities.hasOpenClashInit) {
       throw const _QuickApplyException('restart_unavailable');
     }
@@ -623,17 +629,16 @@ class OpenClashQuickSettingsService {
     required OpenClashQuickSettings desired,
     required OpenClashQuickSettingKey key,
   }) {
-    if (original.baseMode != desired.baseMode) {
-      throw ArgumentError('OpenClash base mode cannot be changed here');
-    }
     final changed = OpenClashQuickSettingKey.values
         .where((candidate) => !_matches(candidate, original, desired))
         .toList();
     if (changed.length > 1 || (changed.isNotEmpty && changed.single != key)) {
       throw ArgumentError('applyChange accepts exactly one setting');
     }
-    if (key == OpenClashQuickSettingKey.runVariant &&
-        (desired.baseMode == OpenClashBaseMode.unknown ||
+    if (_requiresRestart(key) &&
+        (original.baseMode == OpenClashBaseMode.unknown ||
+            original.runVariant == null ||
+            desired.baseMode == OpenClashBaseMode.unknown ||
             desired.runVariant == null)) {
       throw const _QuickApplyException('unsupported_run_mode');
     }
@@ -658,9 +663,9 @@ class OpenClashQuickSettingsService {
     OpenClashQuickSettings expected,
   ) {
     return switch (key) {
+      OpenClashQuickSettingKey.baseMode => actual.baseMode == expected.baseMode,
       OpenClashQuickSettingKey.runVariant =>
-        actual.baseMode == expected.baseMode &&
-            actual.runVariant == expected.runVariant,
+        actual.runVariant == expected.runVariant,
       OpenClashQuickSettingKey.proxyMode =>
         actual.proxyMode == expected.proxyMode,
       OpenClashQuickSettingKey.areaBypass =>
@@ -691,6 +696,10 @@ class OpenClashQuickSettingsService {
     );
   }
 
+  static bool _requiresRestart(OpenClashQuickSettingKey key) =>
+      key == OpenClashQuickSettingKey.baseMode ||
+      key == OpenClashQuickSettingKey.runVariant;
+
   static bool _usesRuntime(OpenClashQuickSettingKey key) =>
       key == OpenClashQuickSettingKey.sniffer ||
       key == OpenClashQuickSettingKey.dnsProxy;
@@ -710,6 +719,7 @@ class OpenClashQuickSettingsService {
     final usesRuntime = _usesRuntime(key);
     final usesFirewall = _usesFirewall(key);
     final body = switch (key) {
+      OpenClashQuickSettingKey.baseMode ||
       OpenClashQuickSettingKey.runVariant => throw StateError(
         'Run mode uses the restart flow',
       ),
@@ -891,7 +901,7 @@ printf 'PROXLY_PERSISTED=1\n'
 ''';
   }
 
-  static String _runVariantPersistCommand({
+  static String _runModePersistCommand({
     required String transaction,
     required OpenClashQuickSettings desired,
   }) {

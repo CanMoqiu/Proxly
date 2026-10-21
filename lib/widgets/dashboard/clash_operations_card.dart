@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../l10n/app_locale.dart';
 import '../../theme/app_theme.dart';
 import 'operation_button.dart';
+import 'dashboard_button_style.dart';
 
 class ClashOperationsCard extends StatelessWidget {
   final String restartLabel;
@@ -21,11 +22,11 @@ class ClashOperationsCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final palette = AppPalette.of(context);
     final cardBg = palette.surface, cardBorder = palette.border;
-    final textColor = palette.textPrimary, hintColor = palette.textSecondary;
+    final textColor = palette.textPrimary;
     return Container(
       decoration: BoxDecoration(
         color: cardBg,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(color: cardBorder, width: 0.5),
       ),
       padding: const EdgeInsets.all(16),
@@ -40,12 +41,7 @@ class ClashOperationsCard extends StatelessWidget {
               color: textColor,
             ),
           ),
-          const SizedBox(height: 4),
-          Text(
-            tr('重启 OpenClash，或维护 Clash 内核的 DNS 缓存与代理连接。'),
-            style: TextStyle(fontSize: 11, color: hintColor),
-          ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 16),
           SizedBox(
             width: double.infinity,
             child: DashboardOperationButton(
@@ -53,12 +49,11 @@ class ClashOperationsCard extends StatelessWidget {
               label: tr(restartLabel),
               icon: Icons.restart_alt_rounded,
               warning: true,
-              loading: false,
               enabled: !busy,
               onTap: onRestart,
             ),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: DashboardButtonStyle.spacing),
           Row(
             children: [
               Expanded(
@@ -66,12 +61,11 @@ class ClashOperationsCard extends StatelessWidget {
                   key: const ValueKey('maintenance_flush_dns'),
                   label: tr(flushingDns ? '清理中' : '清理 DNS 缓存'),
                   icon: Icons.dns_rounded,
-                  loading: flushingDns,
                   enabled: !busy,
                   onTap: onFlushDns,
                 ),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: DashboardButtonStyle.spacing),
               Expanded(
                 child: DashboardOperationButton(
                   key: const ValueKey(
@@ -79,7 +73,6 @@ class ClashOperationsCard extends StatelessWidget {
                   ),
                   label: tr(closingConnections ? '关闭中' : '关闭连接'),
                   icon: Icons.link_off_rounded,
-                  loading: closingConnections,
                   enabled: !busy,
                   onTap: onCloseConnections,
                 ),

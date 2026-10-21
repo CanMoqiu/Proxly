@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../widgets/adaptive_ui.dart';
+import '../widgets/app_popup.dart';
+import '../widgets/app_feedback.dart';
 
 enum AppLanguage { simplifiedChinese, english }
 
@@ -40,10 +42,12 @@ class AppLocaleController extends ChangeNotifier {
 
   Future<void> setLanguage(AppLanguage language) async {
     if (_language == language) return;
+    final prefs = await SharedPreferences.getInstance();
+    if (!await prefs.setString(preferenceKey, _storageValue(language))) {
+      throw StateError('Language preference was not saved');
+    }
     _language = language;
     notifyListeners();
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(preferenceKey, _storageValue(language));
   }
 
   static AppLanguage resolveSystemLanguage(List<Locale>? locales) {
@@ -92,99 +96,75 @@ class AppLanguagePicker extends StatelessWidget {
     final colorScheme = Theme.of(context).colorScheme;
     final foreground = colorScheme.onSurface;
 
-    return MenuAnchor(
-      style: MenuStyle(
-        backgroundColor: WidgetStatePropertyAll(colorScheme.surface),
-        elevation: const WidgetStatePropertyAll(8),
-        shape: WidgetStatePropertyAll(
-          RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        ),
-        padding: const WidgetStatePropertyAll(
-          EdgeInsets.symmetric(vertical: 4),
-        ),
-      ),
-      menuChildren: AppLanguage.values
-          .map(
-            (language) => MenuItemButton(
-              onPressed: () => appLocale.setLanguage(language),
-              leadingIcon: language == current
-                  ? Icon(
-                      Icons.check_rounded,
-                      size: 18,
-                      color: colorScheme.primary,
-                    )
-                  : const SizedBox(width: 18, height: 18),
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(minWidth: 96),
-                child: AdaptiveSingleLineText(
-                  _languageLabel(language),
-                  alignment: Alignment.centerLeft,
-                  textAlign: TextAlign.left,
-                  style: TextStyle(
-                    fontSize: 13,
-                    letterSpacing: 0,
-                    color: foreground,
-                  ),
-                ),
+    return Tooltip(
+      message: tr('切换语言'),
+      child: Material(
+        type: MaterialType.transparency,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: () async {
+            final language = await AppPopup.sheet<AppLanguage>(
+              context: context,
+              builder: (_) => AppOptionsSheet<AppLanguage>(
+                title: tr('切换语言'),
+                selectedValue: current,
+                options: [
+                  for (final value in AppLanguage.values)
+                    AppSheetOption(value: value, label: _languageLabel(value))
+                ],
               ),
+            );
+            if (!context.mounted || language == null || language == current) {
+              return;
+            }
+            try {
+              await appLocale.setLanguage(language);
+            } catch (_) {
+              if (context.mounted) {
+                AppFeedback.showSnackBar(context, tr('保存语言失败，请重试'),
+                    tone: AppFeedbackTone.error);
+              }
+            }
+          },
+          child: Container(
+            padding: EdgeInsets.symmetric(
+              horizontal: compact ? 10 : 12,
+              vertical: compact ? 8 : 10,
             ),
-          )
-          .toList(),
-      builder: (context, menuController, child) {
-        return Tooltip(
-          message: tr('切换语言'),
-          child: Material(
-            type: MaterialType.transparency,
-            child: InkWell(
+            decoration: BoxDecoration(
+              border: Border.all(
+                color: foreground.withValues(alpha: 0.18),
+              ),
               borderRadius: BorderRadius.circular(12),
-              onTap: () {
-                if (menuController.isOpen) {
-                  menuController.close();
-                } else {
-                  menuController.open();
-                }
-              },
-              child: Container(
-                padding: EdgeInsets.symmetric(
-                  horizontal: compact ? 10 : 12,
-                  vertical: compact ? 8 : 10,
-                ),
-                decoration: BoxDecoration(
-                  border: Border.all(
-                    color: foreground.withValues(alpha: 0.18),
-                  ),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.language_rounded, size: 18, color: foreground),
-                    const SizedBox(width: 8),
-                    Flexible(
-                      child: AdaptiveSingleLineText(
-                        _languageLabel(current),
-                        style: TextStyle(
-                          fontSize: 12,
-                          letterSpacing: 0,
-                          color: foreground,
-                        ),
-                        alignment: Alignment.centerLeft,
-                        textAlign: TextAlign.left,
-                      ),
-                    ),
-                    const SizedBox(width: 4),
-                    Icon(
-                      Icons.arrow_drop_down_rounded,
-                      size: 18,
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.language_rounded, size: 18, color: foreground),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: AdaptiveSingleLineText(
+                    _languageLabel(current),
+                    style: TextStyle(
+                      fontSize: 12,
+                      letterSpacing: 0,
                       color: foreground,
                     ),
-                  ],
+                    alignment: Alignment.centerLeft,
+                    textAlign: TextAlign.left,
+                  ),
                 ),
-              ),
+                const SizedBox(width: 4),
+                Icon(
+                  Icons.arrow_drop_down_rounded,
+                  size: 18,
+                  color: foreground,
+                ),
+              ],
             ),
           ),
-        );
-      },
+        ),
+      ),
     );
   }
 }
@@ -195,6 +175,54 @@ String _languageLabel(AppLanguage language) => switch (language) {
     };
 
 const _english = <String, String>{
+  '暂时无法连接软路由。请连接软路由所在网络，并确认 Clash 已启动。连接恢复后会自动重试。':
+      'Router unavailable. Connect to its network and make sure Clash is running. Retrying automatically when the connection recovers.',
+  '控制器认证失败，请在设置中检查 Token。':
+      'Controller authentication failed. Check the token in Settings.',
+  '控制器请求失败，请检查地址、端口及 Clash 运行状态。':
+      'Controller request failed. Check the address, port and Clash status.',
+  '读取控制器数据失败，请重试。': 'Unable to load controller data. Please retry.',
+  '当前配置暂时无法读取，请检查软路由连接和 SSH 设置。':
+      'Current configuration unavailable. Check the router connection and SSH settings.',
+  '快捷设置暂时无法刷新，请检查软路由连接和 SSH 设置。':
+      'Quick settings could not refresh. Check the router connection and SSH settings.',
+  '若已连接正确网络，请检查系统设置中的 Proxly 局域网权限。':
+      'If you are on the correct network, check Proxly Local Network permission in system settings.',
+  '已检测到 SFTP 组件，但服务不可用，请检查路由器 SSH 的 SFTP 配置。':
+      'The SFTP component is installed, but unavailable. Check the router’s SSH SFTP configuration.',
+  '路由器缺少 SFTP 组件，无法读写 YAML 文件。':
+      'The router is missing SFTP support, which is required to read and write YAML files.',
+  'SFTP 服务不可用，请在路由器上启用 SFTP。':
+      'SFTP is unavailable. Enable SFTP on the router.',
+  '连接设置已改变，请重新检测 SFTP 后再安装。':
+      'Connection settings changed. Check SFTP again before installing.',
+  'SFTP 状态已改变，请重新检测后再操作。':
+      'The SFTP status changed. Check again before continuing.',
+  '未能确认安装完成。请检查路由器联网、软件源和剩余空间，重新检测 SFTP 后再试。':
+      'Installation could not be verified. Check the router’s internet connection, package repositories and free space, then check SFTP again.',
+  '正在安装 SFTP 组件，请稍候。': 'SFTP installation is already in progress. Please wait.',
+  '安装 SFTP 组件？': 'Install SFTP support?',
+  '将在路由器上更新软件包索引并安装 openssh-sftp-server，需要路由器联网及可用存储空间。不执行全量升级或重启 Clash。':
+      'This updates the router’s package index and installs openssh-sftp-server. Internet access and free storage are required. No full system upgrade or Clash restart will be performed.',
+  '确认安装': 'Confirm installation',
+  '自动安装需要 root 权限及 opkg 或 apk，请在路由器上手动安装 openssh-sftp-server。':
+      'Automatic installation requires root and opkg or apk. Install openssh-sftp-server manually on the router.',
+  '正在检查或安装 SFTP，请稍候…': 'Checking or installing SFTP. Please wait…',
+  '安装 SFTP 组件': 'Install SFTP support',
+  '重新检测': 'Check again',
+  'SFTP 已可用，请重新执行刚才的文件操作。': 'SFTP is ready. Retry the previous file operation.',
+  '从内核导入': 'Import from core',
+  '从本地导入 JS 文件': 'Import local JS file',
+  '支持 Zashboard 导出的 JSON 配置（.json / .js）':
+      'Zashboard JSON settings (.json / .js)',
+  '内核未保存 Zashboard 配置，或不支持从内核导入。':
+      'No Zashboard settings are stored in the core, or this core does not support importing them.',
+  '无法读取内核中的 Zashboard 配置，请检查连接和访问权限。':
+      'Unable to read Zashboard settings from the core. Check the connection and access permissions.',
+  '将合并内核中保存的 Zashboard 配置，覆盖同名面板设置。':
+      'Merge Zashboard settings stored in the core, replacing matching panel preferences.',
+  '导入失败，请检查连接或文件格式后重试。':
+      'Import failed. Check the connection or file format and try again.',
   '只能重命名配置目录中的普通 YAML 文件':
       'Only regular YAML files in configuration directories can be renamed',
   '无法确认当前运行配置，请刷新连接后重试重命名':
@@ -232,8 +260,8 @@ const _english = <String, String>{
   '拖动手柄排序，关闭开关隐藏卡片': 'Drag to reorder; turn off a switch to hide a card',
   '拖动排序': 'Drag to reorder',
   '恢复默认': 'Reset layout',
-  '卡片已隐藏，点击右上角自定义首页以恢复。':
-      'Cards are hidden. Customize the dashboard to restore them.',
+  '卡片已隐藏，点击下方自定义首页以恢复。':
+      'Cards are hidden. Use Customize dashboard below to restore them.',
   '读取首页布局失败': 'Could not load the dashboard layout',
   '保存首页布局失败，请重试': 'Could not save the dashboard layout. Please try again.',
   '暂无订阅流量': 'No subscription traffic available',
@@ -505,6 +533,15 @@ const _english = <String, String>{
   '请选择 .yaml 或 .yml 文件': 'Select a .yaml or .yml file',
   '请允许"安装未知应用"\n开启后重新点击更新':
       'Allow "Install unknown apps"\nThen tap Update again',
+  '清除 SSH 信任失败，请重试': 'Could not clear SSH trust. Please retry.',
+  '继续编辑': 'Keep editing',
+  '放弃修改': 'Discard changes',
+  '保存并继续': 'Save and continue',
+  '保存语言失败，请重试': 'Could not save language. Please retry.',
+  '保存 SSH 密码失败，请重试': 'Could not save the SSH password. Please retry.',
+  '操作失败，请重试': 'Operation failed. Please retry.',
+  '取消下载': 'Cancel download',
+  '前往发布页': 'Open release page',
   '取消': 'Cancel',
   '稍后': 'Later',
   '去开启': 'Open settings',
@@ -640,8 +677,6 @@ const _english = <String, String>{
   '总量': 'Total',
   '无限制': 'Unlimited',
   '维护操作': 'Maintenance',
-  '重启 OpenClash，或维护 Clash 内核的 DNS 缓存与代理连接。':
-      'Restart OpenClash, clear the DNS cache, or close all proxy connections.',
   '直连': 'Direct',
   '只扫描 Clash/OpenClash 目录下的 config 文件夹。':
       'Only config folders under Clash/OpenClash directories are scanned.',
@@ -656,8 +691,6 @@ const _english = <String, String>{
   '重启失败': 'Restart failed',
   '重试': 'Retry',
   'OpenClash 快捷设置': 'OpenClash quick settings',
-  '设置会立即应用；切换运行模式时现有连接可能短暂重连。':
-      'Changes apply immediately; existing connections may briefly reconnect when the running mode changes.',
   '正在应用设置...': 'Applying setting...',
   'Clash 返回了不支持的代理模式': 'Clash returned an unsupported proxy mode',
   '读取快捷设置': 'Load quick settings',
@@ -666,8 +699,7 @@ const _english = <String, String>{
   '运行模式': 'Running mode',
   '所有 Clash 代理连接已关闭': 'All Clash proxy connections have been closed',
   '更新检测': 'Update checks',
-  '当前基础模式由 OpenClash 管理，可选择对应运行方式':
-      'OpenClash manages the base mode; choose the corresponding runtime type',
+  '选择当前基础模式对应的运行方式': 'Choose how the selected base mode handles traffic',
   '增强': 'Enhanced',
   '兼容': 'Compatible',
   '混合': 'Mixed',

@@ -1,3 +1,4 @@
+import '../widgets/app_popup.dart';
 import 'dart:async';
 
 import '../l10n/app_locale.dart';
@@ -41,7 +42,7 @@ class _MainShellState extends State<MainShell> with RouteAware {
     if (!mounted || !AppPlatform.supportsUpdateChecks) return;
     final info = await UpdateService.instance.checkForUpdate(silent: true);
     if (info != null && mounted) {
-      showDialog(
+      AppPopup.dialog(
         context: context,
         builder: (_) => UpdateDialog(info: info, autoTriggered: true),
       );

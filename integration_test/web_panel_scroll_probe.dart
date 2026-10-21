@@ -44,7 +44,9 @@ const webPanelScrollProbe = r'''
     send('touchend', [[60, 150], [120, 150]]);
     return { top, bottom, horizontal, multi,
       overscroll: getComputedStyle(scroller).overscrollBehaviorY,
-      preference: localStorage.getItem('config/disable-pull-to-refresh') };
+      preference: localStorage.getItem('config/disable-pull-to-refresh'),
+      pageSwipe: localStorage.getItem('config/swipe-in-pages'),
+      tabSwipe: localStorage.getItem('config/swipe-in-tabs') };
   } finally {
     scroller.remove();
   }

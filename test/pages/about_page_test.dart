@@ -40,8 +40,13 @@ void main() {
   testWidgets('Chinese about page shows MIT original followed by translation',
       (tester) async {
     await _pumpAboutPage(tester, 'zh_CN');
+    final license = find.byKey(const ValueKey('about_mit_license'));
+    final theme = Theme.of(tester.element(license));
+    expect(theme.highlightColor, Colors.transparent);
+    expect(theme.splashColor, Colors.transparent);
+    expect(theme.splashFactory, NoSplash.splashFactory);
     expect(find.textContaining('Permission is hereby granted'), findsNothing);
-    await tester.tap(find.byKey(const ValueKey('about_mit_license')));
+    await tester.tap(find.text('MIT License'));
     await tester.pumpAndSettle();
 
     expect(find.text('MIT License'), findsOneWidget);
@@ -53,6 +58,9 @@ void main() {
       tester.getTopLeft(find.textContaining('Permission is hereby granted')).dy,
       lessThan(tester.getTopLeft(find.textContaining('任何获得本软件及相关文档文件')).dy),
     );
+    await tester.tap(find.text('MIT License'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Permission is hereby granted'), findsNothing);
   });
 
   testWidgets('English about page shows only the official MIT text',
@@ -60,7 +68,6 @@ void main() {
     await _pumpAboutPage(tester, 'en');
     await tester.tap(find.byKey(const ValueKey('about_mit_license')));
     await tester.pumpAndSettle();
-
     expect(find.text('MIT License'), findsOneWidget);
     expect(find.textContaining('Permission is hereby granted'), findsOneWidget);
     expect(find.text('中文译文'), findsNothing);

@@ -30,7 +30,6 @@ void main() {
               foregroundColor: Colors.black,
               dividerColor: Colors.black12,
               onConsolePressed: () {},
-              onCustomizePressed: () {},
             ),
           ),
         ),
@@ -40,23 +39,14 @@ void main() {
   }
 
   testWidgets(
-      'console is hidden by default and dashboard customization stays visible',
+      'header has no customization button and console is hidden by default',
       (tester) async {
     await pumpHeader(tester, showConsoleButton: false);
 
     expect(find.byKey(const ValueKey('home_console_button')), findsNothing);
     expect(
       find.byKey(const ValueKey('home_customize_button')),
-      findsOneWidget,
-    );
-
-    final controlCenterButton = tester.widget<IconButton>(
-      find.byKey(const ValueKey('home_customize_button')),
-    );
-    expect(
-      controlCenterButton.style?.overlayColor
-          ?.resolve(<WidgetState>{WidgetState.pressed}),
-      Colors.transparent,
+      findsNothing,
     );
   });
 
@@ -67,7 +57,7 @@ void main() {
     expect(consoleButton, findsOneWidget);
     expect(
       find.byKey(const ValueKey('home_customize_button')),
-      findsOneWidget,
+      findsNothing,
     );
 
     final consoleIcon = find.descendant(
@@ -117,6 +107,11 @@ void main() {
     expect(find.text('重启中'), findsOneWidget);
     expect(find.byKey(const ValueKey('dashboard_activity_indicator')),
         findsOneWidget);
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    expect(
+        find.byWidgetPredicate((widget) =>
+            widget is LinearProgressIndicator && widget.value == null),
+        findsNothing);
 
     await tester.pumpWidget(const SizedBox());
     gate.complete();
@@ -161,8 +156,8 @@ void main() {
     );
     await tester.pump();
 
-    final scrollView = tester.widget<ReorderableListView>(
-      find.byType(ReorderableListView),
+    final scrollView = tester.widget<SingleChildScrollView>(
+      find.byType(SingleChildScrollView),
     );
     expect(
       find.byWidgetPredicate(
@@ -172,7 +167,7 @@ void main() {
     );
     expect(find.byType(RefreshIndicator), findsNothing);
     expect(scrollView.padding, const EdgeInsets.fromLTRB(16, 16, 16, 42));
-    expect(scrollView.padding!.bottom, lessThan(80));
+    expect(scrollView.padding!.resolve(TextDirection.ltr).bottom, lessThan(80));
     expect(scrollView.physics, isA<ClampingScrollPhysics>());
 
     await tester.pumpWidget(const SizedBox());

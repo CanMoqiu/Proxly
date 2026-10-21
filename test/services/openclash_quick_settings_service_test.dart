@@ -525,52 +525,199 @@ runtime_tun_enabled=0
     expect(events, isNot(contains('mihomo-put')));
   });
 
-  test('running mode reports saved changes when restart fails', () async {
-    var current = original;
-    final desired = original.copyWith(runVariant: OpenClashRunVariant.tun);
+  for (final base in [OpenClashBaseMode.fakeIp, OpenClashBaseMode.redirHost]) {
+    for (final variant in OpenClashRunVariant.values) {
+      test('base mode switches to $base while preserving $variant', () async {
+        final starting = original.copyWith(
+          baseMode: base == OpenClashBaseMode.fakeIp
+              ? OpenClashBaseMode.redirHost
+              : OpenClashBaseMode.fakeIp,
+          runVariant: variant,
+        );
+        final desired = starting.copyWith(baseMode: base);
+        var current = starting;
+        final events = <String>[];
+        final commands = <String>[];
+        final coordinator = OpenClashRestartCoordinator(
+          restartCommand: (_) async => events.add('restart'),
+          healthProbe: () async => events.add('health'),
+          delay: (_) async {},
+          requiredHealthyChecks: 1,
+          verificationAttempts: 1,
+          terminalStateDuration: Duration.zero,
+        );
+        addTearDown(coordinator.dispose);
+        final service = OpenClashQuickSettingsService(
+          clashService: _clashService(() => current.proxyMode),
+          restartCoordinator: coordinator,
+          commandRunner: (command) async {
+            commands.add(command);
+            if (_isRunModePersistCommand(command)) {
+              events.add('persist');
+              current = desired;
+              return 'PROXLY_PERSISTED=1\n';
+            }
+            if (_isLoadCommand(command)) {
+              events.add('verify');
+              return _settingsOutput(current);
+            }
+            return '';
+          },
+        );
+        final result = await service.applyChange(
+          original: starting,
+          desired: desired,
+          key: OpenClashQuickSettingKey.baseMode,
+        );
+        expect(result.success, isTrue);
+        expect(result.settings.baseMode, base);
+        expect(result.settings.runVariant, variant);
+        expect(events, ['persist', 'restart', 'health', 'verify']);
+        final mode =
+            base == OpenClashBaseMode.fakeIp ? 'fake-ip' : 'redir-host';
+        final suffix = switch (variant) {
+          OpenClashRunVariant.compatibility => '',
+          OpenClashRunVariant.tun => '-tun',
+          OpenClashRunVariant.mix => '-mix',
+        };
+        final persist = commands.singleWhere(_isRunModePersistCommand);
+        expect(persist,
+            contains("uci set openclash.config.en_mode='$mode$suffix'"));
+        expect(persist, contains("set_overwrite en_mode '$mode$suffix'"));
+        expect(commands.where(_isApplyCommand), isEmpty);
+      });
+    }
+  }
+
+  for (final key in [
+    OpenClashQuickSettingKey.runVariant,
+    OpenClashQuickSettingKey.baseMode
+  ]) {
+    test(
+        '$key reports saved changes when restart fails and retries without saving',
+        () async {
+      var current = original;
+      final desired = key == OpenClashQuickSettingKey.baseMode
+          ? original.copyWith(baseMode: OpenClashBaseMode.redirHost)
+          : original.copyWith(runVariant: OpenClashRunVariant.tun);
+      final commands = <String>[];
+      var failRestart = true;
+      final coordinator = OpenClashRestartCoordinator(
+        restartCommand: (_) async {
+          if (failRestart) throw StateError('restart unavailable');
+        },
+        healthProbe: () async {},
+        delay: (_) async {},
+        initialWait: Duration.zero,
+        requiredHealthyChecks: 1,
+        verificationAttempts: 1,
+        terminalStateDuration: Duration.zero,
+      );
+      addTearDown(coordinator.dispose);
+      final service = OpenClashQuickSettingsService(
+        clashService: _clashService(() => current.proxyMode),
+        restartCoordinator: coordinator,
+        transactionIdFactory: () => 'failed-run-mode',
+        commandRunner: (command) async {
+          commands.add(command);
+          if (_isRunModePersistCommand(command)) {
+            current = desired;
+            return 'PROXLY_PERSISTED=1\n';
+          }
+          if (_isLoadCommand(command)) return _settingsOutput(current);
+          return '';
+        },
+        delay: (_) async {},
+      );
+
+      final result = await service.applyChange(
+        original: original,
+        desired: desired,
+        key: key,
+      );
+
+      expect(result.success, isFalse);
+      expect(result.errorCode, 'restart_failed');
+      expect(result.failureStage, '重启或等待 OpenClash 上线');
+      expect(result.changesPersisted, isTrue);
+      expect(result.canRetry, isTrue);
+      expect(result.settings.runVariant, desired.runVariant);
+      expect(result.settings.baseMode, desired.baseMode);
+      final persistCommand = commands.firstWhere(_isRunModePersistCommand);
+      expect(persistCommand, isNot(contains('PROXLY_RUNTIME')));
+      expect(persistCommand, isNot(contains('ruby -ryaml')));
+      expect(commands.where(_isApplyCommand), isEmpty);
+      failRestart = false;
+      expect((await coordinator.retryLast()).success, isTrue);
+      expect(commands.where(_isRunModePersistCommand), hasLength(1));
+    });
+  }
+
+  for (final failure in ['persist', 'base', 'variant']) {
+    test('base switch does not report success after $failure failure',
+        () async {
+      var restarts = 0;
+      final desired = original.copyWith(baseMode: OpenClashBaseMode.redirHost);
+      final coordinator = OpenClashRestartCoordinator(
+        restartCommand: (_) async => restarts++,
+        healthProbe: () async {},
+        delay: (_) async {},
+        requiredHealthyChecks: 1,
+        verificationAttempts: 1,
+        terminalStateDuration: Duration.zero,
+      );
+      addTearDown(coordinator.dispose);
+      final service = OpenClashQuickSettingsService(
+        clashService: _clashService(() => original.proxyMode),
+        restartCoordinator: coordinator,
+        commandRunner: (command) async {
+          if (_isRunModePersistCommand(command)) {
+            if (failure == 'persist') throw StateError('write failed');
+            return 'PROXLY_PERSISTED=1\n';
+          }
+          if (_isLoadCommand(command)) {
+            return _settingsOutput(failure == 'variant'
+                ? desired.copyWith(runVariant: OpenClashRunVariant.tun)
+                : original);
+          }
+          return '';
+        },
+      );
+      final result = await service.applyChange(
+          original: original,
+          desired: desired,
+          key: OpenClashQuickSettingKey.baseMode);
+      expect(result.success, isFalse);
+      expect(result.canRetry, isTrue);
+      expect(result.changesPersisted, failure != 'persist');
+      expect(restarts, failure == 'persist' ? 0 : 1);
+    });
+  }
+
+  test('base mode refuses unknown or combined changes before SSH', () async {
     final commands = <String>[];
-    final coordinator = OpenClashRestartCoordinator(
-      restartCommand: (_) async => throw StateError('restart unavailable'),
-      healthProbe: () async {},
-      delay: (_) async {},
-      initialWait: Duration.zero,
-      requiredHealthyChecks: 1,
-      verificationAttempts: 1,
-      terminalStateDuration: Duration.zero,
-    );
-    addTearDown(coordinator.dispose);
-    final service = OpenClashQuickSettingsService(
-      clashService: _clashService(() => current.proxyMode),
-      restartCoordinator: coordinator,
-      transactionIdFactory: () => 'failed-run-mode',
-      commandRunner: (command) async {
-        commands.add(command);
-        if (_isRunModePersistCommand(command)) {
-          current = desired;
-          return 'PROXLY_PERSISTED=1\n';
-        }
-        if (_isLoadCommand(command)) return _settingsOutput(current);
-        return '';
-      },
-      delay: (_) async {},
-    );
-
-    final result = await service.applyChange(
-      original: original,
-      desired: desired,
-      key: OpenClashQuickSettingKey.runVariant,
-    );
-
-    expect(result.success, isFalse);
-    expect(result.errorCode, 'restart_failed');
-    expect(result.failureStage, '重启或等待 OpenClash 上线');
-    expect(result.changesPersisted, isTrue);
-    expect(result.canRetry, isTrue);
-    expect(result.settings.runVariant, OpenClashRunVariant.tun);
-    final persistCommand = commands.firstWhere(_isRunModePersistCommand);
-    expect(persistCommand, isNot(contains('PROXLY_RUNTIME')));
-    expect(persistCommand, isNot(contains('ruby -ryaml')));
-    expect(commands.where(_isApplyCommand), isEmpty);
+    final service =
+        OpenClashQuickSettingsService(commandRunner: (command) async {
+      commands.add(command);
+      return '';
+    });
+    await expectLater(
+        service.applyChange(
+          original: original,
+          desired: original.copyWith(
+              baseMode: OpenClashBaseMode.redirHost,
+              runVariant: OpenClashRunVariant.tun),
+          key: OpenClashQuickSettingKey.baseMode,
+        ),
+        throwsArgumentError);
+    await expectLater(
+        service.applyChange(
+          original: original.copyWith(baseMode: OpenClashBaseMode.unknown),
+          desired: original,
+          key: OpenClashQuickSettingKey.baseMode,
+        ),
+        throwsA(isA<Exception>()));
+    expect(commands, isEmpty);
   });
 
   test('runtime settings require Ruby before any mutation', () async {

@@ -1,3 +1,4 @@
+import '../widgets/app_popup.dart';
 import 'dart:async';
 import 'dart:collection';
 import 'dart:isolate';
@@ -13,6 +14,8 @@ import '../l10n/app_locale.dart';
 import '../services/app_platform.dart';
 import '../services/clash_config_file_service.dart';
 import '../services/openclash_restart_coordinator.dart';
+import '../services/sftp_support_service.dart';
+import '../widgets/sftp_support_notice.dart';
 import '../theme/app_theme.dart';
 import '../widgets/adaptive_ui.dart';
 import '../widgets/app_feedback.dart';
@@ -30,6 +33,8 @@ class ClashConfigEditorPage extends StatefulWidget {
   final OpenClashRestartCoordinator? restartCoordinator;
   final Future<String> Function(String path)? readFile;
   final Future<void> Function(String path, String content)? writeFile;
+  final Future<void> Function(SftpSupportIssue)? installSftp;
+  final Future<void> Function(SftpSupportIssue)? verifySftp;
 
   const ClashConfigEditorPage({
     super.key,
@@ -40,6 +45,8 @@ class ClashConfigEditorPage extends StatefulWidget {
     this.restartCoordinator,
     this.readFile,
     this.writeFile,
+    this.installSftp,
+    this.verifySftp,
   });
 
   @override
@@ -83,6 +90,7 @@ class _ClashConfigEditorPageState extends State<ClashConfigEditorPage>
   String _savedText = '';
   String? _error;
   String? _message;
+  SftpSupportIssue? _sftpIssue;
 
   @override
   void initState() {
@@ -206,6 +214,7 @@ class _ClashConfigEditorPageState extends State<ClashConfigEditorPage>
       _setEditorText('');
       _loading = true;
       _clearEditorFeedback();
+      _sftpIssue = null;
     });
     try {
       final content =
@@ -215,6 +224,7 @@ class _ClashConfigEditorPageState extends State<ClashConfigEditorPage>
       if (!mounted) return;
       setState(() {
         _setEditorText(content);
+        _sftpIssue = null;
         _dirty = false;
         _fileLoaded = true;
       });
@@ -243,6 +253,7 @@ class _ClashConfigEditorPageState extends State<ClashConfigEditorPage>
       if (!mounted) return true;
       setState(() {
         _savedText = _editorController.text;
+        _sftpIssue = null;
         _dirty = false;
         _savedDuringSession = true;
         _modifiedPaths.add(_file!.path);
@@ -260,26 +271,64 @@ class _ClashConfigEditorPageState extends State<ClashConfigEditorPage>
     }
   }
 
+  Future<void> _chooseFileAction() async {
+    final action = await AppPopup.sheet<String>(
+        context: context,
+        builder: (_) => AppOptionsSheet<String>(title: tr('文件管理'), options: [
+              AppSheetOption(
+                  value: 'upload',
+                  label: tr('上传新配置'),
+                  icon: Icons.upload_file_outlined),
+              AppSheetOption(
+                  value: 'rename',
+                  label: tr('重命名'),
+                  icon: Icons.drive_file_rename_outline,
+                  enabled: _file != null),
+              AppSheetOption(
+                  value: 'export',
+                  label: tr('导出当前内容'),
+                  icon: Icons.ios_share_rounded,
+                  enabled: _fileLoaded),
+              AppSheetOption(
+                  value: 'delete',
+                  label: tr('删除配置'),
+                  icon: Icons.delete_outline,
+                  enabled: _file != null,
+                  destructive: true),
+            ]));
+    if (!mounted || _saving || _loading || _managing) return;
+    switch (action) {
+      case 'upload':
+        await _uploadFile();
+      case 'rename':
+        await _renameFile();
+      case 'export':
+        await _exportFile();
+      case 'delete':
+        await _deleteFile();
+    }
+  }
+
   Future<bool> _confirmPendingChanges() async {
     if (!_dirty) return true;
 
-    final choice = await showDialog<_ExitChoice>(
+    final choice = await AppPopup.dialog<_ExitChoice>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (context) => AppDialog(
         title: Text(tr('保存修改？')),
         content: Text(tr('当前 YAML 配置有未保存修改，继续前要保存吗？')),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(context).pop(_ExitChoice.cancel),
-            child: AdaptiveSingleLineText(tr('取消')),
+            onPressed: () => AppPopup.close(context, _ExitChoice.cancel),
+            child: Text(tr('继续编辑')),
           ),
           TextButton(
-            onPressed: () => Navigator.of(context).pop(_ExitChoice.discard),
-            child: AdaptiveSingleLineText(tr('不保存')),
+            onPressed: () => AppPopup.close(context, _ExitChoice.discard),
+            child: Text(tr('放弃修改')),
           ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(_ExitChoice.save),
-            child: AdaptiveSingleLineText(tr('保存')),
+          FilledButton(
+            onPressed: () => AppPopup.close(context, _ExitChoice.save),
+            child: Text(tr('保存并继续')),
           ),
         ],
       ),
@@ -299,7 +348,7 @@ class _ClashConfigEditorPageState extends State<ClashConfigEditorPage>
       if (!await _confirmPendingChanges() || !mounted) return;
       if (await _needsRestartReminder()) {
         if (!mounted) return;
-        final restart = await showDialog<bool>(
+        final restart = await AppPopup.dialog<bool>(
             context: context,
             builder: (_) => const YamlRestartAfterSaveDialog());
         if (!mounted || restart == null) return;
@@ -377,10 +426,8 @@ class _ClashConfigEditorPageState extends State<ClashConfigEditorPage>
           setState(() => _message = '没有找到 YAML 配置文件，可上传新配置。');
           return;
         }
-        final selected = await showModalBottomSheet<ClashConfigFile>(
+        final selected = await AppPopup.sheet<ClashConfigFile>(
             context: context,
-            showDragHandle: true,
-            isScrollControlled: true,
             builder: (_) => YamlConfigPickerSheet(
                 files: files, activePath: _file?.path, activate: false));
         if (!mounted || selected == null || selected.path == _file?.path) {
@@ -447,12 +494,40 @@ class _ClashConfigEditorPageState extends State<ClashConfigEditorPage>
       });
 
   String _formatError(String action, Object error) {
+    if (error is SftpSupportIssue) _sftpIssue = error;
     if (error is SshPasswordRequiredException) {
       return '请先在设置页填写 SSH 密码';
     }
     final detail = error is FormatException ? error.message : error;
     return '$action失败：$detail';
   }
+
+  Future<void> _recoverSftp({required bool install}) => _manage(() async {
+        final issue = _sftpIssue;
+        if (issue == null) return;
+        if (install) {
+          if (!await SftpSupportNotice.confirm(context, issue) || !mounted) {
+            return;
+          }
+          await (widget.installSftp ??
+              ClashConfigFileService.installSftpSupport)(issue);
+        } else {
+          await (widget.verifySftp ??
+              ClashConfigFileService.verifySftpSupport)(issue);
+        }
+        if (!mounted) return;
+        setState(() {
+          _sftpIssue = null;
+          _clearEditorFeedback();
+        });
+        if (!_fileLoaded) {
+          await _loadFile();
+        } else {
+          // Never replace an unsaved buffer or replay a failed mutation implicitly.
+          setState(() => _message = 'SFTP 已可用，请重新执行刚才的文件操作。');
+          _scheduleEditorFeedback(isError: false);
+        }
+      });
 
   @override
   Widget build(BuildContext context) {
@@ -518,39 +593,12 @@ class _ClashConfigEditorPageState extends State<ClashConfigEditorPage>
               enabled: _fileLoaded && !_managing,
               onSave: _saveFile,
             ),
-            PopupMenuButton<String>(
+            IconButton(
               key: const ValueKey('yaml_editor_file_actions'),
               tooltip: tr('文件管理'),
-              enabled: !_saving && !_loading && !_managing,
-              onSelected: (action) {
-                switch (action) {
-                  case 'upload':
-                    unawaited(_uploadFile());
-                  case 'rename':
-                    unawaited(_renameFile());
-                  case 'export':
-                    unawaited(_exportFile());
-                  case 'delete':
-                    unawaited(_deleteFile());
-                }
-              },
-              itemBuilder: (_) => [
-                PopupMenuItem(value: 'upload', child: Text(tr('上传新配置'))),
-                PopupMenuItem(
-                    value: 'rename',
-                    enabled: _file != null,
-                    child: Text(tr('重命名'))),
-                PopupMenuItem(
-                    value: 'export',
-                    enabled: _fileLoaded,
-                    child: Text(tr('导出当前内容'))),
-                PopupMenuItem(
-                    value: 'delete',
-                    enabled: _file != null,
-                    child: Text(tr('删除配置'),
-                        style: TextStyle(
-                            color: Theme.of(context).colorScheme.error))),
-              ],
+              icon: const Icon(Icons.more_vert_rounded),
+              onPressed:
+                  _saving || _loading || _managing ? null : _chooseFileAction,
             ),
           ],
           bottom: PreferredSize(
@@ -579,12 +627,24 @@ class _ClashConfigEditorPageState extends State<ClashConfigEditorPage>
                       actionLabel: '上传',
                       onAction: _managing ? null : _uploadFile,
                       compact: true),
-                if (_error != null)
+                if (_sftpIssue != null)
+                  SftpSupportNotice(
+                    issue: _sftpIssue!,
+                    busy: _managing || _loading || _saving,
+                    onInstall: () => _recoverSftp(install: true),
+                    onRetry: () => _recoverSftp(install: false),
+                  ),
+                if (_error != null &&
+                    (_sftpIssue == null ||
+                        !_error!.contains(tr(_sftpIssue!.message))))
                   _InfoBanner(
                     message: _error!,
                     color: AppPalette.dark.error,
-                    actionLabel: !_fileLoaded && !_loading ? '重试' : null,
-                    onAction: !_fileLoaded && !_loading ? _loadFile : null,
+                    actionLabel:
+                        !_fileLoaded && !_loading && !_managing ? '重试' : null,
+                    onAction: !_fileLoaded && !_loading && !_managing
+                        ? _loadFile
+                        : null,
                     compact: true,
                   ),
                 if (_message != null)
@@ -609,7 +669,7 @@ class _ClashConfigEditorPageState extends State<ClashConfigEditorPage>
                 YamlEditorShortcutBar(
                   controller: _editorController,
                   focusNode: _editorFocusNode,
-                  enabled: _fileLoaded && !_loading && !_saving,
+                  enabled: _fileLoaded && !_loading && !_saving && !_managing,
                 ),
               ],
             ),

@@ -7,6 +7,7 @@ import 'package:dartssh2/dartssh2.dart';
 
 import 'connection_settings_store.dart';
 import 'ssh_service.dart';
+import 'sftp_support_service.dart';
 
 class SshPasswordRequiredException implements Exception {
   const SshPasswordRequiredException();
@@ -115,6 +116,7 @@ class ClashActiveConfig {
 }
 
 class ClashConfigSshSettings {
+  SftpTarget get target => SftpTarget(host, port, username);
   final String host;
   final int port;
   final String username;
@@ -155,12 +157,13 @@ class ClashConfigFileService {
   static Future<ClashConfigSshSettings> loadSettings({
     String? passwordOverride,
   }) async {
-    final host = await routerHost();
+    final stored = await ConnectionSettingsStore.instance.load();
+    final host = _routerHostFromClashHost(stored.host);
     if (host.isEmpty) {
       throw Exception(tr('请先在设置页填写 OpenClash 地址'));
     }
 
-    final password = passwordOverride ?? await savedPassword();
+    final password = passwordOverride ?? stored.sshPassword;
     if (password.isEmpty) {
       throw const SshPasswordRequiredException();
     }
@@ -171,6 +174,42 @@ class ClashConfigFileService {
       username: 'root',
       password: password,
     );
+  }
+
+  static bool _installingSftp = false;
+
+  static Future<void> verifySftpSupport(SftpSupportIssue issue) async {
+    final settings = await _settingsForSftpIssue(issue);
+    await SshService.withClient(settings.host, settings.password,
+        (client) async {
+      (await SftpSupportService.open(client, settings.target)).close();
+    }, username: settings.username, port: settings.port);
+  }
+
+  static Future<void> installSftpSupport(SftpSupportIssue issue) async {
+    if (_installingSftp) throw StateError(tr('正在安装 SFTP 组件，请稍候。'));
+    _installingSftp = true;
+    try {
+      final settings = await _settingsForSftpIssue(issue);
+      await SshService.withClient(
+          settings.host,
+          settings.password,
+          (client) => SftpSupportService.forClient(client, settings.target)
+              .install(issue),
+          username: settings.username,
+          port: settings.port);
+    } finally {
+      _installingSftp = false;
+    }
+  }
+
+  static Future<ClashConfigSshSettings> _settingsForSftpIssue(
+      SftpSupportIssue issue) async {
+    final settings = await loadSettings();
+    if (!settings.target.matches(issue.target)) {
+      throw StateError(tr('连接设置已改变，请重新检测 SFTP 后再安装。'));
+    }
+    return settings;
   }
 
   static Future<List<ClashConfigFile>> listFiles({
@@ -448,17 +487,25 @@ class ClashConfigFileService {
         'SFTP open',
       );
       try {
-        final bytes = await _withTimeout(file.readBytes(), 'SFTP read');
-        if (bytes.length > maxConfigBytes) {
-          throw Exception(
-            'File is too large (${(bytes.length / 1048576).toStringAsFixed(1)} MB), max 5 MB',
-          );
-        }
-        return bytes;
+        return await _withTimeout(
+            readBoundedConfig(file.read(length: maxConfigBytes + 1)),
+            'SFTP read');
       } finally {
         await _withTimeout(file.close(), 'SFTP close').catchError((_) {});
       }
     });
+  }
+
+  /// Bound actual bytes even when the remote size changes after stat.
+  static Future<Uint8List> readBoundedConfig(Stream<Uint8List> chunks) async {
+    final buffer = BytesBuilder(copy: false);
+    await for (final chunk in chunks) {
+      if (chunk.length > maxConfigBytes - buffer.length) {
+        throw Exception('File is too large, max 5 MB');
+      }
+      buffer.add(chunk);
+    }
+    return buffer.takeBytes();
   }
 
   static Future<void> writeTextFile(
@@ -497,7 +544,7 @@ class ClashConfigFileService {
             'mkdir -p ${_shellQuote(directory)}',
           ).timeout(_sftpTimeout);
         }
-        final sftp = await _withTimeout(client.sftp(), 'SFTP init');
+        final sftp = await SftpSupportService.open(client, settings.target);
         final tmpPath =
             '$safePath.proxly_tmp_${DateTime.now().microsecondsSinceEpoch}';
         try {
@@ -552,7 +599,7 @@ class ClashConfigFileService {
         settings.host,
         settings.password,
         (client) async {
-          final sftp = await _withTimeout(client.sftp(), 'SFTP init');
+          final sftp = await SftpSupportService.open(client, settings.target);
           try {
             final attrs = await _withTimeout(
                 sftp.stat(safeSource, followLink: false), 'SFTP stat');
@@ -637,7 +684,7 @@ class ClashConfigFileService {
     final settings = await loadSettings(passwordOverride: password);
     await SshService.withClient(settings.host, settings.password,
         (client) async {
-      final sftp = await _withTimeout(client.sftp(), 'SFTP init');
+      final sftp = await SftpSupportService.open(client, settings.target);
       try {
         final sourceAttrs = await _withTimeout(
             sftp.stat(safePath, followLink: false), 'SFTP stat');
@@ -709,7 +756,7 @@ class ClashConfigFileService {
       settings.host,
       settings.password,
       (client) async {
-        final sftp = await _withTimeout(client.sftp(), 'SFTP init');
+        final sftp = await SftpSupportService.open(client, settings.target);
         try {
           return await action(sftp);
         } finally {

@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import '../l10n/app_locale.dart';
 import 'clash_host_validator.dart';
 import 'connection_settings_store.dart';
+import 'controller_connection_state.dart';
 
 class ClashConfig {
   final String host;
@@ -284,18 +285,28 @@ class ClashService {
     Future<http.Response> Function() request, {
     Duration timeout = const Duration(seconds: 8),
   }) async {
+    final connection =
+        identical(this, _instance) ? ControllerConnectionState.instance : null;
+    final observation = connection?.observe();
     try {
-      return await request().timeout(timeout);
+      final response = await request().timeout(timeout);
+      if (observation != null) {
+        connection!.reportStatus(observation, response.statusCode);
+      }
+      return response;
     } on TimeoutException {
+      if (observation != null) connection!.reportOffline(observation);
       throw const ClashControllerException(
         ClashControllerFailureKind.timeout,
       );
     } on http.ClientException catch (error) {
+      if (observation != null) connection!.reportOffline(observation);
       throw ClashControllerException(
         ClashControllerFailureKind.unreachable,
         detail: _sanitizeControllerDetail(error.message),
       );
     } on SocketException catch (error) {
+      if (observation != null) connection!.reportOffline(observation);
       throw ClashControllerException(
         ClashControllerFailureKind.unreachable,
         detail: _sanitizeControllerDetail(error.message),

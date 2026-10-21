@@ -6,13 +6,181 @@ import 'package:proxly/app_route_observer.dart';
 import 'package:proxly/l10n/app_locale.dart';
 import 'package:proxly/pages/clash_config_editor_page.dart';
 import 'package:proxly/services/clash_config_file_service.dart';
+import 'package:proxly/widgets/adaptive_ui.dart';
 import 'package:proxly/widgets/dashboard/dashboard_controls.dart';
+import 'package:proxly/widgets/dashboard/home_app_bar.dart';
+import 'package:proxly/widgets/dashboard/quick_settings_card.dart';
 import 'package:proxly/services/openclash_quick_settings_service.dart';
 import 'package:proxly/services/openclash_restart_coordinator.dart';
 import 'package:proxly/theme/app_theme.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
+  void showAllCards(WidgetTester tester) {
+    tester.view.physicalSize = const Size(420, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+  }
+
+  testWidgets('quick options share one track with only selected outlines',
+      (tester) async {
+    showAllCards(tester);
+    tester.view.physicalSize = const Size(600, 2400);
+    SharedPreferences.setMockInitialValues({'app_language': 'en'});
+    await AppLocaleController.instance.load();
+    await tester.pumpWidget(MaterialApp(
+        theme: AppTheme.light(),
+        home: _DashboardHarness(
+            quickSettingsService: _FakeQuickSettingsService())));
+    await tester.pumpAndSettle();
+    expect(find.text('Fake-IP'), findsOneWidget);
+    expect(find.text('Redir-Host'), findsOneWidget);
+    expect(tester.getBottomLeft(find.text('Fake-IP')).dy,
+        lessThan(tester.getTopLeft(find.text('Running mode')).dy));
+    for (final group in ['base', 'run', 'proxy', 'area']) {
+      final buttons = find.descendant(
+          of: find.byKey(ValueKey('quick_setting_${group}_group')),
+          matching: find.byType(AdaptiveSelectionButton));
+      Rect? previous;
+      var selectedCount = 0;
+      for (final element in buttons.evaluate()) {
+        final button = element.widget as AdaptiveSelectionButton;
+        final finder = find.byWidget(button);
+        final bounds = tester.getRect(finder);
+        if (previous != null) {
+          expect(bounds.top, previous.top);
+          expect(bounds.left, previous.right);
+          expect(bounds.width, closeTo(previous.width, 0.01));
+        }
+        previous = bounds;
+        final container = tester.widget<AnimatedContainer>(find.descendant(
+            of: finder, matching: find.byType(AnimatedContainer)));
+        final border =
+            (container.decoration! as BoxDecoration).border! as Border;
+        expect(
+            border.top.color,
+            button.selected
+                ? AppTheme.light().colorScheme.primary
+                : Colors.transparent);
+        if (button.selected) selectedCount++;
+      }
+      expect(selectedCount, 1);
+    }
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('parallel dashboard loads share one indicator until both finish',
+      (tester) async {
+    showAllCards(tester);
+    SharedPreferences.setMockInitialValues({'app_language': 'en'});
+    await AppLocaleController.instance.load();
+    final service = _FakeQuickSettingsService()..loadGate = Completer<void>();
+    final config = Completer<ClashActiveConfig>();
+    await tester.pumpWidget(MaterialApp(
+        home: _DashboardHarness(
+      quickSettingsService: service,
+      loadActiveConfig: () => config.future,
+    )));
+    await tester.pump();
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    config.complete(const ClashActiveConfig(
+        file: ClashConfigFile(path: '/etc/openclash/config/active.yaml')));
+    await tester.pump();
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    service.loadGate!.complete();
+    await tester.pumpAndSettle();
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+    service.loadGate = Completer<void>();
+    await tester.pump(const Duration(seconds: 5));
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+    service.loadGate!.complete();
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets(
+      'offline startup stays quiet and recovery reloads YAML immediately',
+      (tester) async {
+    showAllCards(tester);
+    SharedPreferences.setMockInitialValues({'app_language': 'en'});
+    await AppLocaleController.instance.load();
+    final service = _FakeQuickSettingsService()
+      ..loadError = StateError('offline');
+    var offline = true;
+    var loads = 0;
+    Future<ClashActiveConfig> load() async {
+      loads++;
+      if (offline) throw StateError('offline');
+      return const ClashActiveConfig(
+          file: ClashConfigFile(path: '/etc/openclash/config/recovered.yaml'));
+    }
+
+    Future<void> pump(int revision) async {
+      await tester.pumpWidget(MaterialApp(
+          home: _DashboardHarness(
+        quickSettingsService: service,
+        loadActiveConfig: load,
+        recoveryRevision: revision,
+      )));
+      await tester.pump();
+    }
+
+    await pump(0);
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+    expect(find.byKey(const ValueKey('app_feedback_banner')), findsNothing);
+    expect(find.textContaining('Current configuration unavailable'),
+        findsOneWidget);
+    offline = false;
+    service.loadError = null;
+    await pump(1);
+    expect(loads, 2);
+    expect(find.text('recovered.yaml'), findsOneWidget);
+    expect(
+        find.textContaining('Current configuration unavailable'), findsNothing);
+    expect(
+        find.textContaining('Quick settings could not refresh'), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('recovery waits for stale reads and discards their failures',
+      (tester) async {
+    showAllCards(tester);
+    SharedPreferences.setMockInitialValues({'app_language': 'en'});
+    await AppLocaleController.instance.load();
+    final service = _FakeQuickSettingsService();
+    final stale = Completer<ClashActiveConfig>();
+    var loads = 0;
+    Future<ClashActiveConfig> load() {
+      loads++;
+      if (loads == 1) return stale.future;
+      return Future.value(const ClashActiveConfig(
+          file: ClashConfigFile(path: '/etc/openclash/config/new.yaml')));
+    }
+
+    Future<void> pump(int revision) async {
+      await tester.pumpWidget(MaterialApp(
+          home: _DashboardHarness(
+        quickSettingsService: service,
+        loadActiveConfig: load,
+        recoveryRevision: revision,
+      )));
+      await tester.pump();
+    }
+
+    await pump(0);
+    await pump(1);
+    expect(loads, 1);
+    stale.completeError(StateError('stale offline result'));
+    await tester.pumpAndSettle();
+    expect(loads, 2);
+    expect(find.text('new.yaml'), findsOneWidget);
+    expect(find.textContaining('stale offline result'), findsNothing);
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+  });
+
   testWidgets(
       'inactive dashboard does not poll and slow refreshes cannot overlap',
       (tester) async {
@@ -96,6 +264,9 @@ void main() {
     await tester.tap(find.text('other.yaml'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 350));
+    // The confirmation opens after the sheet overlay has been removed.
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 250));
     expect(find.text('Switch the active configuration?'), findsOneWidget);
     await tester.tap(find.text('Cancel'));
     await tester.pumpAndSettle();
@@ -158,6 +329,9 @@ void main() {
     await tester.tap(find.text('selected.yaml'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 350));
+    // The confirmation opens after the sheet overlay has been removed.
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 250));
     expect(events, isEmpty);
     await tester.tap(find.text('Switch and restart'));
     await tester.pumpAndSettle();
@@ -198,7 +372,7 @@ void main() {
       );
       await tester.pump();
 
-      expect(find.text('Dashboard'), findsOneWidget);
+      expect(find.text('Home'), findsOneWidget);
       expect(find.text('Runtime actions'), findsOneWidget);
       expect(find.text('Quick settings'), findsOneWidget);
       expect(find.text('Clear DNS cache'), findsOneWidget);
@@ -227,7 +401,8 @@ void main() {
     }
   });
 
-  testWidgets('control cards retain maintenance button geometry and shared theme',
+  testWidgets(
+      'control cards align action sizes and spacing while retaining theme colors',
       (tester) async {
     SharedPreferences.setMockInitialValues({'app_language': 'en'});
     await AppLocaleController.instance.load();
@@ -250,7 +425,8 @@ void main() {
 
     final maintenanceY = tester.getTopLeft(find.text('Runtime actions')).dy;
     final quickSettingsY = tester.getTopLeft(find.text('Quick settings')).dy;
-    final activeConfigY = tester.getTopLeft(find.text('Current configuration')).dy;
+    final activeConfigY =
+        tester.getTopLeft(find.text('Current configuration')).dy;
     final restartY =
         tester.getTopLeft(find.byKey(const ValueKey('maintenance_restart'))).dy;
     final dnsY = tester
@@ -289,10 +465,33 @@ void main() {
         ),
       );
       expect(
-        button.style,
+        button.style?.backgroundColor,
         isNull,
-        reason: '$key must inherit the shared FilledButton theme',
+        reason: '$key must inherit the shared FilledButton theme color',
       );
+    }
+    for (final keys in [
+      ['maintenance_flush_dns', 'maintenance_close_connections'],
+      ['current_config_switch', 'current_config_edit'],
+    ]) {
+      final left = tester.getRect(find.byKey(ValueKey(keys.first)));
+      final right = tester.getRect(find.byKey(ValueKey(keys.last)));
+      expect(left.top, right.top);
+      expect(left.size, right.size);
+      expect(left.height, 48);
+      expect(right.left - left.right, 8);
+    }
+    final restart =
+        tester.getRect(find.byKey(const ValueKey('maintenance_restart')));
+    final dns =
+        tester.getRect(find.byKey(const ValueKey('maintenance_flush_dns')));
+    expect(restart.height, 48);
+    expect(dns.top - restart.bottom, 8);
+    final quickButtons = find.descendant(
+        of: find.byType(OpenClashQuickSettingsCard),
+        matching: find.byType(AdaptiveSelectionButton));
+    for (final element in quickButtons.evaluate()) {
+      expect(tester.getSize(find.byWidget(element.widget)).height, 48);
     }
     expect(maintenanceY, lessThan(quickSettingsY));
     expect(quickSettingsY, lessThan(activeConfigY));
@@ -401,7 +600,9 @@ void main() {
     await tester.tap(find.text('open'));
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('Changes apply immediately'), findsOneWidget);
+    await tester.ensureVisible(find.byKey(
+        const ValueKey('quick_setting_proxy_OpenClashProxyMode.global')));
+    await tester.pump();
     await tester.tap(
       find.byKey(
         const ValueKey(
@@ -413,7 +614,7 @@ void main() {
     expect(service.applyCount, 1);
     expect(restartCount, 0);
 
-    await tester.tap(find.byTooltip('Back'));
+    Navigator.of(tester.element(find.byType(_DashboardHarness))).pop();
     await tester.pumpAndSettle();
     expect(find.text('open'), findsOneWidget);
     expect(find.text('Apply quick settings?'), findsNothing);
@@ -430,6 +631,13 @@ void main() {
       OpenClashQuickSettingKey key,
       Finder Function() finder,
     })>[
+      (
+        name: 'base mode',
+        key: OpenClashQuickSettingKey.baseMode,
+        finder: () => find.byKey(
+              const ValueKey('quick_setting_base_OpenClashBaseMode.redirHost'),
+            ),
+      ),
       (
         name: 'run variant',
         key: OpenClashQuickSettingKey.runVariant,
@@ -538,6 +746,9 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    await tester.ensureVisible(find.byKey(
+        const ValueKey('quick_setting_proxy_OpenClashProxyMode.global')));
+    await tester.pump();
     await tester.tap(
       find.byKey(
         const ValueKey('quick_setting_proxy_OpenClashProxyMode.global'),
@@ -659,6 +870,9 @@ void main() {
     await tester.pump();
     expect(service.loadCount, 2);
 
+    await tester.ensureVisible(find.byKey(
+        const ValueKey('quick_setting_proxy_OpenClashProxyMode.global')));
+    await tester.pump();
     await tester.tap(
       find.byKey(
         const ValueKey('quick_setting_proxy_OpenClashProxyMode.global'),
@@ -720,6 +934,9 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(
+        const ValueKey('quick_setting_proxy_OpenClashProxyMode.global')));
+    await tester.pump();
     await tester.tap(
       find.byKey(
         const ValueKey('quick_setting_proxy_OpenClashProxyMode.global'),
@@ -907,24 +1124,33 @@ class _DashboardHarness extends StatelessWidget {
   final bool autoLoad;
   final OpenClashQuickSettingsService? quickSettingsService;
   final OpenClashRestartCoordinator? restartCoordinator;
+  final Future<ClashActiveConfig> Function()? loadActiveConfig;
+  final int recoveryRevision;
   const _DashboardHarness(
       {this.autoLoad = true,
+      this.loadActiveConfig,
+      this.recoveryRevision = 0,
       this.quickSettingsService,
       this.restartCoordinator});
   @override
-  Widget build(BuildContext context) => DashboardControls(
+  Widget build(BuildContext context) => AppLocaleScope(
+      controller: AppLocaleController.instance,
+      child: DashboardControls(
         autoLoad: autoLoad,
+        loadActiveConfig:
+            loadActiveConfig ?? () async => const ClashActiveConfig(file: null),
+        recoveryRevision: recoveryRevision,
         quickSettingsService: quickSettingsService,
         restartCoordinator: restartCoordinator,
         builder: (context, cards) => Scaffold(
-          appBar: AppBar(title: const Text('Dashboard'), actions: [
-            if (cards.activityLabel != null)
-              const SizedBox(
-                  key: ValueKey('dashboard_activity_indicator'),
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2)),
-          ]),
+          appBar: HomeAppBar(
+            showConsoleButton: false,
+            backgroundColor: Colors.white,
+            foregroundColor: Colors.black,
+            dividerColor: Colors.black12,
+            onConsolePressed: () {},
+            activityLabel: cards.activityLabel,
+          ),
           body: ListView(
               physics: const ClampingScrollPhysics(),
               padding: const EdgeInsets.all(16),
@@ -936,5 +1162,5 @@ class _DashboardHarness extends StatelessWidget {
                 cards.currentYaml,
               ]),
         ),
-      );
+      ));
 }

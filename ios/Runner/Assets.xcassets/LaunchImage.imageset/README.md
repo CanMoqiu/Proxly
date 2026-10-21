@@ -1,5 +1,13 @@
 # Launch Screen Assets
 
-You can customize the launch screen with your own desired assets by replacing the image files in this directory.
+The launch screen uses `LaunchImage.pdf`, a 96-point icon with a 22-point rounded
+clipping path. The PDF embeds the existing `LaunchImage@3x.png` artwork unchanged;
+Xcode rasterizes it for each device scale. The PNG files remain source references.
 
-You can also do it by opening your Flutter project's Xcode project with `open ios/Runner.xcworkspace`, selecting `Runner/Assets.xcassets` in the Project Navigator and dropping in the desired images.
+The rounded shape is part of the asset because launch storyboards cannot use
+runtime attributes such as `layer.cornerRadius`. The app name is a native label
+in `Base.lproj/LaunchScreen.storyboard`, keeping text sharp at every screen scale.
+
+To regenerate the PDF after changing the source artwork, install Python's
+`reportlab` package and run `python scripts/generate_ios_launch_icon.py` from the
+repository root. This is an asset-authoring step, not a build dependency.

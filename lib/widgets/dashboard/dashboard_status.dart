@@ -8,6 +8,8 @@ import '../../services/clash_service.dart';
 import '../../services/clash_data_hub.dart';
 import '../../services/core_version_lookup.dart';
 import '../../services/connection_settings_store.dart';
+import '../../services/connection_feedback.dart';
+import '../../services/controller_connection_state.dart';
 import '../../services/openclash_restart_coordinator.dart';
 
 class DashboardStatus extends StatefulWidget {
@@ -47,6 +49,8 @@ class _DashboardStatusState extends State<DashboardStatus>
   bool _forceFetchRequested = false;
   bool _connectionReloadPending = false;
   bool _clashOnline = false;
+  bool _recoveryPending = false;
+  int _recoveryRevision = 0;
   String _coreVersion = '--';
   final _versionLookup = CoreVersionLookup(
     load: () async =>
@@ -54,6 +58,7 @@ class _DashboardStatusState extends State<DashboardStatus>
   );
   int _lastSnapshotSequence = 0;
   final ClashDataHub _dataHub = ClashDataHub.instance;
+  final _connection = ControllerConnectionState.instance;
   late final OpenClashRestartCoordinator _restartCoordinator;
   late OpenClashRestartPhase _lastRestartPhase;
 
@@ -65,6 +70,7 @@ class _DashboardStatusState extends State<DashboardStatus>
     _lastRestartPhase = _restartCoordinator.phase;
     WidgetsBinding.instance.addObserver(this);
     _dataHub.addListener(_handleDataHubChanged);
+    _connection.addListener(_handleConnectionStateChanged);
     ConnectionSettingsStore.instance.addListener(
       _handleConnectionSettingsChanged,
     );
@@ -84,6 +90,7 @@ class _DashboardStatusState extends State<DashboardStatus>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _dataHub.removeListener(_handleDataHubChanged);
+    _connection.removeListener(_handleConnectionStateChanged);
     ConnectionSettingsStore.instance.removeListener(
       _handleConnectionSettingsChanged,
     );
@@ -91,6 +98,29 @@ class _DashboardStatusState extends State<DashboardStatus>
     _timer?.cancel();
     _versionLookup.reset();
     super.dispose();
+  }
+
+  void _handleConnectionStateChanged() {
+    if (!mounted || _connection.phase == ControllerConnectionPhase.restarting) {
+      return;
+    }
+    final online = _connection.phase == ControllerConnectionPhase.online;
+    final reconnected = online && !_clashOnline;
+    setState(() {
+      _clashOnline = online;
+      _error = _connection.message;
+      _loading = false;
+      if (!online) {
+        _recoveryPending = true;
+      } else if (_recoveryPending) {
+        _recoveryRevision++;
+        _recoveryPending = false;
+      }
+    });
+    if (reconnected) {
+      unawaited(_loadVersionInfo());
+      unawaited(_fetchData(force: true));
+    }
   }
 
   void _handleRestartStateChanged() {
@@ -203,13 +233,16 @@ class _DashboardStatusState extends State<DashboardStatus>
           setState(() {
             _loading = false;
             _clashOnline = false;
+            _recoveryPending = true;
             _error = '请先在设置页填写 Clash 地址';
           });
         }
         return;
       }
 
+      final generation = _connection.generation;
       final snapshot = await _dataHub.refresh(force: force);
+      if (generation != _connection.generation || !_canApplySnapshot) return;
       _applyRealtimeSnapshot(snapshot);
     } catch (e) {
       if (mounted) {
@@ -217,7 +250,8 @@ class _DashboardStatusState extends State<DashboardStatus>
           _loading = false;
           if (!_restartCoordinator.isBusy) {
             _clashOnline = false;
-            _error = '错误：$e';
+            _recoveryPending = true;
+            _error = ConnectionFeedback.forError(e);
           }
         });
       }
@@ -227,8 +261,16 @@ class _DashboardStatusState extends State<DashboardStatus>
   void _handleDataHubChanged() {
     final snapshot = _dataHub.snapshot;
     if (snapshot == null || !mounted || !widget.active || !_foreground) return;
+    // A reset baseline is cached data, not evidence of a recovered connection.
+    if (snapshot.updatedAt.millisecondsSinceEpoch == 0) return;
+    if (!_canApplySnapshot) return;
     _applyRealtimeSnapshot(snapshot);
   }
+
+  bool get _canApplySnapshot =>
+      _connection.phase != ControllerConnectionPhase.offline &&
+      _connection.phase != ControllerConnectionPhase.unauthorized &&
+      _connection.phase != ControllerConnectionPhase.restarting;
 
   void _applyRealtimeSnapshot(ClashRealtimeSnapshot snapshot) {
     if (!mounted || snapshot.sequence == _lastSnapshotSequence) return;
@@ -243,6 +285,10 @@ class _DashboardStatusState extends State<DashboardStatus>
     _uploadSpeeds.add(snapshot.uploadSpeed);
 
     setState(() {
+      if (_recoveryPending) {
+        _recoveryRevision++;
+        _recoveryPending = false;
+      }
       _loading = false;
       _error = null;
       _clashOnline = true;
@@ -262,6 +308,8 @@ class _DashboardStatusState extends State<DashboardStatus>
     return widget.builder(
         context,
         DashboardStatusCards(
+          activityLabel: _loading && widget.active ? tr('正在读取...') : null,
+          recoveryRevision: _recoveryRevision,
           status: ClashStatusCard(
               loading: _loading && widget.active,
               error: _error,
@@ -286,6 +334,12 @@ class _DashboardStatusState extends State<DashboardStatus>
 
 class DashboardStatusCards {
   final Widget status, traffic, overview;
+  final String? activityLabel;
+  final int recoveryRevision;
   const DashboardStatusCards(
-      {required this.status, required this.traffic, required this.overview});
+      {required this.status,
+      required this.traffic,
+      required this.overview,
+      required this.activityLabel,
+      required this.recoveryRevision});
 }

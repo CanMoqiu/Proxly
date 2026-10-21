@@ -8,8 +8,6 @@ class HomeAppBar extends StatelessWidget implements PreferredSizeWidget {
   final Color foregroundColor;
   final Color dividerColor;
   final VoidCallback onConsolePressed;
-  final VoidCallback onCustomizePressed;
-  final bool editing;
   final String? activityLabel;
 
   const HomeAppBar({
@@ -19,8 +17,6 @@ class HomeAppBar extends StatelessWidget implements PreferredSizeWidget {
     required this.foregroundColor,
     required this.dividerColor,
     required this.onConsolePressed,
-    required this.onCustomizePressed,
-    this.editing = false,
     this.activityLabel,
   });
 
@@ -55,26 +51,17 @@ class HomeAppBar extends StatelessWidget implements PreferredSizeWidget {
       centerTitle: true,
       actions: [
         if (activityLabel != null)
-          Center(
-              child: Semantics(
-                  label: activityLabel,
-                  liveRegion: true,
-                  child: const SizedBox(
-                      key: ValueKey('dashboard_activity_indicator'),
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2)))),
-        IconButton(
-          key: const ValueKey('home_customize_button'),
-          tooltip: tr(editing ? '完成' : '自定义首页'),
-          onPressed: onCustomizePressed,
-          style: IconButton.styleFrom(overlayColor: Colors.transparent),
-          icon: Icon(
-              editing
-                  ? Icons.check_rounded
-                  : Icons.dashboard_customize_outlined,
-              color: foregroundColor),
-        ),
+          Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Center(
+                  child: Semantics(
+                      label: activityLabel,
+                      liveRegion: true,
+                      child: const SizedBox(
+                          key: ValueKey('dashboard_activity_indicator'),
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2))))),
       ],
       bottom: PreferredSize(
         preferredSize: const Size.fromHeight(0.5),

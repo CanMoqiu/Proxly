@@ -1,10 +1,90 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:proxly/services/web_panel_service.dart';
+import 'package:proxly/services/controller_connection_state.dart';
 
 void main() {
+  test(
+      'panel observations update shared state and old bridges cannot update new controllers',
+      () async {
+    final state = ControllerConnectionState();
+    addTearDown(state.dispose);
+    var status = 401;
+    final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    upstream.listen((request) async {
+      request.response.statusCode = status;
+      await request.response.close();
+    });
+    addTearDown(() => upstream.close(force: true));
+    final bridge = WebPanelControllerBridge(
+        hostname: '127.0.0.1',
+        port: upstream.port,
+        token: '',
+        connectionState: state);
+    final server =
+        AssetHttpServer('assets/web_panel', controllerBridge: bridge);
+    await server.start();
+    addTearDown(server.close);
+    final client = HttpClient();
+    addTearDown(() => client.close(force: true));
+    Future<void> request() async {
+      final request = await client.getUrl(Uri.parse(
+          'http://127.0.0.1:${server.port}${bridge.secondaryPath}/version'));
+      await (await request.close()).drain<void>();
+    }
+
+    await request();
+    expect(state.phase, ControllerConnectionPhase.unauthorized);
+    status = 200;
+    await request();
+    expect(state.phase, ControllerConnectionPhase.online);
+    state.reset();
+    await request();
+    expect(state.phase, ControllerConnectionPhase.unknown);
+  });
+
+  test('upstream WebSocket closure marks the shared controller offline',
+      () async {
+    final state = ControllerConnectionState();
+    final online = Completer<void>();
+    state.addListener(() {
+      if (state.phase == ControllerConnectionPhase.online &&
+          !online.isCompleted) {
+        online.complete();
+      }
+    });
+    addTearDown(state.dispose);
+    final accepted = Completer<WebSocket>();
+    final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    upstream.listen((request) async {
+      final socket = await WebSocketTransformer.upgrade(request);
+      socket.listen((_) {});
+      accepted.complete(socket);
+    });
+    addTearDown(() => upstream.close(force: true));
+    final bridge = WebPanelControllerBridge(
+        hostname: '127.0.0.1',
+        port: upstream.port,
+        token: '',
+        connectionState: state);
+    final server =
+        AssetHttpServer('assets/web_panel', controllerBridge: bridge);
+    await server.start();
+    addTearDown(server.close);
+    final downstream = await WebSocket.connect(
+        'ws://127.0.0.1:${server.port}${bridge.secondaryPath}/traffic');
+    final closed = Completer<void>();
+    downstream.listen((_) {}, onDone: closed.complete);
+    await online.future.timeout(const Duration(seconds: 3));
+    expect(state.phase, ControllerConnectionPhase.online);
+    await (await accepted.future).close(WebSocketStatus.goingAway);
+    await closed.future.timeout(const Duration(seconds: 3));
+    expect(state.phase, ControllerConnectionPhase.offline);
+  });
+
   test('gzip upstream bytes are decoded exactly once by the browser client',
       () async {
     const payload = '{"version":"test-gzip"}';
@@ -143,5 +223,45 @@ void main() {
 
     expect(response.statusCode, HttpStatus.found);
     expect(redirectedRequests, 0);
+  });
+  test('WebSocket redirects must not forward controller authentication',
+      () async {
+    String? receivedAuth;
+    var requests = 0;
+    final target = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    target.listen((request) async {
+      requests++;
+      receivedAuth = request.headers.value(HttpHeaders.authorizationHeader);
+      request.response.statusCode = 400;
+      await request.response.close();
+    });
+    addTearDown(() => target.close(force: true));
+    final upstream = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    upstream.listen((request) async {
+      request.response.statusCode = 302;
+      request.response.headers.set(HttpHeaders.locationHeader,
+          'http://127.0.0.1:${target.port}/redirect-target');
+      await request.response.close();
+    });
+    addTearDown(() => upstream.close(force: true));
+    final bridge = WebPanelControllerBridge(
+        hostname: '127.0.0.1',
+        port: upstream.port,
+        token: 'synthetic-audit-token');
+    final server =
+        AssetHttpServer('assets/web_panel', controllerBridge: bridge);
+    await server.start();
+    addTearDown(server.close);
+    try {
+      final socket = await WebSocket.connect(
+              'ws://127.0.0.1:${server.port}${bridge.secondaryPath}/traffic')
+          .timeout(const Duration(seconds: 5));
+      await socket.close();
+    } on WebSocketException {
+      // A rejected upstream redirect is expected.
+    }
+    expect(receivedAuth, isNull,
+        reason: 'A different server received the controller Bearer header');
+    expect(requests, 0, reason: 'The bridge followed a WebSocket redirect');
   });
 }
