@@ -59,6 +59,8 @@ void main() {
       'config/language': 'zh-CN',
       'config/connection-display-style': 'table',
       'config/disable-pull-to-refresh': 'true',
+      'config/swipe-in-pages': 'true',
+      'config/swipe-in-tabs': 'true',
       'cache/auto-sync-settings-hash': 'hash',
       'config/private': 'controller-secret',
       'config/object': {'authorization': 'Bearer leaked'},
@@ -66,7 +68,7 @@ void main() {
 
     expect(result, isNotNull);
     expect(result!.acceptedCount, 2);
-    expect(result.skippedCount, 7);
+    expect(result.skippedCount, 9);
     final prefs = await SharedPreferences.getInstance();
     final saved = jsonDecode(
       prefs.getString(ZashboardSettingsImportService.preferenceKey)!,

@@ -5,6 +5,7 @@ import '../../theme/app_theme.dart';
 import '../adaptive_ui.dart';
 import '../../services/clash_config_file_service.dart';
 import 'operation_button.dart';
+import 'dashboard_button_style.dart';
 
 class CurrentYamlCard extends StatelessWidget {
   final ClashActiveConfig? activeConfig;
@@ -43,7 +44,7 @@ class CurrentYamlCard extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         color: cardBg,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(color: cardBorder, width: 0.5),
       ),
       padding: const EdgeInsets.all(16),
@@ -51,69 +52,66 @@ class CurrentYamlCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            children: [
-              Expanded(
-                child: AdaptiveSingleLineText(
-                  dashboardCardTitle(DashboardCardId.currentYaml),
-                  alignment: Alignment.centerLeft,
-                  textAlign: TextAlign.left,
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: textColor,
-                  ),
-                ),
-              ),
-              IconButton(
-                tooltip: tr('刷新当前配置'),
-                visualDensity: VisualDensity.compact,
-                onPressed: loading || operationBusy ? null : onRefresh,
-                icon: loading
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : Icon(Icons.refresh_rounded, size: 20, color: hintColor),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(
-                activeConfig?.usesYaml == true
-                    ? Icons.description_outlined
-                    : Icons.link_off_rounded,
-                size: 20,
-                color: hintColor,
-              ),
-              const SizedBox(width: 10),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      tr(
-                        loading
-                            ? '正在读取...'
-                            : (activeConfig?.displayText ?? '尚未读取'),
+                    AdaptiveSingleLineText(
+                      dashboardCardTitle(DashboardCardId.currentYaml),
+                      alignment: Alignment.centerLeft,
+                      textAlign: TextAlign.left,
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: textColor,
                       ),
-                      style: TextStyle(fontSize: 13, color: textColor),
                     ),
-                    const SizedBox(height: 4),
-                    Text(
-                      tr(activeConfig?.detailText ?? '读取 OpenClash 当前使用的配置来源'),
-                      style: TextStyle(fontSize: 11, color: hintColor),
+                    const SizedBox(height: 16),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(
+                          activeConfig?.usesYaml == true
+                              ? Icons.description_outlined
+                              : Icons.link_off_rounded,
+                          size: 20,
+                          color: hintColor,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            tr(loading
+                                ? '正在读取...'
+                                : (activeConfig?.displayText ?? '尚未读取')),
+                            style: TextStyle(fontSize: 13, color: textColor),
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
               ),
+              const SizedBox(width: 8),
+              IconButton(
+                tooltip: tr('刷新当前配置'),
+                style: DashboardButtonStyle.icon,
+                onPressed: loading || operationBusy ? null : onRefresh,
+                icon: Icon(Icons.refresh_rounded, size: 20, color: hintColor),
+              ),
             ],
           ),
+          const SizedBox(height: 4),
+          Padding(
+            padding: const EdgeInsetsDirectional.only(start: 28),
+            child: Text(
+              tr(activeConfig?.detailText ?? '读取 OpenClash 当前使用的配置来源'),
+              style: TextStyle(fontSize: 11, color: hintColor),
+            ),
+          ),
           if (message != null) ...[
-            const SizedBox(height: 10),
+            const SizedBox(height: 12),
             Text(
               tr(message!),
               style: TextStyle(
@@ -124,23 +122,24 @@ class CurrentYamlCard extends StatelessWidget {
               ),
             ),
           ],
-          const SizedBox(height: 14),
+          const SizedBox(height: 16),
           Row(children: [
             Expanded(
                 child: DashboardOperationButton(
               key: const ValueKey('current_config_switch'),
               label: tr(switching ? '处理中' : '切换配置'),
               icon: Icons.swap_horiz_rounded,
-              loading: switching,
               enabled: !operationBusy && !loading,
               onTap: onSwitch,
             )),
-            const SizedBox(width: 10),
+            const SizedBox(width: DashboardButtonStyle.spacing),
             Expanded(
                 child: OutlinedButton.icon(
               key: const ValueKey('current_config_edit'),
               onPressed: operationBusy || loading ? null : onEdit,
-              icon: const Icon(Icons.edit_outlined, size: 18),
+              style: DashboardButtonStyle.action,
+              icon: const Icon(Icons.edit_outlined,
+                  size: DashboardButtonStyle.iconSize),
               label: AdaptiveSingleLineText(tr('编辑配置')),
             ))
           ]),

@@ -1,3 +1,4 @@
+import '../app_popup.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -11,7 +12,6 @@ import '../../services/connection_settings_store.dart';
 import '../../services/openclash_quick_settings_service.dart';
 import '../../services/openclash_restart_coordinator.dart';
 import '../../theme/app_theme.dart';
-import '../adaptive_ui.dart';
 import '../app_feedback.dart';
 import '../../pages/clash_config_editor_page.dart';
 import '../yaml_config_picker.dart';
@@ -24,6 +24,7 @@ class DashboardControls extends StatefulWidget {
   final bool active;
   final bool refreshConfig;
   final bool refreshQuickSettings;
+  final int recoveryRevision;
   final Widget Function(BuildContext, DashboardControlCards) builder;
   final Future<ClashActiveConfig> Function()? loadActiveConfig;
   final Future<List<ClashConfigFile>> Function()? listFiles;
@@ -38,6 +39,7 @@ class DashboardControls extends StatefulWidget {
     this.active = true,
     this.refreshConfig = true,
     this.refreshQuickSettings = true,
+    this.recoveryRevision = 0,
     required this.builder,
     this.loadActiveConfig,
     this.listFiles,
@@ -70,7 +72,9 @@ class _DashboardControlsState extends State<DashboardControls>
   bool _loadingConfig = false;
   bool _loadingQuickSettings = false;
   bool _readingQuickSettings = false;
+  bool _quickSettingsReadFailed = false;
   bool _readingConfig = false;
+  bool _configReadFailed = false;
   int _connectionEpoch = 0;
   bool _switchingConfig = false;
   bool _flushingDns = false;
@@ -114,7 +118,7 @@ class _DashboardControlsState extends State<DashboardControls>
         if (!mounted) return;
         _routeVisible = ModalRoute.of<void>(context)?.isCurrent ?? true;
         _syncAutoSyncTimer();
-        if (_autoSyncEnabled) unawaited(_refreshPage());
+        if (_autoSyncEnabled) unawaited(_refreshPage(silent: true));
       });
     }
   }
@@ -122,6 +126,13 @@ class _DashboardControlsState extends State<DashboardControls>
   @override
   void didUpdateWidget(covariant DashboardControls oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.recoveryRevision != widget.recoveryRevision) {
+      // Invalidate reads started offline; their finally blocks queue one fresh
+      // read after completion instead of opening overlapping SSH sessions.
+      _configMutationEpoch++;
+      _quickSettingsMutationEpoch++;
+      _refreshVisibleStatus();
+    }
     if (oldWidget.active != widget.active ||
         oldWidget.refreshConfig != widget.refreshConfig ||
         oldWidget.refreshQuickSettings != widget.refreshQuickSettings) {
@@ -215,6 +226,8 @@ class _DashboardControlsState extends State<DashboardControls>
       _activeConfig = null;
       _quickSettings = null;
       _configMessage = null;
+      _configReadFailed = false;
+      _quickSettingsReadFailed = false;
     });
     _refreshVisibleStatus();
   }
@@ -244,7 +257,9 @@ class _DashboardControlsState extends State<DashboardControls>
     _readingQuickSettings = true;
     final connectionEpoch = _connectionEpoch;
     final startedEpoch = _quickSettingsMutationEpoch;
-    if (!silent) setState(() => _loadingQuickSettings = true);
+    final showLoading =
+        !silent || (_quickSettings == null && !_quickSettingsReadFailed);
+    if (showLoading) setState(() => _loadingQuickSettings = true);
     try {
       final settings = await _quickSettingsService.load();
       if (!mounted || connectionEpoch != _connectionEpoch) return;
@@ -254,10 +269,17 @@ class _DashboardControlsState extends State<DashboardControls>
       }
       setState(() {
         _quickSettings = settings;
-        if (!silent) _loadingQuickSettings = false;
+        _quickSettingsReadFailed = false;
+        if (showLoading) _loadingQuickSettings = false;
       });
     } catch (error) {
-      if (!mounted || connectionEpoch != _connectionEpoch) return;
+      if (!mounted ||
+          connectionEpoch != _connectionEpoch ||
+          startedEpoch != _quickSettingsMutationEpoch ||
+          _operationBusy) {
+        return;
+      }
+      setState(() => _quickSettingsReadFailed = true);
       if (!silent) {
         setState(() => _loadingQuickSettings = false);
         AppFeedback.showSnackBar(
@@ -268,7 +290,7 @@ class _DashboardControlsState extends State<DashboardControls>
       }
     } finally {
       _readingQuickSettings = false;
-      if (!silent && mounted && _loadingQuickSettings) {
+      if (showLoading && mounted && _loadingQuickSettings) {
         setState(() => _loadingQuickSettings = false);
       }
       if ((connectionEpoch != _connectionEpoch ||
@@ -285,7 +307,9 @@ class _DashboardControlsState extends State<DashboardControls>
     _readingConfig = true;
     final connectionEpoch = _connectionEpoch;
     final mutationEpoch = _configMutationEpoch;
-    if (!silent) {
+    final showLoading =
+        !silent || (_activeConfig == null && !_configReadFailed);
+    if (showLoading) {
       cancelFeedbackClear('config');
       setState(() {
         _loadingConfig = true;
@@ -302,19 +326,37 @@ class _DashboardControlsState extends State<DashboardControls>
           _operationBusy) {
         return;
       }
-      setState(() => _activeConfig = active);
+      setState(() {
+        _activeConfig = active;
+        if (_configReadFailed) {
+          cancelFeedbackClear('config');
+          _configMessage = null;
+          _configMessageIsError = false;
+        }
+        _configReadFailed = false;
+      });
     } catch (error) {
-      if (!mounted) return;
-      if (!silent) {
+      if (!mounted ||
+          connectionEpoch != _connectionEpoch ||
+          mutationEpoch != _configMutationEpoch ||
+          _operationBusy) {
+        return;
+      }
+      if (!silent || _activeConfig == null) {
         setState(() {
-          _configMessage = _formatConfigError('读取当前配置', error);
+          _configMessage = silent
+              ? error is SshPasswordRequiredException
+                  ? '请先在设置页填写并保存 SSH 密码'
+                  : '当前配置暂时无法读取，请检查软路由连接和 SSH 设置。'
+              : _formatConfigError('读取当前配置', error);
           _configMessageIsError = true;
         });
-        _scheduleConfigMessageClear(isError: true);
+        if (!silent) _scheduleConfigMessageClear(isError: true);
       }
+      _configReadFailed = true;
     } finally {
       _readingConfig = false;
-      if (!silent && mounted) setState(() => _loadingConfig = false);
+      if (showLoading && mounted) setState(() => _loadingConfig = false);
       if ((connectionEpoch != _connectionEpoch ||
               mutationEpoch != _configMutationEpoch) &&
           _autoSyncEnabled &&
@@ -347,10 +389,8 @@ class _DashboardControlsState extends State<DashboardControls>
         return;
       }
 
-      final selected = await showModalBottomSheet<ClashConfigFile>(
+      final selected = await AppPopup.sheet<ClashConfigFile>(
         context: context,
-        showDragHandle: true,
-        isScrollControlled: true,
         builder: (context) => YamlConfigPickerSheet(
           files: files,
           activePath: _activeConfig?.file?.path,
@@ -362,19 +402,19 @@ class _DashboardControlsState extends State<DashboardControls>
         return;
       }
 
-      final confirmed = await showDialog<bool>(
+      final confirmed = await AppPopup.dialog<bool>(
         context: context,
-        builder: (dialogContext) => AlertDialog(
+        builder: (dialogContext) => AppDialog(
           title: Text(tr('切换当前配置？')),
           content: Text(tr('将切换到 ${selected.name} 并重启 OpenClash。重启期间代理会短暂断开。')),
           actions: [
             TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: AdaptiveSingleLineText(tr('取消')),
+              onPressed: () => AppPopup.close(dialogContext, false),
+              child: Text(tr('取消')),
             ),
             FilledButton(
-              onPressed: () => Navigator.of(dialogContext).pop(true),
-              child: AdaptiveSingleLineText(tr('切换并重启')),
+              onPressed: () => AppPopup.close(dialogContext, true),
+              child: Text(tr('切换并重启')),
             ),
           ],
         ),
@@ -474,7 +514,7 @@ class _DashboardControlsState extends State<DashboardControls>
     final savedPassword = await ClashConfigFileService.savedPassword();
     if (!mounted) return null;
     FocusManager.instance.primaryFocus?.unfocus();
-    return showDialog<String>(
+    return AppPopup.dialog<String>(
       context: context,
       builder: (_) =>
           _SshPasswordDialog(routerIp: routerIp, savedPassword: savedPassword),
@@ -497,6 +537,7 @@ class _DashboardControlsState extends State<DashboardControls>
     if (_operationBusy) return;
     final confirmed = await _confirmMaintenanceAction(
       title: '清理 DNS 缓存？',
+      confirmText: '清理 DNS 缓存',
       message: '将清理 Clash 内核的 DNS 解析缓存。确定继续？',
     );
     if (!confirmed || !mounted || _operationBusy) return;
@@ -521,6 +562,7 @@ class _DashboardControlsState extends State<DashboardControls>
     if (_operationBusy) return;
     final confirmed = await _confirmMaintenanceAction(
       title: '关闭所有连接？',
+      confirmText: '关闭连接',
       message: '将立即关闭所有当前 Clash 代理连接，部分应用可能会自动重新连接。确定继续？',
     );
     if (!confirmed || !mounted || _operationBusy) return;
@@ -550,26 +592,42 @@ class _DashboardControlsState extends State<DashboardControls>
   Future<bool> _confirmMaintenanceAction({
     required String title,
     required String message,
+    required String confirmText,
   }) async {
     if (!mounted) return false;
-    final confirmed = await showDialog<bool>(
+    final confirmed = await AppPopup.dialog<bool>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
+      builder: (dialogContext) => AppDialog(
         title: Text(tr(title)),
         content: Text(tr(message)),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: AdaptiveSingleLineText(tr('取消')),
+            onPressed: () => AppPopup.close(dialogContext, false),
+            child: Text(tr('取消')),
           ),
           FilledButton(
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: AdaptiveSingleLineText(tr('确定')),
+            onPressed: () => AppPopup.close(dialogContext, true),
+            child: Text(tr(confirmText)),
           ),
         ],
       ),
     );
     return confirmed == true;
+  }
+
+  Future<void> _changeBaseMode(OpenClashBaseMode mode) async {
+    final current = _quickSettings;
+    if (current == null ||
+        current.baseMode == mode ||
+        current.baseMode == OpenClashBaseMode.unknown ||
+        mode == OpenClashBaseMode.unknown ||
+        current.runVariant == null) {
+      return;
+    }
+    await _applyQuickSetting(
+      key: OpenClashQuickSettingKey.baseMode,
+      desired: current.copyWith(baseMode: mode),
+    );
   }
 
   Future<void> _changeRunVariant(OpenClashRunVariant variant) async {
@@ -760,10 +818,18 @@ class _DashboardControlsState extends State<DashboardControls>
       };
 
   bool get _showAppBarActivity =>
-      _applyingQuickSetting != null || _restartCoordinator.isBusy;
+      _operationBusy ||
+      (widget.refreshConfig && _loadingConfig) ||
+      (widget.refreshQuickSettings && _loadingQuickSettings);
 
-  String get _appBarActivityLabel =>
-      _restartCoordinator.isBusy ? _restartStatusLabel : '正在应用设置...';
+  String get _appBarActivityLabel {
+    if (_restartCoordinator.isBusy) return _restartStatusLabel;
+    if (_applyingQuickSetting != null) return '正在应用设置...';
+    if (_switchingConfig) return '处理中';
+    if (_flushingDns) return '清理中';
+    if (_closingConnections) return '关闭中';
+    return '正在读取...';
+  }
 
   String _formatConfigError(String action, Object error) {
     if (error is SshPasswordRequiredException) {
@@ -830,12 +896,13 @@ class _DashboardControlsState extends State<DashboardControls>
           ),
           quickSettings: OpenClashQuickSettingsCard(
             settings: _quickSettings,
-            loading: _loadingQuickSettings,
+            readFailed: _quickSettingsReadFailed,
             busy: _operationBusy,
             cardBg: palette.surface,
             cardBorder: palette.border,
             textColor: palette.textPrimary,
             hintColor: palette.textSecondary,
+            onBaseModeChanged: _changeBaseMode,
             onRunVariantChanged: _changeRunVariant,
             onProxyModeChanged: _changeProxyMode,
             onAreaBypassChanged: _changeAreaBypass,
@@ -889,6 +956,7 @@ class _SshPasswordDialogState extends State<_SshPasswordDialog> {
   }
 
   Future<void> _confirm() async {
+    if (_saving) return;
     final password = _controller.text;
     if (password.isEmpty) {
       setState(() => _error = '请输入密码');
@@ -898,70 +966,84 @@ class _SshPasswordDialogState extends State<_SshPasswordDialog> {
       _saving = true;
       _error = null;
     });
-    if (!_hasSavedPassword) {
-      await ClashConfigFileService.savePassword(password);
+    try {
+      if (!_hasSavedPassword) {
+        await ClashConfigFileService.savePassword(password);
+      }
+      if (mounted) {
+        setState(() => _saving = false);
+        AppPopup.close(context, password);
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _saving = false;
+          _error = '保存 SSH 密码失败，请重试';
+        });
+      }
     }
-    if (mounted) Navigator.of(context).pop(password);
   }
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text(tr('确认重启 OpenClash')),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'root@${widget.routerIp}',
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-          const SizedBox(height: 14),
-          if (_hasSavedPassword)
-            Text(tr('将使用设置页保存的 SSH 密码执行重启。如需更换密码，请到设置页修改。'))
-          else ...[
-            Text(tr('设置页未保存 SSH 密码，本次输入后会同步保存到设置页。')),
-            const SizedBox(height: 10),
-            TextField(
-              controller: _controller,
-              autofocus: true,
-              obscureText: _obscure,
-              onSubmitted: (_) => _confirm(),
-              decoration: InputDecoration(
-                labelText: tr('SSH 密码'),
-                errorText: _error == null ? null : tr(_error!),
-                suffixIcon: IconButton(
-                  onPressed: () => setState(() => _obscure = !_obscure),
-                  icon: Icon(
-                    _obscure
-                        ? Icons.visibility_off_outlined
-                        : Icons.visibility_outlined,
+    return PopScope(
+        canPop: !_saving,
+        child: AppDialog(
+          title: Text(tr('确认重启 OpenClash')),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'root@${widget.routerIp}',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              const SizedBox(height: 14),
+              if (_hasSavedPassword)
+                Text(tr('将使用设置页保存的 SSH 密码执行重启。如需更换密码，请到设置页修改。'))
+              else ...[
+                Text(tr('设置页未保存 SSH 密码，本次输入后会同步保存到设置页。')),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: _controller,
+                  autofocus: true,
+                  obscureText: _obscure,
+                  onSubmitted: (_) => _confirm(),
+                  decoration: InputDecoration(
+                    labelText: tr('SSH 密码'),
+                    errorText: _error == null ? null : tr(_error!),
+                    suffixIcon: IconButton(
+                      onPressed: () => setState(() => _obscure = !_obscure),
+                      icon: Icon(
+                        _obscure
+                            ? Icons.visibility_off_outlined
+                            : Icons.visibility_outlined,
+                      ),
+                    ),
                   ),
                 ),
-              ),
+              ],
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: _saving ? null : () => AppPopup.close(context),
+              child: Text(tr('取消')),
+            ),
+            FilledButton(
+              onPressed: _saving ? null : _confirm,
+              child: _saving
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : Text(tr('确认重启')),
             ),
           ],
-        ],
-      ),
-      actions: [
-        TextButton(
-          onPressed: _saving ? null : () => Navigator.of(context).pop(),
-          child: AdaptiveSingleLineText(tr('取消')),
-        ),
-        FilledButton(
-          onPressed: _saving ? null : _confirm,
-          child: _saving
-              ? const SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: Colors.white,
-                  ),
-                )
-              : AdaptiveSingleLineText(tr('确认重启')),
-        ),
-      ],
-    );
+        ));
   }
 }

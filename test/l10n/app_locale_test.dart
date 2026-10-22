@@ -14,6 +14,7 @@ void main() {
       '正在检查当前配置...',
       '运行操作',
       '快捷设置',
+      '选择当前基础模式对应的运行方式',
       '自定义首页',
       '完成',
       '长按卡片拖动排序，关闭开关隐藏卡片',
@@ -21,6 +22,12 @@ void main() {
       '恢复默认',
       '编辑配置',
       '文件管理',
+      '安装 SFTP 组件',
+      '重新检测',
+      '路由器缺少 SFTP 组件，无法读写 YAML 文件。',
+      '从内核导入',
+      '从本地导入 JS 文件',
+      '支持 Zashboard 导出的 JSON 配置（.json / .js）',
       '删除配置',
       '删除配置文件？',
       '删除',
@@ -39,7 +46,7 @@ void main() {
       '选择要编辑的文件，不改变当前运行配置。',
       '当前 YAML 配置有未保存修改，继续前要保存吗？',
       '覆盖已有配置？',
-      '卡片已隐藏，点击右上角自定义首页以恢复。',
+      '卡片已隐藏，点击下方自定义首页以恢复。',
     ]) {
       expect(tr(text), isNot(matches(RegExp(r'[\u4e00-\u9fff]'))),
           reason: text);
@@ -103,7 +110,7 @@ void main() {
         ),
       ),
     );
-    expect(find.byType(MenuAnchor), findsOneWidget);
+    expect(find.byType(AppLanguagePicker), findsOneWidget);
     expect(find.byIcon(Icons.language_rounded), findsOneWidget);
     expect(find.byIcon(Icons.arrow_drop_down_rounded), findsOneWidget);
 
@@ -122,7 +129,7 @@ void main() {
     await tester.tap(find.byIcon(Icons.arrow_drop_down_rounded));
     await tester.pumpAndSettle();
 
-    expect(find.byType(MenuItemButton), findsNWidgets(2));
+    expect(find.byType(ListTile), findsNWidgets(2));
     expect(find.text('简体中文'), findsAtLeastNWidgets(1));
     expect(find.text('English'), findsOneWidget);
     expect(find.textContaining('繁體中文'), findsNothing);
@@ -134,7 +141,7 @@ void main() {
     expect(AppLocaleController.instance.language, AppLanguage.english);
   });
 
-  testWidgets('compact language picker keeps native dropdown layout tight',
+  testWidgets('compact language picker keeps bottom sheet trigger layout tight',
       (tester) async {
     SharedPreferences.setMockInitialValues({'app_language': 'en'});
     await AppLocaleController.instance.load();
@@ -156,7 +163,7 @@ void main() {
       ),
     );
 
-    expect(find.byType(MenuAnchor), findsOneWidget);
+    expect(find.byType(AppLanguagePicker), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 

@@ -293,6 +293,9 @@ class AdaptiveSelectionButton extends StatelessWidget {
   final bool enabled;
   final VoidCallback onTap;
   final EdgeInsetsGeometry padding;
+  final double minimumHeight;
+  final double cornerRadius;
+  final bool showUnselectedBorder;
 
   const AdaptiveSelectionButton({
     super.key,
@@ -302,6 +305,9 @@ class AdaptiveSelectionButton extends StatelessWidget {
     this.enabled = true,
     required this.onTap,
     this.padding = const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+    this.minimumHeight = 0,
+    this.cornerRadius = 8,
+    this.showUnselectedBorder = true,
   });
 
   @override
@@ -322,9 +328,10 @@ class AdaptiveSelectionButton extends StatelessWidget {
         color: Colors.transparent,
         child: InkWell(
           onTap: enabled ? onTap : null,
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(cornerRadius),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 180),
+            constraints: BoxConstraints(minHeight: minimumHeight),
             padding: padding,
             decoration: BoxDecoration(
               color: selected
@@ -337,10 +344,14 @@ class AdaptiveSelectionButton extends StatelessWidget {
                       ? Colors.transparent
                       : palette.inputBackground,
               border: Border.all(
-                color: selected ? primary : palette.border,
+                color: selected
+                    ? primary
+                    : showUnselectedBorder
+                        ? palette.border
+                        : Colors.transparent,
                 width: selected ? 1.2 : 1,
               ),
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(cornerRadius),
             ),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,

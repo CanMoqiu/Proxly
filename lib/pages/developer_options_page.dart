@@ -1,3 +1,4 @@
+import '../widgets/app_popup.dart';
 import '../l10n/app_locale.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -21,6 +22,7 @@ class _DeveloperOptionsPageState extends State<DeveloperOptionsPage> {
   bool _showBall = false;
   bool _showConsoleButton = false;
   int _trustedSshHosts = 0;
+  bool _clearingSshTrust = false;
   String _connectionsTabMode = 'webview';
   String _webPanelVersion = WebPanelService.builtinVersion;
   final _panelUpdate = WebPanelUpdateSession.instance;
@@ -94,39 +96,49 @@ class _DeveloperOptionsPageState extends State<DeveloperOptionsPage> {
   }
 
   Future<void> _clearSshTrust() async {
-    if (_trustedSshHosts == 0) return;
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text(tr('清除 SSH 信任？')),
-        content: Text(tr('清除后，下次执行 YAML、快捷设置或重启操作时，需要重新确认设备指纹。')),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: Text(tr('取消')),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: Text(tr('清除信任')),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true) return;
-    await SshHostTrustService.instance.clearAll();
-    if (!mounted) return;
-    setState(() => _trustedSshHosts = 0);
-    AppFeedback.showSnackBar(
-      context,
-      tr('SSH 信任已清除'),
-      tone: AppFeedbackTone.success,
-    );
+    if (_trustedSshHosts == 0 || _clearingSshTrust) return;
+    setState(() => _clearingSshTrust = true);
+    try {
+      final confirmed = await AppPopup.dialog<bool>(
+        context: context,
+        builder: (dialogContext) => AppDialog(
+          title: Text(tr('清除 SSH 信任？')),
+          content: Text(tr('清除后，下次执行 YAML、快捷设置或重启操作时，需要重新确认设备指纹。')),
+          actions: [
+            TextButton(
+              onPressed: () => AppPopup.close(dialogContext, false),
+              child: Text(tr('取消')),
+            ),
+            FilledButton(
+              onPressed: () => AppPopup.close(dialogContext, true),
+              child: Text(tr('清除信任')),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true) return;
+      await SshHostTrustService.instance.clearAll();
+      if (!mounted) return;
+      setState(() => _trustedSshHosts = 0);
+      AppFeedback.showSnackBar(
+        context,
+        tr('SSH 信任已清除'),
+        tone: AppFeedbackTone.success,
+      );
+    } catch (_) {
+      if (mounted) {
+        AppFeedback.showSnackBar(context, tr('清除 SSH 信任失败，请重试'),
+            tone: AppFeedbackTone.error);
+      }
+    } finally {
+      if (mounted) setState(() => _clearingSshTrust = false);
+    }
   }
 
   Future<bool> _confirmWebPanelUpdate() async {
-    final confirmed = await showDialog<bool>(
+    final confirmed = await AppPopup.dialog<bool>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
+      builder: (dialogContext) => AppDialog(
         title: Text(tr('确认更新 Zashboard？')),
         content: Text(
           tr(
@@ -137,12 +149,12 @@ class _DeveloperOptionsPageState extends State<DeveloperOptionsPage> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: AdaptiveSingleLineText(tr('取消')),
+            onPressed: () => AppPopup.close(dialogContext, false),
+            child: Text(tr('取消')),
           ),
           FilledButton(
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: AdaptiveSingleLineText(tr('继续更新')),
+            onPressed: () => AppPopup.close(dialogContext, true),
+            child: Text(tr('继续更新')),
           ),
         ],
       ),
@@ -257,8 +269,9 @@ class _DeveloperOptionsPageState extends State<DeveloperOptionsPage> {
                         style: TextStyle(fontSize: 11, color: hintColor),
                       ),
                       trailing: TextButton(
-                        onPressed:
-                            _trustedSshHosts == 0 ? null : _clearSshTrust,
+                        onPressed: _trustedSshHosts == 0 || _clearingSshTrust
+                            ? null
+                            : _clearSshTrust,
                         child: AdaptiveSingleLineText(tr('清除信任')),
                       ),
                       contentPadding: const EdgeInsets.symmetric(

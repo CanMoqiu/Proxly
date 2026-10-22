@@ -2,6 +2,7 @@ import '../l10n/app_locale.dart';
 import 'package:flutter/foundation.dart';
 
 import 'clash_service.dart';
+import 'controller_connection_state.dart';
 
 class ClashRealtimeSnapshot {
   final int sequence;
@@ -73,6 +74,7 @@ class ClashDataHub extends ChangeNotifier {
     _lastPollTime = null;
     _baselineResetPending = true;
     if (clearSnapshot) {
+      _inFlight = null;
       _snapshot = null;
       notifyListeners();
     } else if (_snapshot != null) {
@@ -113,10 +115,14 @@ class ClashDataHub extends ChangeNotifier {
   }
 
   Future<ClashRealtimeSnapshot> _load() async {
+    final generation = ControllerConnectionState.instance.generation;
     final results = await Future.wait([
       ClashService.instance.getTrafficSnapshot(),
       ClashService.instance.getProviderTraffic(),
     ]);
+    if (generation != ControllerConnectionState.instance.generation) {
+      throw StateError('Discarded stale controller data');
+    }
 
     final rawSnapshot = results[0] as Map<String, dynamic>;
     final providers = results[1] as List<ProviderTraffic>;

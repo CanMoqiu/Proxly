@@ -12,6 +12,7 @@ import 'package:archive/archive.dart';
 
 import 'version_comparator.dart';
 import 'web_panel_flag_font.dart';
+import 'controller_connection_state.dart';
 
 class WebPanelVersionInfo {
   final String tag;
@@ -455,6 +456,8 @@ class WebPanelControllerBridge {
   final String _token;
   final HttpClient _client;
   final String _session;
+  final ControllerConnectionState? connectionState;
+  final int? _connectionGeneration;
   final Set<WebSocket> _webSockets = <WebSocket>{};
   bool _closed = false;
 
@@ -464,7 +467,9 @@ class WebPanelControllerBridge {
     required String token,
     HttpClient? client,
     String? session,
+    this.connectionState,
   })  : _token = token,
+        _connectionGeneration = connectionState?.generation,
         _client = client ?? HttpClient(),
         _session = session ?? _randomSession() {
     // Forward the original bytes with Content-Encoding. HttpClient otherwise
@@ -474,6 +479,10 @@ class WebPanelControllerBridge {
   }
 
   String get secondaryPath => '$_pathRoot/$_session';
+
+  bool get isCurrentConnection =>
+      connectionState == null ||
+      connectionState!.generation == _connectionGeneration;
 
   bool matches(Uri uri) =>
       uri.path == secondaryPath || uri.path.startsWith('$secondaryPath/');
@@ -495,13 +504,22 @@ class WebPanelControllerBridge {
 
     final relativePath = request.uri.path.substring(secondaryPath.length);
     final upstreamPath = relativePath.isEmpty ? '/' : relativePath;
+    final observation = _observation();
     try {
       if (WebSocketTransformer.isUpgradeRequest(request)) {
-        await _proxyWebSocket(request, upstreamPath);
+        await _proxyWebSocket(request, upstreamPath, observation);
       } else {
-        await _proxyHttp(request, upstreamPath);
+        await _proxyHttp(request, upstreamPath, observation);
       }
-    } catch (_) {
+    } catch (error) {
+      if (!_closed && observation != null) {
+        if (error is SocketException || error is TimeoutException) {
+          connectionState!.reportOffline(observation);
+        } else if (error is WebSocketException &&
+            error.httpStatusCode != null) {
+          connectionState!.reportStatus(observation, error.httpStatusCode!);
+        }
+      }
       try {
         request.response.statusCode = HttpStatus.badGateway;
         await request.response.close();
@@ -512,7 +530,13 @@ class WebPanelControllerBridge {
     return true;
   }
 
-  Future<void> _proxyHttp(HttpRequest request, String upstreamPath) async {
+  (int, int)? _observation() {
+    final current = connectionState?.observe();
+    return current == null ? null : (_connectionGeneration!, current.$2);
+  }
+
+  Future<void> _proxyHttp(
+      HttpRequest request, String upstreamPath, (int, int)? observation) async {
     final upstreamUri = Uri(
       scheme: 'http',
       host: hostname,
@@ -550,6 +574,9 @@ class WebPanelControllerBridge {
         throw TimeoutException('Controller response timed out');
       },
     );
+    if (!_closed && observation != null) {
+      connectionState!.reportStatus(observation, response.statusCode);
+    }
     request.response.statusCode = response.statusCode;
     _copyResponseHeaders(response.headers, request.response.headers);
     _setCorsHeaders(request.response);
@@ -560,6 +587,7 @@ class WebPanelControllerBridge {
   Future<void> _proxyWebSocket(
     HttpRequest request,
     String upstreamPath,
+    (int, int)? observation,
   ) async {
     final upstreamUri = Uri(
       scheme: 'ws',
@@ -573,10 +601,23 @@ class WebPanelControllerBridge {
         : <String, dynamic>{
             HttpHeaders.authorizationHeader: 'Bearer $_token',
           };
+    final handshake = _NoRedirectWebSocketClient(_client);
+    var expired = false;
     final upstream = await WebSocket.connect(
       upstreamUri.toString(),
       headers: headers,
-    );
+      customClient: handshake,
+    ).then((socket) {
+      if (expired || _closed) {
+        unawaited(socket.close());
+        throw StateError('Controller bridge is closed');
+      }
+      return socket;
+    }).timeout(const Duration(seconds: 10), onTimeout: () {
+      expired = true;
+      handshake.abort();
+      throw TimeoutException('Controller WebSocket handshake timed out');
+    });
     if (_closed) {
       await upstream.close();
       throw StateError('Controller bridge is closed');
@@ -591,6 +632,9 @@ class WebPanelControllerBridge {
     _webSockets
       ..add(upstream)
       ..add(downstream);
+    if (observation != null) {
+      connectionState!.reportStatus(observation, HttpStatus.ok);
+    }
     downstream.listen(
       upstream.add,
       onError: (_) => _closeSocketPair(downstream, upstream),
@@ -598,11 +642,27 @@ class WebPanelControllerBridge {
       cancelOnError: true,
     );
     upstream.listen(
-      downstream.add,
-      onError: (_) => _closeSocketPair(upstream, downstream),
-      onDone: () => _closeSocketPair(upstream, downstream),
+      (message) {
+        final current = _observation();
+        if (!_closed && current != null) {
+          connectionState!.reportStatus(current, 200);
+        }
+        downstream.add(message);
+      },
+      onError: (_) => _upstreamEnded(upstream, downstream),
+      onDone: () => _upstreamEnded(upstream, downstream),
       cancelOnError: true,
     );
+  }
+
+  void _upstreamEnded(WebSocket upstream, WebSocket downstream) {
+    final observation = _observation();
+    if (!_closed &&
+        downstream.readyState == WebSocket.open &&
+        observation != null) {
+      connectionState!.reportOffline(observation);
+    }
+    _closeSocketPair(upstream, downstream);
   }
 
   void _closeSocketPair(WebSocket source, WebSocket target) {
@@ -672,6 +732,35 @@ class WebPanelControllerBridge {
     final bytes = List<int>.generate(16, (_) => random.nextInt(256));
     return base64UrlEncode(bytes).replaceAll('=', '');
   }
+}
+
+/// WebSocket.connect only uses openUrl; keep its handshake on the fixed endpoint.
+class _NoRedirectWebSocketClient implements HttpClient {
+  _NoRedirectWebSocketClient(this.client);
+  final HttpClient client;
+  HttpClientRequest? _request;
+  bool _aborted = false;
+
+  @override
+  Future<HttpClientRequest> openUrl(String method, Uri url) async {
+    final request = await client.openUrl(method, url);
+    if (_aborted) {
+      request.abort();
+      throw TimeoutException('WebSocket handshake expired');
+    }
+    _request = request;
+    return request
+      ..followRedirects = false
+      ..maxRedirects = 0;
+  }
+
+  void abort() {
+    _aborted = true;
+    _request?.abort();
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
 /// 本地 HTTP 文件服务器，供 InAppWebView 加载已下载的面板版本

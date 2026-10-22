@@ -1,3 +1,4 @@
+import '../widgets/app_popup.dart';
 import '../l10n/app_locale.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
@@ -254,7 +255,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
           fillColor: blue,
           onTap: () {
             if (_latestInfo == null) return;
-            showDialog(
+            AppPopup.dialog(
               context: context,
               builder: (_) => UpdateDialog(info: _latestInfo!),
             );
@@ -525,7 +526,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
           ),
           const SizedBox(height: 24),
 
-          // ── 开源协议 ──
+          // Project license
           _SectionTitle('开源协议', textColor),
           const SizedBox(height: 10),
           Container(
@@ -534,47 +535,29 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
               borderRadius: BorderRadius.circular(16),
               border: Border.all(color: cardBorder, width: 0.5),
             ),
-            child: ExpansionTile(
-              key: const ValueKey('about_mit_license'),
-              title: Text('MIT License',
-                  style: TextStyle(fontSize: 13, color: textColor)),
-              subtitle: Text(tr('Proxly 的使用与分发许可'),
-                  style: TextStyle(fontSize: 11, color: hintColor)),
-              shape: const Border(),
-              collapsedShape: const Border(),
-              childrenPadding: const EdgeInsets.all(16),
-              children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    SelectionArea(
-                      child: Text(
-                        _mitLicenseEnglish,
-                        key: const ValueKey('about_mit_license_english'),
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: hintColor,
-                          height: 1.65,
-                        ),
-                      ),
-                    ),
-                    if (showChineseLicense) ...[
-                      const SizedBox(height: 16),
-                      Divider(color: cardBorder, height: 1),
-                      const SizedBox(height: 16),
-                      Text(
-                        '中文译文',
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: textColor,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
+            child: Theme(
+              data: Theme.of(context).copyWith(
+                splashFactory: NoSplash.splashFactory,
+                splashColor: Colors.transparent,
+                highlightColor: Colors.transparent,
+              ),
+              child: ExpansionTile(
+                key: const ValueKey('about_mit_license'),
+                title: Text('MIT License',
+                    style: TextStyle(fontSize: 13, color: textColor)),
+                subtitle: Text(tr('Proxly 的使用与分发许可'),
+                    style: TextStyle(fontSize: 11, color: hintColor)),
+                shape: const Border(),
+                collapsedShape: const Border(),
+                childrenPadding: const EdgeInsets.all(16),
+                children: [
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
                       SelectionArea(
                         child: Text(
-                          _mitLicenseChinese,
-                          key: const ValueKey('about_mit_license_chinese'),
+                          _mitLicenseEnglish,
+                          key: const ValueKey('about_mit_license_english'),
                           style: TextStyle(
                             fontSize: 12,
                             color: hintColor,
@@ -582,10 +565,35 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
                           ),
                         ),
                       ),
+                      if (showChineseLicense) ...[
+                        const SizedBox(height: 16),
+                        Divider(color: cardBorder, height: 1),
+                        const SizedBox(height: 16),
+                        Text(
+                          '中文译文',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: textColor,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        SelectionArea(
+                          child: Text(
+                            _mitLicenseChinese,
+                            key: const ValueKey('about_mit_license_chinese'),
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: hintColor,
+                              height: 1.65,
+                            ),
+                          ),
+                        ),
+                      ],
                     ],
-                  ],
-                )
-              ],
+                  )
+                ],
+              ),
             ),
           ),
           const SizedBox(height: 12),

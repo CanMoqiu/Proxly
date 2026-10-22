@@ -4,15 +4,17 @@ import '../../l10n/app_locale.dart';
 import '../../theme/app_theme.dart';
 import '../adaptive_ui.dart';
 import '../../services/openclash_quick_settings_service.dart';
+import 'dashboard_button_style.dart';
 
 class OpenClashQuickSettingsCard extends StatelessWidget {
   final OpenClashQuickSettings? settings;
-  final bool loading;
+  final bool readFailed;
   final bool busy;
   final Color cardBg;
   final Color cardBorder;
   final Color textColor;
   final Color hintColor;
+  final ValueChanged<OpenClashBaseMode> onBaseModeChanged;
   final ValueChanged<OpenClashRunVariant> onRunVariantChanged;
   final ValueChanged<OpenClashProxyMode> onProxyModeChanged;
   final ValueChanged<OpenClashAreaBypass> onAreaBypassChanged;
@@ -23,12 +25,13 @@ class OpenClashQuickSettingsCard extends StatelessWidget {
   const OpenClashQuickSettingsCard({
     super.key,
     required this.settings,
-    required this.loading,
+    this.readFailed = false,
     required this.busy,
     required this.cardBg,
     required this.cardBorder,
     required this.textColor,
     required this.hintColor,
+    required this.onBaseModeChanged,
     required this.onRunVariantChanged,
     required this.onProxyModeChanged,
     required this.onAreaBypassChanged,
@@ -40,15 +43,7 @@ class OpenClashQuickSettingsCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final current = settings;
-    final palette = AppPalette.of(context);
-    final enabled = current != null && !busy;
-    final baseModeLabel = switch (current?.baseMode) {
-      OpenClashBaseMode.fakeIp => 'Fake-IP',
-      OpenClashBaseMode.redirHost => 'Redir-Host',
-      _ => current?.rawRunMode.isNotEmpty == true
-          ? current!.rawRunMode
-          : tr('尚未读取'),
-    };
+    final enabled = current != null && !busy && !readFailed;
     final compatibilityLabel =
         current?.baseMode == OpenClashBaseMode.fakeIp ? tr('增强') : tr('兼容');
     final runModeSupported = current?.baseMode != OpenClashBaseMode.unknown &&
@@ -67,71 +62,48 @@ class OpenClashQuickSettingsCard extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         color: cardBg,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(color: cardBorder, width: 0.5),
       ),
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+      padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    AdaptiveSingleLineText(
-                      dashboardCardTitle(DashboardCardId.quickSettings),
-                      alignment: Alignment.centerLeft,
-                      textAlign: TextAlign.left,
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: textColor,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      tr('设置会立即应用；切换运行模式时现有连接可能短暂重连。'),
-                      style: TextStyle(fontSize: 11, color: hintColor),
-                    ),
-                  ],
-                ),
-              ),
-              if (loading && current == null) ...[
-                const SizedBox(width: 12),
-                const SizedBox(
-                  key: ValueKey('quick_setting_loading_indicator'),
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
-              ],
-            ],
+          AdaptiveSingleLineText(
+            dashboardCardTitle(DashboardCardId.quickSettings),
+            alignment: Alignment.centerLeft,
+            textAlign: TextAlign.left,
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: textColor,
+            ),
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 16),
+          if (readFailed) ...[
+            Text(
+              tr('快捷设置暂时无法刷新，请检查软路由连接和 SSH 设置。'),
+              style: TextStyle(fontSize: 12, color: hintColor),
+            ),
+            const SizedBox(height: 12),
+          ],
+          _QuickChoiceGroup<OpenClashBaseMode>(
+            labels: const ['Fake-IP', 'Redir-Host'],
+            values: const [
+              OpenClashBaseMode.fakeIp,
+              OpenClashBaseMode.redirHost
+            ],
+            selected: current?.baseMode,
+            enabled: enabled && runModeSupported,
+            valueKeyPrefix: 'quick_setting_base',
+            onSelected: onBaseModeChanged,
+          ),
+          const SizedBox(height: 16),
           _QuickSettingsSection(
             title: tr('运行模式'),
-            description: tr('当前基础模式由 OpenClash 管理，可选择对应运行方式'),
+            description: tr('选择当前基础模式对应的运行方式'),
             textColor: textColor,
             hintColor: hintColor,
-            trailing: Container(
-              constraints: const BoxConstraints(minWidth: 68),
-              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
-              decoration: BoxDecoration(
-                color: palette.success.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: AdaptiveSingleLineText(
-                baseModeLabel,
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  color: palette.success,
-                ),
-              ),
-            ),
             child: _QuickChoiceGroup<OpenClashRunVariant>(
               labels: [compatibilityLabel, 'TUN', tr('混合')],
               values: OpenClashRunVariant.values,
@@ -141,7 +113,7 @@ class OpenClashQuickSettingsCard extends StatelessWidget {
               onSelected: onRunVariantChanged,
             ),
           ),
-          Divider(height: 25, color: cardBorder),
+          Divider(height: 24, color: cardBorder),
           _QuickSettingsSection(
             title: tr('代理模式'),
             description: tr('切换 Mihomo 处理连接时使用的规则范围'),
@@ -156,7 +128,7 @@ class OpenClashQuickSettingsCard extends StatelessWidget {
               onSelected: onProxyModeChanged,
             ),
           ),
-          Divider(height: 25, color: cardBorder),
+          Divider(height: 24, color: cardBorder),
           _QuickSettingsSection(
             title: tr('区域绕过'),
             description: tr('指定区域流量不经过内核'),
@@ -175,7 +147,7 @@ class OpenClashQuickSettingsCard extends StatelessWidget {
               onSelected: onAreaBypassChanged,
             ),
           ),
-          Divider(height: 25, color: cardBorder),
+          Divider(height: 24, color: cardBorder),
           _QuickSwitchRow(
             key: const ValueKey('quick_setting_sniffer'),
             title: tr('域名嗅探'),
@@ -186,7 +158,7 @@ class OpenClashQuickSettingsCard extends StatelessWidget {
             hintColor: hintColor,
             onChanged: onSnifferChanged,
           ),
-          Divider(height: 17, color: cardBorder),
+          Divider(height: 16, color: cardBorder),
           _QuickSwitchRow(
             key: const ValueKey('quick_setting_dns_proxy'),
             title: tr('DNS 代理'),
@@ -197,7 +169,7 @@ class OpenClashQuickSettingsCard extends StatelessWidget {
             hintColor: hintColor,
             onChanged: onDnsProxyChanged,
           ),
-          Divider(height: 17, color: cardBorder),
+          Divider(height: 16, color: cardBorder),
           _QuickSwitchRow(
             key: const ValueKey('quick_setting_stream_unlock'),
             title: tr('流媒体解锁'),
@@ -219,7 +191,6 @@ class _QuickSettingsSection extends StatelessWidget {
   final String description;
   final Color textColor;
   final Color hintColor;
-  final Widget? trailing;
   final Widget child;
 
   const _QuickSettingsSection({
@@ -228,7 +199,6 @@ class _QuickSettingsSection extends StatelessWidget {
     required this.textColor,
     required this.hintColor,
     required this.child,
-    this.trailing,
   });
 
   @override
@@ -251,7 +221,7 @@ class _QuickSettingsSection extends StatelessWidget {
                       color: textColor,
                     ),
                   ),
-                  const SizedBox(height: 3),
+                  const SizedBox(height: 4),
                   Text(
                     description,
                     style: TextStyle(fontSize: 11, color: hintColor),
@@ -259,10 +229,9 @@ class _QuickSettingsSection extends StatelessWidget {
                 ],
               ),
             ),
-            if (trailing != null) ...[const SizedBox(width: 10), trailing!],
           ],
         ),
-        const SizedBox(height: 11),
+        const SizedBox(height: 12),
         child,
       ],
     );
@@ -288,19 +257,31 @@ class _QuickChoiceGroup<T> extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return AdaptiveOptionGroup(
-      labels: labels,
-      reservedItemWidth: 28,
-      children: [
-        for (var index = 0; index < values.length; index++)
-          _QuickChoiceButton(
-            key: ValueKey('${valueKeyPrefix}_${values[index]}'),
-            label: labels[index],
-            selected: selected == values[index],
-            enabled: enabled,
-            onTap: () => onSelected(values[index]),
-          ),
-      ],
+    final palette = AppPalette.of(context);
+    return Container(
+      key: ValueKey('${valueKeyPrefix}_group'),
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: palette.inputBackground,
+        borderRadius:
+            BorderRadius.circular(DashboardButtonStyle.cornerRadius + 3),
+        border: Border.all(color: palette.border, width: 0.5),
+      ),
+      child: AdaptiveOptionGroup(
+        labels: labels,
+        spacing: 0,
+        reservedItemWidth: DashboardButtonStyle.padding.horizontal + 2,
+        children: [
+          for (var index = 0; index < values.length; index++)
+            _QuickChoiceButton(
+              key: ValueKey('${valueKeyPrefix}_${values[index]}'),
+              label: labels[index],
+              selected: selected == values[index],
+              enabled: enabled,
+              onTap: () => onSelected(values[index]),
+            ),
+        ],
+      ),
     );
   }
 }
@@ -326,6 +307,10 @@ class _QuickChoiceButton extends StatelessWidget {
       selected: selected,
       enabled: enabled,
       onTap: onTap,
+      minimumHeight: DashboardButtonStyle.minimumHeight,
+      cornerRadius: DashboardButtonStyle.cornerRadius,
+      showUnselectedBorder: false,
+      padding: DashboardButtonStyle.padding,
     );
   }
 }
@@ -366,7 +351,7 @@ class _QuickSwitchRow extends StatelessWidget {
                   color: textColor,
                 ),
               ),
-              const SizedBox(height: 3),
+              const SizedBox(height: 4),
               Text(
                 description,
                 style: TextStyle(fontSize: 11, color: hintColor),

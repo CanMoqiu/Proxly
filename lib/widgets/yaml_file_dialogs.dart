@@ -1,24 +1,24 @@
+import 'app_popup.dart';
 import 'package:flutter/material.dart';
 import '../l10n/app_locale.dart';
 import '../services/clash_config_file_service.dart';
-import 'adaptive_ui.dart';
 
 class YamlRestartAfterSaveDialog extends StatelessWidget {
   const YamlRestartAfterSaveDialog({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
+    return AppDialog(
       title: Text(tr('确认重启 OpenClash')),
       content: Text(tr('配置已保存，是否立即重启 OpenClash 使修改生效？')),
       actions: [
         TextButton(
-          onPressed: () => Navigator.of(context).pop(false),
-          child: AdaptiveSingleLineText(tr('稍后')),
+          onPressed: () => AppPopup.close(context, false),
+          child: Text(tr('稍后')),
         ),
         FilledButton(
-          onPressed: () => Navigator.of(context).pop(true),
-          child: AdaptiveSingleLineText(tr('立即重启')),
+          onPressed: () => AppPopup.close(context, true),
+          child: Text(tr('立即重启')),
         ),
       ],
     );
@@ -90,96 +90,46 @@ class _YamlFileNameDialogState extends State<YamlFileNameDialog> {
       setState(() => _errorText = validationError);
       return;
     }
-    Navigator.of(context).pop(candidate);
+    AppPopup.close(context, candidate);
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Dialog(
-      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
-      child: SafeArea(
-        minimum: const EdgeInsets.all(20),
-        child: ConstrainedBox(
-          key: widget.contentKey,
-          constraints: const BoxConstraints(maxWidth: 360),
-          child: SingleChildScrollView(
+  Widget build(BuildContext context) => AppDialog(
+        title: Text(tr(widget.title)),
+        content: SizedBox(
+            key: widget.contentKey,
+            width: 320,
             child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  tr(widget.title),
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
-                const SizedBox(height: 18),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (widget.showFieldTitle) ...[
-                      Text(
-                        tr('文件名'),
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: Theme.of(context).colorScheme.onSurface,
-                        ),
-                      ),
-                      const SizedBox(height: 3),
-                    ],
-                    Text(
-                      tr(widget.description),
-                      style: TextStyle(
-                        fontSize: 11,
-                        height: 1.35,
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(tr(widget.description),
+                      style: Theme.of(context).textTheme.bodySmall),
+                  const SizedBox(height: 12),
+                  TextField(
+                    key: widget.fieldKey,
+                    controller: _controller,
+                    autofocus: true,
+                    autocorrect: false,
+                    enableSuggestions: false,
+                    textInputAction: TextInputAction.done,
+                    onSubmitted: (_) => _submit(),
+                    onChanged: (_) {
+                      if (_errorText != null) setState(() => _errorText = null);
+                    },
+                    decoration: InputDecoration(
+                      labelText: widget.showFieldTitle ? tr('文件名') : null,
+                      hintText: tr('请输入文件名'),
+                      errorText: _errorText == null ? null : tr(_errorText!),
                     ),
-                    const SizedBox(height: 8),
-                    TextField(
-                      key: widget.fieldKey,
-                      controller: _controller,
-                      autofocus: true,
-                      autocorrect: false,
-                      enableSuggestions: false,
-                      textInputAction: TextInputAction.done,
-                      onSubmitted: (_) => _submit(),
-                      onChanged: (_) {
-                        if (_errorText != null) {
-                          setState(() => _errorText = null);
-                        }
-                      },
-                      decoration: InputDecoration(
-                        hintText: tr('请输入文件名'),
-                        errorText: _errorText == null ? null : tr(_errorText!),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 18),
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextButton(
-                        onPressed: () => Navigator.of(context).pop(),
-                        child: AdaptiveSingleLineText(tr('取消')),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: FilledButton(
-                        onPressed: _submit,
-                        child: AdaptiveSingleLineText(tr(widget.confirmText)),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
+                  ),
+                ])),
+        actions: [
+          TextButton(
+              onPressed: () => AppPopup.close(context), child: Text(tr('取消'))),
+          FilledButton(onPressed: _submit, child: Text(tr(widget.confirmText))),
+        ],
+      );
 }
 
 String? _uploadFileNameError(String value) {

@@ -328,16 +328,20 @@ Future<void> verifyBundledPanelLayoutAndFlags(
     expect(scroll['multi'], isFalse);
     expect(scroll['overscroll'], 'none');
     expect(scroll['preference'], 'false');
+    expect(scroll['pageSwipe'], 'false');
+    expect(scroll['tabSwipe'], 'false');
   }
 
   await verifyScroll();
   // A live VueUse preference change must not reinstall the faulty touch guard.
   await web!.evaluateJavascript(source: r'''
-    localStorage.setItem('config/disable-pull-to-refresh', 'true');
-    window.dispatchEvent(new CustomEvent('vueuse-storage', { detail: {
-      key: 'config/disable-pull-to-refresh', newValue: 'true',
-      storageArea: localStorage
-    }}));
+    for (const key of ['config/disable-pull-to-refresh',
+        'config/swipe-in-pages', 'config/swipe-in-tabs']) {
+      localStorage.setItem(key, 'true');
+      window.dispatchEvent(new CustomEvent('vueuse-storage', { detail: {
+        key, newValue: 'true', storageArea: localStorage
+      }}));
+    }
   ''');
   await tester.pump(const Duration(milliseconds: 100));
   await verifyScroll();

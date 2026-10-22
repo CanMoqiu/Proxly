@@ -42,6 +42,12 @@ class _HomePageState extends State<HomePage> with RouteAware {
     unawaited(_loadLayout());
   }
 
+  @override
+  void didUpdateWidget(covariant HomePage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.active && !widget.active) _editing = false;
+  }
+
   Future<void> _loadLayout() async {
     try {
       await _layout.load();
@@ -78,7 +84,10 @@ class _HomePageState extends State<HomePage> with RouteAware {
   }
 
   @override
-  void didPushNext() => setState(() => _routeVisible = false);
+  void didPushNext() => setState(() {
+        _routeVisible = false;
+        _editing = false;
+      });
   @override
   void didPopNext() => setState(() => _routeVisible = true);
 
@@ -115,6 +124,7 @@ class _HomePageState extends State<HomePage> with RouteAware {
               restartCoordinator: widget.restartCoordinator,
               builder: (context, status) => DashboardControls(
                 active: active,
+                recoveryRevision: status.recoveryRevision,
                 autoLoad: widget.autoLoad,
                 refreshConfig: _layout.isVisible(DashboardCardId.currentYaml),
                 refreshQuickSettings:
@@ -128,13 +138,13 @@ class _HomePageState extends State<HomePage> with RouteAware {
                       foregroundColor: palette.textPrimary,
                       dividerColor: palette.border,
                       onConsolePressed: _openConsole,
-                      editing: _editing,
-                      activityLabel: controls.activityLabel,
-                      onCustomizePressed: () =>
-                          setState(() => _editing = !_editing)),
+                      activityLabel: widget.active && _routeVisible
+                          ? controls.activityLabel ?? status.activityLabel
+                          : null),
                   body: DashboardCardList(
                       layout: _layout,
                       editing: _editing,
+                      onEditPressed: () => setState(() => _editing = !_editing),
                       onSave: _saveLayout,
                       cards: {
                         DashboardCardId.status: status.status,

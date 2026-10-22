@@ -18,6 +18,8 @@ import '../services/app_platform.dart';
 import '../services/panel_load_monitor.dart';
 import '../services/web_panel_page_probe.dart';
 import '../widgets/panel_error_view.dart';
+import '../widgets/panel_connection_gate.dart';
+import '../services/controller_connection_state.dart';
 import '../services/zashboard_settings_import_service.dart';
 import '../theme/app_theme.dart';
 
@@ -39,8 +41,18 @@ class _ConnectionsPageState extends State<ConnectionsPage>
   }
 
   Future<void> _recoverPanel() async {
+    if (ControllerConnectionState.instance.phase ==
+        ControllerConnectionPhase.restarting) {
+      return;
+    }
     try {
       await _restartLocalServer();
+      if (mounted &&
+          _controllerBridge?.isCurrentConnection == false &&
+          ControllerConnectionState.instance.phase !=
+              ControllerConnectionPhase.restarting) {
+        await _restartLocalServer();
+      }
     } catch (_) {
       // The load monitor presents the failure and a retry button.
     }
@@ -312,6 +324,7 @@ class _ConnectionsPageState extends State<ConnectionsPage>
       hostname: endpoint.hostname,
       port: endpoint.port,
       token: settings.token,
+      connectionState: ControllerConnectionState.instance,
     );
     AssetHttpServer? assetServer;
     FileHttpServer? fileServer;
@@ -886,20 +899,27 @@ class _ConnectionsPageState extends State<ConnectionsPage>
               },
             ),
           Positioned.fill(
-            child: IgnorePointer(
-              ignoring: _webViewReady,
-              child: AnimatedSwitcher(
-                duration: const Duration(milliseconds: 260),
-                switchInCurve: Curves.easeOut,
-                switchOutCurve: Curves.easeOut,
-                child: _webViewReady
-                    ? const SizedBox.shrink(
-                        key: ValueKey('connections_panel_ready'))
-                    : _panelLoad.error != null
-                        ? PanelErrorView(
-                            message: _panelLoad.error!,
-                            onRetry: () => unawaited(_recoverPanel()))
-                        : _LoadingOverlay(isDark: _isDark, bgColor: bgColor),
+            child: PanelConnectionGate(
+              isActive: () => WebPanelSync.instance.connectionsTabActive,
+              onRetry: _recoverPanel,
+              onUnavailable: () => _needsRecovery = true,
+              child: IgnorePointer(
+                ignoring: _webViewReady,
+                child: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 260),
+                  switchInCurve: Curves.easeOut,
+                  switchOutCurve: Curves.easeOut,
+                  child: _webViewReady
+                      ? const SizedBox.shrink(
+                          key: ValueKey('connections_panel_ready'))
+                      : _panelLoad.error != null
+                          ? PanelErrorView(
+                              message: _panelLoad.error!,
+                              isActive: () =>
+                                  WebPanelSync.instance.connectionsTabActive,
+                              onRetry: _recoverPanel)
+                          : _LoadingOverlay(isDark: _isDark, bgColor: bgColor),
+                ),
               ),
             ),
           ),

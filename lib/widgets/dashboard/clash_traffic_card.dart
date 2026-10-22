@@ -122,6 +122,8 @@ class HomeSubscriptionTrafficRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.baseline,
+      textBaseline: TextBaseline.alphabetic,
       children: [
         Expanded(
           child: AdaptiveMarqueeText(

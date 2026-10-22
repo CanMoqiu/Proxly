@@ -1,6 +1,7 @@
 /// Native WebViews and CSS own overscroll suppression in the embedded panel.
 /// Zashboard 3.29's touchmove guard compares against touchstart and keeps
 /// cancelling a gesture after the finger reverses at a scroll boundary.
+/// Page and tab swipes are disabled because Flutter owns top-level navigation.
 class WebPanelScroll {
   static const managedPreference = 'config/disable-pull-to-refresh';
 
@@ -11,15 +12,21 @@ class WebPanelScroll {
         window[stateKey]();
         return;
       }
-      const key = 'config/disable-pull-to-refresh';
+      const keys = [
+        'config/disable-pull-to-refresh',
+        'config/swipe-in-pages',
+        'config/swipe-in-tabs'
+      ];
       function apply() {
-        const oldValue = localStorage.getItem(key);
-        if (oldValue !== 'false') {
-          localStorage.setItem(key, 'false');
-          // Also update a mounted panel after preferences are restored/imported.
-          window.dispatchEvent(new StorageEvent('storage', {
-            key, oldValue, newValue: 'false', storageArea: localStorage
-          }));
+        for (const key of keys) {
+          const oldValue = localStorage.getItem(key);
+          if (oldValue !== 'false') {
+            localStorage.setItem(key, 'false');
+            // Also update a mounted panel after preferences are restored/imported.
+            window.dispatchEvent(new StorageEvent('storage', {
+              key, oldValue, newValue: 'false', storageArea: localStorage
+            }));
+          }
         }
         if (!document.documentElement) return;
         if (document.getElementById('__proxly_native_scroll')) return;
@@ -39,7 +46,7 @@ class WebPanelScroll {
       function preferenceChanged(event) {
         const change = event.detail || event;
         if (change.storageArea === localStorage &&
-            (change.key === key || change.key === null)) {
+            (keys.includes(change.key) || change.key === null)) {
           // VueUse writes its ref before emitting this event. Reset on the next
           // microtask so its storage listener can update that ref without a loop.
           queueMicrotask(apply);

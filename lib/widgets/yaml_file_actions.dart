@@ -1,3 +1,4 @@
+import 'app_popup.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -17,9 +18,9 @@ class YamlFileActions {
 
   Future<bool> delete(BuildContext context, ClashConfigFile file,
       {bool hasUnsavedChanges = false}) async {
-    final confirmed = await showDialog<bool>(
+    final confirmed = await AppPopup.dialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (context) => AppDialog(
         title: Text(tr('删除配置文件？')),
         content: Text([
           file.name,
@@ -29,10 +30,10 @@ class YamlFileActions {
         ].join('\n\n')),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(context, false),
+              onPressed: () => AppPopup.close(context, false),
               child: Text(tr('取消'))),
           FilledButton(
-              onPressed: () => Navigator.pop(context, true),
+              onPressed: () => AppPopup.close(context, true),
               style: FilledButton.styleFrom(
                   backgroundColor: Theme.of(context).colorScheme.error,
                   foregroundColor: Theme.of(context).colorScheme.onError),
@@ -58,7 +59,7 @@ class YamlFileActions {
     }
     final bytes = await readPickedFileBytes(picked);
     if (!context.mounted) return null;
-    final name = await showDialog<String>(
+    final name = await AppPopup.dialog<String>(
         context: context,
         builder: (_) => YamlUploadFileNameDialog(initialValue: picked.name));
     if (!context.mounted || name == null) return null;
@@ -66,17 +67,17 @@ class YamlFileActions {
     final files = await ClashConfigFileService.listFiles();
     if (!context.mounted) return null;
     if (files.any((file) => file.path == path)) {
-      final overwrite = await showDialog<bool>(
+      final overwrite = await AppPopup.dialog<bool>(
           context: context,
-          builder: (context) => AlertDialog(
+          builder: (context) => AppDialog(
                   title: Text(tr('覆盖已有配置？')),
                   content: Text(name),
                   actions: [
                     TextButton(
-                        onPressed: () => Navigator.pop(context, false),
+                        onPressed: () => AppPopup.close(context, false),
                         child: Text(tr('取消'))),
                     FilledButton(
-                        onPressed: () => Navigator.pop(context, true),
+                        onPressed: () => AppPopup.close(context, true),
                         child: Text(tr('覆盖'))),
                   ]));
       if (!context.mounted || overwrite != true) return null;
@@ -115,11 +116,11 @@ class YamlFileActions {
 
   Future<ClashConfigFile?> rename(
       BuildContext context, ClashConfigFile file) async {
-    final name = await showDialog<String>(
+    final name = await AppPopup.dialog<String>(
         context: context,
         builder: (_) => YamlFileNameDialog(
             title: '重命名',
-            confirmText: '确认',
+            confirmText: '重命名',
             description: '所在目录：${file.directory}',
             initialValue: file.name,
             fieldKey: const ValueKey('yaml_rename_file_name'),

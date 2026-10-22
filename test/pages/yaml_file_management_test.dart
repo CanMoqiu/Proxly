@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:proxly/l10n/app_locale.dart';
 import 'package:proxly/pages/clash_config_editor_page.dart';
 import 'package:proxly/services/clash_config_file_service.dart';
+import 'package:proxly/services/sftp_support_service.dart';
 import 'package:proxly/widgets/yaml_file_actions.dart';
 import 'package:re_editor/re_editor.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -18,6 +19,7 @@ void main() {
     YamlFileActions? actions,
     Future<ClashActiveConfig> Function()? loadActiveConfig,
     Future<List<ClashConfigFile>> Function()? listFiles,
+    Future<void> Function(SftpSupportIssue)? installSftp,
   }) async {
     SharedPreferences.setMockInitialValues({'app_language': 'zh_CN'});
     await AppLocaleController.instance.load();
@@ -37,6 +39,7 @@ void main() {
                                               file: fileA),
                                   readFile: read,
                                   writeFile: write,
+                                  installSftp: installSftp,
                                   fileActions: actions,
                                   listFiles: listFiles ??
                                       () async => [fileA, fileB]))),
@@ -54,6 +57,97 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  const missingSftp = SftpSupportIssue(
+      target: SftpTarget('192.168.1.1', 22, 'root'),
+      openWrt: true,
+      installed: false,
+      root: true,
+      manager: SftpPackageManager.opkg);
+
+  testWidgets(
+      'SFTP installation requires confirmation and reloads an unread file',
+      (tester) async {
+    var installed = false;
+    var installs = 0;
+    await pumpEditor(tester,
+        read: (_) async {
+          if (!installed) throw missingSftp;
+          return 'mode: rule';
+        },
+        write: (_, __) async {},
+        installSftp: (_) async {
+          installs++;
+          installed = true;
+        });
+    expect(find.text(missingSftp.message), findsOneWidget);
+    expect(installs, 0);
+    await tester.tap(find.text('安装 SFTP 组件'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.text('root@192.168.1.1:22'), findsOneWidget);
+    expect(installs, 0);
+    await tester.tap(find.text('取消'));
+    await tester.pumpAndSettle();
+    expect(installs, 0);
+    await tester.tap(find.text('安装 SFTP 组件'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.tap(find.text('确认安装'));
+    await tester.pumpAndSettle();
+    expect(installs, 1);
+    expect(find.text(missingSftp.message), findsNothing);
+    expect(tester.widget<CodeEditor>(find.byType(CodeEditor)).controller!.text,
+        'mode: rule');
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('SFTP recovery retains unsaved text and does not replay writes',
+      (tester) async {
+    var writes = 0;
+    await pumpEditor(tester,
+        read: (_) async => 'mode: rule',
+        write: (_, __) async {
+          writes++;
+          throw missingSftp;
+        },
+        installSftp: (_) async {});
+    final controller =
+        tester.widget<CodeEditor>(find.byType(CodeEditor)).controller!;
+    controller.text = 'mode: global';
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('yaml_editor_save')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('安装 SFTP 组件'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.tap(find.text('确认安装'));
+    await tester.pumpAndSettle();
+    expect(controller.text, 'mode: global');
+    expect(writes, 1);
+    expect(find.text('SFTP 已可用，请重新执行刚才的文件操作。'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('failed SFTP install leaves recovery available', (tester) async {
+    await pumpEditor(tester,
+        read: (_) async => throw missingSftp,
+        write: (_, __) async {},
+        installSftp: (_) async => throw StateError('Install failed'));
+    await tester.tap(find.text('安装 SFTP 组件'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.tap(find.text('确认安装'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Install failed'), findsOneWidget);
+    expect(
+        tester
+            .widget<TextButton>(find.widgetWithText(TextButton, '重新检测'))
+            .onPressed,
+        isNotNull);
+    expect(tester.widget<CodeEditor>(find.byType(CodeEditor)).readOnly, isTrue);
+    await tester.pumpWidget(const SizedBox());
+  });
+
   testWidgets(
       'switching files cancels safely or saves the original path before loading the next file',
       (tester) async {
@@ -70,13 +164,13 @@ void main() {
     await tester.pump();
     await chooseB(tester);
     expect(find.text('保存修改？'), findsOneWidget);
-    await tester.tap(find.text('取消'));
+    await tester.tap(find.text('继续编辑'));
     await tester.pumpAndSettle();
     expect(controller.text, 'mode: global');
     expect(writes, isEmpty);
     expect(find.text('a.yaml'), findsOneWidget);
     await chooseB(tester);
-    await tester.tap(find.text('保存'));
+    await tester.tap(find.text('保存并继续'));
     await tester.pumpAndSettle();
     expect(writes, {fileA.path: 'mode: global'});
     expect(find.text('b.yaml'), findsOneWidget);
@@ -101,7 +195,7 @@ void main() {
     controller.text = 'mode: global';
     await tester.pump();
     await chooseB(tester);
-    await tester.tap(find.text('保存'));
+    await tester.tap(find.text('保存并继续'));
     await tester.pumpAndSettle();
     expect(find.text('a.yaml'), findsOneWidget);
     expect(controller.text, 'mode: global');

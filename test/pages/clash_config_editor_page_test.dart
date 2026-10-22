@@ -650,7 +650,7 @@ tail: true''');
     await tester.tap(find.byIcon(Icons.arrow_back_rounded));
     await tester.pumpAndSettle();
     expect(find.text('保存修改？'), findsOneWidget);
-    await tester.tap(find.text('取消'));
+    await tester.tap(find.text('继续编辑'));
     await tester.pumpAndSettle();
     controller.undo();
     await tester.pump();
