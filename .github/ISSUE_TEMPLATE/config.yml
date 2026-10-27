@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 阅读使用文档 / Read the documentation
+    url: https://github.com/CanMoqiu/Proxly/blob/main/docs/README.md
+    about: 先查看使用、构建与安装说明；目录内可切换英文。 / Usage, build, and installation guides with English links.
+  - name: 私密报告安全漏洞 / Report a vulnerability privately
+    url: https://github.com/CanMoqiu/Proxly/security/advisories/new
+    about: 请勿在公开问题中披露漏洞或凭据。 / Do not disclose vulnerabilities or credentials in public issues.

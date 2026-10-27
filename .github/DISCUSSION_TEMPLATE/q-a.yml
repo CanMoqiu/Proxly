@@ -1,0 +1,19 @@
+title: "[提问] "
+body:
+  - type: markdown
+    attributes:
+      value: "### 使用提问 / Questions\n默认使用中文，也欢迎英文。 / Chinese is the default; English is welcome.\n请先阅读文档，不要提交控制器密钥、SSH 密码、私钥或私人配置。安全漏洞请使用私密报告入口。 / Read the documentation first. Do not share controller tokens, SSH passwords, private keys, or private configuration. Report vulnerabilities privately."
+  - type: textarea
+    id: topic
+    attributes:
+      label: "问题与目标 / Question and goal"
+      description: "说明希望完成什么，以及不理解的步骤。 / Explain what you want to do and which step is unclear."
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: "环境与尝试 / Environment and attempts"
+      description: "填写版本、平台及已尝试的方法。 / Include your version, platform, and what you have tried."
+    validations:
+      required: false

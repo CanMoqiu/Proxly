@@ -1,0 +1,19 @@
+title: "[建议] "
+body:
+  - type: markdown
+    attributes:
+      value: "### 功能建议 / Ideas\n默认使用中文，也欢迎英文。 / Chinese is the default; English is welcome.\n请先阅读文档，不要提交控制器密钥、SSH 密码、私钥或私人配置。安全漏洞请使用私密报告入口。 / Read the documentation first. Do not share controller tokens, SSH passwords, private keys, or private configuration. Report vulnerabilities privately."
+  - type: textarea
+    id: topic
+    attributes:
+      label: "问题与场景 / Problem and use case"
+      description: "描述希望解决的问题和使用场景。 / Describe the problem and use case."
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: "预期方案 / Proposed behavior"
+      description: "说明预期操作、结果和考虑过的替代方案。 / Explain the interaction, result, and alternatives."
+    validations:
+      required: false

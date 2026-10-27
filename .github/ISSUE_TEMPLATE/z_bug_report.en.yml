@@ -1,0 +1,50 @@
+name: "Bug report (English)"
+description: "Report a reproducible problem in English"
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: "Check whether the latest version is affected. Do not share controller tokens, SSH passwords, private keys, actual addresses, or personal data. Report vulnerabilities through the private reporting link."
+  - type: input
+    id: version
+    attributes:
+      label: "Proxly version"
+      description: "Version shown on the About page."
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: "Platform and system"
+      description: "Android/iOS, device model, and OS version."
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: "Steps to reproduce"
+      description: "List actions in order and the conditions that trigger the problem."
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: "Expected result"
+      description: "What did you expect to happen?"
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: "Actual result"
+      description: "What happened, and does it happen every time?"
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: "Logs or screenshots"
+      description: "Sanitized content only; exclude credentials and private keys."
+    validations:
+      required: false

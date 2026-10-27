@@ -1,0 +1,19 @@
+title: "[公告] "
+body:
+  - type: markdown
+    attributes:
+      value: "### 项目公告 / Announcements\n默认使用中文，也欢迎英文。 / Chinese is the default; English is welcome.\n请先阅读文档，不要提交控制器密钥、SSH 密码、私钥或私人配置。安全漏洞请使用私密报告入口。 / Read the documentation first. Do not share controller tokens, SSH passwords, private keys, or private configuration. Report vulnerabilities privately."
+  - type: textarea
+    id: topic
+    attributes:
+      label: "公告内容 / Announcement"
+      description: "先写中文公告，再附完整英文版本。 / Write the Chinese announcement first, followed by a complete English version."
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: "影响与后续操作 / Impact and next steps"
+      description: "说明受影响版本和用户需要做什么，中英文同步。 / Describe affected versions and user actions in both languages."
+    validations:
+      required: false

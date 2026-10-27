@@ -1,0 +1,28 @@
+name: "Usage question (English)"
+description: "Ask about installation, configuration, builds, or usage in English"
+title: "[Question] "
+body:
+  - type: markdown
+    attributes:
+      value: "Read the documentation and search existing questions first. Do not share controller tokens, SSH passwords, private keys, or private configuration."
+  - type: textarea
+    id: question
+    attributes:
+      label: "Your question"
+      description: "Explain what you want to accomplish and which step is unclear."
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: "Environment"
+      description: "Proxly version, platform, OS version; include toolchain versions for build questions."
+    validations:
+      required: true
+  - type: textarea
+    id: attempts
+    attributes:
+      label: "What you have tried"
+      description: "Link relevant documentation and include sanitized errors to avoid repeated troubleshooting."
+    validations:
+      required: false

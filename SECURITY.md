@@ -1,15 +1,17 @@
-# Security policy
+# 安全说明
 
-## Reporting a vulnerability
+**简体中文** · [English](SECURITY.en.md) · [文档目录](docs/README.md)
 
-Please do not open a public issue for a suspected security vulnerability. Use the repository's [private vulnerability reporting form](https://github.com/CanMoqiu/Proxly/security/advisories/new). If GitHub does not make the form available for your account, contact [@CanMoqiu](https://github.com/CanMoqiu) through GitHub and do not include sensitive data in the initial message.
+## 报告漏洞
 
-Include the affected version or commit, the smallest reproducible description, impact, and a safe way to reproduce the issue. Do not include Clash tokens, SSH passwords, private keys, router addresses, personal data, or signed application credentials.
+发现疑似安全漏洞时，请不要创建公开问题。请使用仓库的 [私密漏洞报告表单](https://github.com/CanMoqiu/Proxly/security/advisories/new)。如果你的账号无法使用该表单，请通过 GitHub 联系 [@CanMoqiu](https://github.com/CanMoqiu)，首次联系时不要附带敏感数据。
 
-## Scope
+请提供受影响的版本或提交、最小复现描述、影响范围和安全的复现方式。不要包含 Clash 密钥、SSH 密码、私钥、路由器真实地址、个人数据或应用签名凭据。默认使用中文，也接受英文报告。
 
-Reports about credential handling, SSH host verification, YAML path restrictions, archive extraction, update integrity, authentication state, or release signing are especially useful. This project does not operate proxy nodes or network services; reports about a user's third-party controller should include only sanitized evidence.
+## 范围
 
-## Supported versions
+欢迎报告凭据处理、SSH 主机验证、YAML 路径限制、归档解压、更新完整性、认证状态或发布签名方面的问题。本项目不运营代理节点或网络服务；涉及用户自行使用的第三方控制器时，只提供脱敏证据。
 
-The latest release and the current `main` branch receive security fixes. Older releases are retained for historical reference and do not receive backported fixes unless explicitly stated.
+## 支持的版本
+
+最新正式版和当前 `main` 分支接收安全修复。旧版本保留作历史参考，除非另有说明，否则不回移修复。
