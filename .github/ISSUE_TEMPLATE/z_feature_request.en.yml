@@ -1,0 +1,29 @@
+name: "Feature request (English)"
+description: "Suggest a feature or usability improvement in English"
+title: "[Feature] "
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: "Search existing suggestions first. Describe the use case without credentials or private configuration."
+  - type: textarea
+    id: problem
+    attributes:
+      label: "Problem and use case"
+      description: "What problem do you want to solve, and in what situation?"
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: "Proposed behavior"
+      description: "Describe the intended interaction, result, and necessary limitations."
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: "Alternatives"
+      description: "How do you handle this now, and what other approaches have you considered?"
+    validations:
+      required: false

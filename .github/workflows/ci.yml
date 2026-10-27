@@ -1,4 +1,4 @@
-name: Proxly CI
+name: Proxly 质量检查 / CI
 
 on:
   pull_request:
@@ -25,12 +25,12 @@ jobs:
       run:
         shell: bash
     steps:
-      - name: Checkout
+      - name: 获取源码 / Checkout
         uses: actions/checkout@v4
         with:
           persist-credentials: false
 
-      - name: Cache Flutter and dependencies
+      - name: 缓存 Flutter 与依赖 / Cache Flutter and dependencies
         uses: actions/cache@v4
         with:
           path: |
@@ -40,7 +40,7 @@ jobs:
           restore-keys: |
             ci-${{ runner.os }}-${{ runner.arch }}-${{ env.FLUTTER_VERSION }}-
 
-      - name: Install Flutter
+      - name: 安装 Flutter / Install Flutter
         run: |
           if [ ! -x "$FLUTTER_ROOT/bin/flutter" ]; then
             git clone \
@@ -54,14 +54,14 @@ jobs:
           "$FLUTTER_ROOT/bin/flutter" config --no-analytics
           "$FLUTTER_ROOT/bin/flutter" --version
 
-      - name: Install dependencies
+      - name: 安装依赖 / Install dependencies
         run: flutter pub get --enforce-lockfile
 
-      - name: Test packaging scripts
+      - name: 测试打包脚本 / Test packaging scripts
         run: python3 -m unittest discover -s scripts -p 'test_*.py'
 
-      - name: Analyze
+      - name: 静态检查 / Analyze
         run: flutter analyze
 
-      - name: Test
+      - name: 运行测试 / Test
         run: flutter test

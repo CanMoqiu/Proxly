@@ -1,0 +1,28 @@
+name: "使用提问（中文）"
+description: "询问安装、配置、构建或使用方法，默认使用中文"
+title: "[提问] "
+body:
+  - type: markdown
+    attributes:
+      value: "请先阅读文档并搜索已有问题。不要提供控制器密钥、SSH 密码、私钥或私人配置。"
+  - type: textarea
+    id: question
+    attributes:
+      label: "想了解的问题"
+      description: "说明你希望完成什么，以及不理解的步骤。"
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: "使用环境"
+      description: "Proxly 版本、平台、系统版本；构建问题请附工具链版本。"
+    validations:
+      required: true
+  - type: textarea
+    id: attempts
+    attributes:
+      label: "已经尝试的方法"
+      description: "附相关文档位置和脱敏错误，帮助避免重复排查。"
+    validations:
+      required: false

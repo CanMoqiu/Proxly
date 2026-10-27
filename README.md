@@ -4,17 +4,23 @@
   <p><strong>面向用户自有 OpenClash / Mihomo 环境的 Android / iOS 监控与管理客户端</strong></p>
   <p>通过 Clash API、内置 Zashboard 和 SSH/SFTP 提供运行状态、代理连接及配置管理功能。</p>
 
-  [![Latest Release](https://img.shields.io/github/v/release/CanMoqiu/proxly?label=release)](https://github.com/CanMoqiu/proxly/releases/latest)
-  [![Platform](https://img.shields.io/badge/platform-Android%20%26%20iOS-3DDC84?logo=android&logoColor=white)](#兼容条件与限制)
+  [![最新正式版](https://img.shields.io/github/v/release/CanMoqiu/proxly?label=正式版)](https://github.com/CanMoqiu/proxly/releases/latest)
+  [![支持平台](https://img.shields.io/badge/平台-Android%20%26%20iOS-3DDC84?logo=android&logoColor=white)](#兼容条件与限制)
   [![Flutter](https://img.shields.io/badge/Flutter-stable-02569B?logo=flutter&logoColor=white)](https://flutter.dev/)
-  [![License](https://img.shields.io/github/license/CanMoqiu/proxly)](LICENSE)
+  [![许可证](https://img.shields.io/github/license/CanMoqiu/proxly)](LICENSE)
 
-  [GitHub Releases](https://github.com/CanMoqiu/proxly/releases) · [English](README.en.md) · **简体中文**
+  [版本下载](https://github.com/CanMoqiu/proxly/releases) · [English](README.en.md) · **简体中文**
 </div>
+
+## 文档与交流
+
+[文档目录](docs/README.md) · [贡献指南](CONTRIBUTING.md) · [安全说明](SECURITY.md) · [问题反馈与使用提问](https://github.com/CanMoqiu/Proxly/issues/new/choose)
+
+仓库文档和交流入口默认使用简体中文，提供完整英文版本。应用继续使用原有语言设置。许可证原文保留，并提供 [中文译本](LICENSE.zh-CN.md)。
 
 ## 项目概述
 
-Android 与 iOS 在 `main` 主分支同步开发，共用 Flutter 3.47.5 和版本号。GitHub Actions 可手动同时构建正式签名 Android APK 与供 iOS 18+ iPhone 自签的 Release 未签名 IPA。详见 [双端构建说明](docs/mobile-builds.zh-CN.md) 和 [iPhone 自签使用说明](docs/ios-selfsign.zh-CN.md)。
+Android 与 iOS 在 `main` 主分支同步开发，共用 Flutter 3.47.5 和版本号。正式安装包从发布页下载；自行构建时，可在有权限的仓库副本中手动运行 GitHub Actions，生成已签名 Android APK 与供 iOS 18+ iPhone 自签的 Release 未签名 IPA。详见 [双端构建说明](docs/mobile-builds.zh-CN.md) 和 [iPhone 自签使用说明](docs/ios-selfsign.zh-CN.md)。
 
 Proxly 是使用 Flutter 开发的 Android / iOS 客户端，用于连接用户自行部署并有权访问的 OpenClash / Mihomo 控制器。应用整合 Clash REST API、内置 Zashboard Web 面板以及基于 SSH/SFTP 的 OpenClash 配置管理能力。
 
@@ -48,7 +54,7 @@ flowchart LR
     UI --> SSH[SSH / SFTP 服务]
     SSH --> OC[OpenClash / UCI / YAML]
     UI --> Store[本地偏好与系统安全存储]
-    UI --> Release[GitHub Releases]
+    UI --> Release[版本下载]
 ```
 
 | 层级 | 实现 |
@@ -121,7 +127,7 @@ Proxly 是公开源代码的 Android / iOS 客户端，仅用于管理用户自�
 
 本项目不以提供、促成或协助所谓“翻墙”服务为目的，不得用于突破、绕过或规避中华人民共和国依法实施的网络访问管理措施。任何人在中华人民共和国境内使用本项目，均应遵守现行法律法规，通过合法的网络接入和国际联网信道使用网络，不得用于未经许可的电信业务、非法国际联网、危害网络安全、侵犯他人合法权益或其他违法活动。
 
-用户自行决定是否使用本项目，并自行负责其设备、配置、网络接入方式、数据处理及由此产生的行为和后果。[MIT License](LICENSE) 中的免责声明继续适用；本声明不排除依法不能免除的责任。
+用户自行决定是否使用本项目，并自行负责其设备、配置、网络接入方式、数据处理及由此产生的行为和后果。[MIT 许可证](LICENSE.zh-CN.md) 中的免责声明继续适用；本声明不排除依法不能免除的责任。
 
 相关官方法律文本：
 
@@ -135,4 +141,4 @@ Proxly 是公开源代码的 Android / iOS 客户端，仅用于管理用户自�
 
 Proxly 是独立开源项目，与 Clash、OpenClash、Mihomo、Zashboard 及相关服务提供方不存在官方隶属、授权或担保关系。
 
-项目源代码依据 [MIT License](LICENSE) 发布，Copyright (c) 2026 CanMoqiu。
+项目源代码依据 [MIT 许可证](LICENSE.zh-CN.md) 发布，Copyright (c) 2026 CanMoqiu。

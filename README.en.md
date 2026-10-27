@@ -12,9 +12,15 @@
   [GitHub Releases](https://github.com/CanMoqiu/proxly/releases) · **English** · [简体中文](README.md)
 </div>
 
+## Documentation and discussion
+
+[Documentation](docs/README.en.md) · [Contributing](CONTRIBUTING.en.md) · [Security policy](SECURITY.en.md) · [Issues and usage questions](https://github.com/CanMoqiu/Proxly/issues/new/choose)
+
+Repository documentation and entry points default to Simplified Chinese, with complete English counterparts. The app retains its existing language settings. Original licenses remain intact, with a [Chinese translation](LICENSE.zh-CN.md) available.
+
 ## Overview
 
-Android and iOS share the `main` branch, Flutter 3.47.5 and a common version number. Manual GitHub Actions builds produce a signed Android Release APK and an unsigned Release IPA for self-signing on iOS 18+ iPhones. See the [shared build guide](docs/mobile-builds.zh-CN.md) and [iPhone installation guide](docs/ios-selfsign.zh-CN.md).
+Android and iOS share the `main` branch, Flutter 3.47.5 and a common version number. Download official packages from Releases. To build your own copy, manually run GitHub Actions in a repository where you have permission to produce a signed Android APK and an unsigned Release IPA for self-signing on iOS 18+ iPhones. See the [shared build guide](docs/mobile-builds.en.md) and [iPhone installation guide](docs/ios-selfsign.en.md).
 
 Proxly is a Flutter-based Android and iOS client that connects to an OpenClash / Mihomo controller deployed and administered by the user. It combines the Clash REST API, a bundled Zashboard web panel, and SSH/SFTP-based OpenClash configuration management.
 
@@ -35,6 +41,8 @@ Proxly does not contain the Clash or Mihomo proxy core and does not supply proxy
 | Updates | Checks application and Zashboard releases on GitHub; Android updates use APK assets; iOS opens GitHub Releases for manual installation; panel updates require a release archive with a SHA-256 digest |
 | Interface | Supports Simplified Chinese, English, and system, light, or dark theme modes |
 
+See the [dashboard guide](docs/dashboard.en.md) for layout and YAML operations.
+
 ## Technical architecture
 
 ```mermaid
@@ -51,7 +59,7 @@ flowchart LR
 
 | Layer | Implementation |
 | --- | --- |
-| Native UI | Flutter Material components implement setup, home, native connections, settings, control center, and YAML editor screens |
+| Native UI | Flutter Material components implement setup, home, native connections, settings, customizable home cards, and YAML editor screens |
 | Realtime data | `ClashDataHub` combines connection, traffic, and proxy-provider requests and shares short-lived state across native pages |
 | Web panel | Zashboard static assets ship with the app and load from a local server; Proxy, Connections, and the standalone console own separate WebViews |
 | Web synchronization | `WebPanelSync` synchronizes theme, language, controller settings, and imported Zashboard data, then broadcasts reloads to live WebViews |

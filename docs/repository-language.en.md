@@ -1,0 +1,28 @@
+# Repository language policy
+
+[简体中文](repository-language.zh-CN.md) · **English** · [Documentation](README.en.md)
+
+## Chinese first
+
+The repository home page, documentation index, contributing and security policies, bug reports, feature requests, usage questions, PR templates, and configurable workflow prompts default to Simplified Chinese. Chinese participation is welcome; English entry points provide equivalent content. Git commit and push descriptions may be English only.
+
+The application's language selection and first-launch behavior remain unchanged. This policy does not change app settings. Source comments continue to follow the existing comment rules and are outside this documentation translation change.
+
+## Keeping both languages current
+
+- Every public document has complete Chinese and English versions, linked at the top.
+- Chinese default entry points use GitHub-recognized names such as `README.md`, `CONTRIBUTING.md`, and `SECURITY.md`. Existing topic-specific Chinese paths remain stable; English versions use `.en.md`.
+- Update both languages when commands, versions, behavior, or limitations change. Translate procedures, examples, limits, and acceptance checklists in full, rather than providing only a summary.
+- English pages should link to English documentation. Add new documents to the [documentation index](README.en.md).
+- Issue forms have Chinese default templates and separate English templates. Discussion forms for questions, ideas, general conversation, announcements, and sharing use Chinese-first bilingual prompts. GitHub does not support forms for poll categories; the author supplies the poll text. Workflow prompts show Chinese first, followed by English.
+- Keep commands, paths, variables, input values, package names, checksums, and external protocol identifiers unchanged so instructions remain executable.
+
+## Upstream and historical material
+
+Keep original licenses, upstream copyright statements, and third-party notices intact. Link Chinese translations from the documentation index; translations aid reading and do not replace the original licenses. Interpret paths in upstream notices within the upstream project's context.
+
+Historical reviews and release notes retain their dates, versions, and original validation scope, with complete translations. If an early plan differs from the final release, mark it as historical and link the final notes.
+
+## GitHub interface boundaries
+
+The repository controls its documents, templates, workflow names, and prompts. GitHub supplies navigation and interface labels such as Settings, Actions, and Run workflow; repository files cannot impose a language on them. Chinese instructions include the original interface names to help readers locate controls. External sites and third-party tools also control their own interfaces.

@@ -1,5 +1,7 @@
 # 弹窗与按钮交互规范
 
+**简体中文** · [English](popup-interactions.en.md) · [文档目录](README.md)
+
 Proxly 原生界面与 Web 页原生工具栏共用以下规则。Zashboard 页面内部菜单由上游管理。
 
 | 用途 | 组件 | 关闭与结果 |

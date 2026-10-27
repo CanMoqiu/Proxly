@@ -1,19 +1,29 @@
-name: Feature request
-description: Suggest an improvement to Proxly
-title: "[Feature] "
+name: "功能建议（中文）"
+description: "提出功能或体验改进建议，默认使用中文"
+title: "[建议] "
 labels: [enhancement]
 body:
+  - type: markdown
+    attributes:
+      value: "请先搜索已有建议。描述使用场景，不要附带真实凭据或私人配置。"
   - type: textarea
     id: problem
     attributes:
-      label: Problem and use case
-      description: 你希望解决什么问题，使用场景是什么？
+      label: "问题与使用场景"
+      description: "你希望解决什么问题，使用场景是什么？"
     validations:
       required: true
   - type: textarea
     id: proposal
     attributes:
-      label: Proposed behavior
-      description: 请描述期望的用户行为和限制
+      label: "期望的行为"
+      description: "描述希望怎样操作、得到什么结果，以及必要限制。"
     validations:
       required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: "替代方式"
+      description: "目前如何解决，有没有考虑过其他办法？"
+    validations:
+      required: false

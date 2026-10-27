@@ -1,5 +1,7 @@
 # 内置 Zashboard
 
+**简体中文** · [English](bundled-zashboard.en.md) · [文档目录](README.md)
+
 - 版本：v3.29.1（2026-09-23）
 - 官方发布：https://github.com/Zephyruso/zashboard/releases/tag/v3.29.1
 - 对应提交：`50717b02dac68425cdc5b80cb754bea768ee4fc9`

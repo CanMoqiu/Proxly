@@ -1,0 +1,19 @@
+title: "[分享] "
+body:
+  - type: markdown
+    attributes:
+      value: "### 使用分享 / Show and tell\n默认使用中文，也欢迎英文。 / Chinese is the default; English is welcome.\n请先阅读文档，不要提交控制器密钥、SSH 密码、私钥或私人配置。安全漏洞请使用私密报告入口。 / Read the documentation first. Do not share controller tokens, SSH passwords, private keys, or private configuration. Report vulnerabilities privately."
+  - type: textarea
+    id: topic
+    attributes:
+      label: "分享内容 / Your project or experience"
+      description: "介绍你使用 Proxly 完成了什么。 / Describe what you have achieved with Proxly."
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: "方法与注意事项 / Approach and notes"
+      description: "分享方法或脱敏截图，避免泄露配置。 / Share your approach or sanitized screenshots without private configuration."
+    validations:
+      required: false

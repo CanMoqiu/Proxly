@@ -1,0 +1,19 @@
+title: "[交流] "
+body:
+  - type: markdown
+    attributes:
+      value: "### 综合交流 / General discussion\n默认使用中文，也欢迎英文。 / Chinese is the default; English is welcome.\n请先阅读文档，不要提交控制器密钥、SSH 密码、私钥或私人配置。安全漏洞请使用私密报告入口。 / Read the documentation first. Do not share controller tokens, SSH passwords, private keys, or private configuration. Report vulnerabilities privately."
+  - type: textarea
+    id: topic
+    attributes:
+      label: "讨论主题 / Topic"
+      description: "说明你想交流的内容。 / Describe what you would like to discuss."
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: "背景与补充 / Context"
+      description: "补充有助于理解的背景和脱敏材料。 / Add useful context and sanitized evidence."
+    validations:
+      required: false

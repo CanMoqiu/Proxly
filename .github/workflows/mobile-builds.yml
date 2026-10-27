@@ -1,15 +1,15 @@
-name: Proxly Android and iOS builds
+name: Proxly 双端打包 / Mobile builds
 
 on:
   workflow_dispatch:
     inputs:
       ref:
-        description: Branch, tag, or commit to build
+        description: 要构建的分支、标签或提交 / Branch, tag, or commit
         required: true
         default: main
         type: string
       platform:
-        description: Platforms to build
+        description: 构建平台（both 双端、android 安卓、ios 苹果）/ Target platforms
         required: true
         default: both
         type: choice
@@ -18,7 +18,7 @@ on:
           - ios
           - android
       android_build_type:
-        description: Android signed Release or separate Debug test APK
+        description: Android 签名正式构建或独立调试包 / Signed release or separate debug APK
         required: true
         default: release
         type: choice
@@ -35,6 +35,7 @@ concurrency:
 
 jobs:
   android:
+    name: Android 打包 / Android build
     if: inputs.platform != 'ios'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
@@ -45,15 +46,18 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - name: 获取源码 / Checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ inputs.ref }}
           persist-credentials: false
-      - uses: actions/setup-java@v4
+      - name: 配置 Java / Set up Java
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-      - uses: actions/cache@v4
+      - name: 缓存工具链与依赖 / Cache toolchain and dependencies
+        uses: actions/cache@v4
         with:
           path: |
             ${{ env.FLUTTER_ROOT }}
@@ -62,7 +66,7 @@ jobs:
             ~/.gradle/wrapper
           key: android-check-${{ runner.os }}-3.47.5-${{ hashFiles('pubspec.lock', 'android/**/gradle-wrapper.properties') }}
           restore-keys: android-check-${{ runner.os }}-3.47.5-
-      - name: Install Flutter
+      - name: 安装 Flutter / Install Flutter
         run: |
           mkdir -p build-logs
           git rev-parse HEAD | tee build-logs/commit.txt
@@ -73,13 +77,13 @@ jobs:
           echo "$FLUTTER_ROOT/bin" >> "$GITHUB_PATH"
           "$FLUTTER_ROOT/bin/flutter" config --no-analytics
           "$FLUTTER_ROOT/bin/flutter" --version | tee build-logs/flutter.txt
-      - name: Analyze and test
+      - name: 静态检查与测试 / Analyze and test
         run: |
           python3 -m unittest discover -s scripts -p 'test_*.py'
           flutter pub get --enforce-lockfile 2>&1 | tee build-logs/dependencies.txt
           flutter analyze 2>&1 | tee build-logs/analyze.txt
           flutter test 2>&1 | tee build-logs/tests.txt
-      - name: Restore release signing key
+      - name: 准备正式签名 / Restore release signing key
         if: inputs.android_build_type == 'release'
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -87,21 +91,21 @@ jobs:
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: python3 scripts/prepare_android_signing.py
-      - name: Build Android APK
+      - name: 构建 Android APK / Build Android APK
         run: |
           case "$ANDROID_BUILD_TYPE" in release|debug) ;; *) exit 1 ;; esac
           flutter build apk "--$ANDROID_BUILD_TYPE" 2>&1 | tee build-logs/android-build.txt
-      - name: Verify and package Android APK
+      - name: 核验并打包 Android / Verify and package Android
         env:
           ANDROID_CERT_SHA256: ${{ vars.ANDROID_CERT_SHA256 }}
         run: |
           export APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -1)
           export AAPT2="$(dirname "$APKSIGNER")/aapt2"
           python3 scripts/package_android.py "$ANDROID_BUILD_TYPE"
-      - name: Remove signing material
+      - name: 清理签名材料 / Remove signing material
         if: always()
         run: rm -f -- android/key.properties "$RUNNER_TEMP/proxly-release.p12"
-      - name: Save Android APK
+      - name: 保存 Android 安装包 / Save Android APK
         uses: actions/upload-artifact@v4
         with:
           name: proxly-android-${{ inputs.android_build_type }}-${{ github.run_number }}
@@ -109,7 +113,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
           compression-level: 0
-      - name: Save Android diagnostics
+      - name: 保存 Android 诊断 / Save Android diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -117,6 +121,7 @@ jobs:
           path: build-logs/
           retention-days: 14
   build:
+    name: iOS 打包 / iOS build
     if: inputs.platform != 'android'
     runs-on: macos-26
     timeout-minutes: 45
@@ -128,21 +133,23 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - name: 获取源码 / Checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ inputs.ref }}
           persist-credentials: false
-      - name: Record source and toolchain
+      - name: 记录源码与工具链 / Record source and toolchain
         run: |
           mkdir -p build-logs
           git rev-parse HEAD | tee build-logs/commit.txt
           xcodebuild -version | tee build-logs/xcode.txt
-          test -f ios/Runner.xcodeproj/project.pbxproj || { echo 'This ref does not contain the iOS port yet.'; exit 1; }
-      - uses: actions/cache@v4
+          test -f ios/Runner.xcodeproj/project.pbxproj || { echo '此版本尚不包含 iOS 工程 / This ref does not contain the iOS project.'; exit 1; }
+      - name: 缓存工具链与依赖 / Cache toolchain and dependencies
+        uses: actions/cache@v4
         with:
           path: ${{ env.FLUTTER_ROOT }}
           key: flutter-${{ runner.os }}-${{ runner.arch }}-${{ env.FLUTTER_VERSION }}
-      - name: Install Flutter
+      - name: 安装 Flutter / Install Flutter
         run: |
           if [ ! -x "$FLUTTER_ROOT/bin/flutter" ]; then
             git clone --depth 1 --branch "$FLUTTER_VERSION" https://github.com/flutter/flutter.git "$FLUTTER_ROOT"
@@ -150,7 +157,8 @@ jobs:
           echo "$FLUTTER_ROOT/bin" >> "$GITHUB_PATH"
           "$FLUTTER_ROOT/bin/flutter" --version | tee build-logs/flutter.txt
           "$FLUTTER_ROOT/bin/flutter" config --no-analytics --no-enable-swift-package-manager
-      - uses: actions/cache@v4
+      - name: 缓存工具链与依赖 / Cache toolchain and dependencies
+        uses: actions/cache@v4
         with:
           path: |
             ~/.pub-cache
@@ -158,13 +166,13 @@ jobs:
             ~/.cocoapods
           key: ios-deps-${{ runner.arch }}-${{ env.FLUTTER_VERSION }}-${{ hashFiles('pubspec.lock', 'ios/Podfile.lock') }}
           restore-keys: ios-deps-${{ runner.arch }}-${{ env.FLUTTER_VERSION }}-
-      - name: Dependencies
+      - name: 安装依赖 / Install dependencies
         run: flutter pub get --enforce-lockfile 2>&1 | tee build-logs/dependencies.txt
-      - name: Analyze and test
+      - name: 静态检查与测试 / Analyze and test
         run: |
           flutter analyze 2>&1 | tee build-logs/analyze.txt
           flutter test 2>&1 | tee build-logs/tests.txt
-      - name: Validate native WebViews on iPhone simulator
+      - name: 验证 iPhone 模拟器 WebView / Validate simulator WebViews
         timeout-minutes: 15
         run: |
           xcrun simctl list devices available --json > build-logs/simulators.json
@@ -173,20 +181,21 @@ jobs:
           xcrun simctl bootstatus "$SIMULATOR_ID" -b
           trap 'xcrun simctl io "$SIMULATOR_ID" screenshot build-logs/ios-simulator.png || true; xcrun simctl spawn "$SIMULATOR_ID" log show --last 3m --predicate '\''process == "Runner"'\'' --style compact > build-logs/ios-system.txt || true' EXIT
           flutter test integration_test/web_panel_smoke_test.dart -d "$SIMULATOR_ID" --no-pub --reporter expanded 2>&1 | tee build-logs/ios-webview-smoke.txt
-      - name: Build unsigned device application
+      - name: 构建未签名真机应用 / Build unsigned device app
         run: |
           flutter build ios --release --no-codesign 2>&1 | tee build-logs/ios-build.txt
           git diff --exit-code -- ios/Podfile.lock
-      - name: Validate and package IPA
+      - name: 核验并打包 IPA / Validate and package IPA
         run: python3 scripts/package_ios.py
-      - uses: actions/upload-artifact@v4
+      - name: 保存 iOS 安装包 / Save iOS package
+        uses: actions/upload-artifact@v4
         with:
           name: proxly-ios-unsigned-${{ github.run_number }}
           path: dist/ios/*
           if-no-files-found: error
           retention-days: 14
           compression-level: 0
-      - name: Save diagnostics
+      - name: 保存 iOS 诊断 / Save iOS diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
