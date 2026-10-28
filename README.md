@@ -16,7 +16,7 @@
 
 [文档目录](docs/README.md) · [贡献指南](CONTRIBUTING.md) · [安全说明](SECURITY.md) · [问题反馈与使用提问](https://github.com/CanMoqiu/Proxly/issues/new/choose)
 
-仓库文档和交流入口默认使用简体中文，提供完整英文版本。应用继续使用原有语言设置。许可证原文保留，并提供 [中文译本](LICENSE.zh-CN.md)。
+仓库文档和交流入口默认使用简体中文，提供完整英文版本。许可证原文保留，并提供 [中文译本](LICENSE.zh-CN.md)。
 
 ## 项目概述
 
