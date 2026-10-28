@@ -16,7 +16,7 @@
 
 [Documentation](docs/README.en.md) · [Contributing](CONTRIBUTING.en.md) · [Security policy](SECURITY.en.md) · [Issues and usage questions](https://github.com/CanMoqiu/Proxly/issues/new/choose)
 
-Repository documentation and entry points default to Simplified Chinese, with complete English counterparts. The app retains its existing language settings. Original licenses remain intact, with a [Chinese translation](LICENSE.zh-CN.md) available.
+Repository documentation and entry points default to Simplified Chinese, with complete English counterparts. Original licenses remain intact, with a [Chinese translation](LICENSE.zh-CN.md) available.
 
 ## Overview
 
