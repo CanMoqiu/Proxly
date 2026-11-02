@@ -34,7 +34,7 @@ SFTP is checked again after installation. A previously unread file is reloaded; 
 
 ## Refresh and recovery
 
-Home reuses the shared realtime source and restart coordinator. Runtime data refreshes every second; current configuration and quick settings refresh every five seconds. Hidden cards do not request their associated periodic reads. Home polling pauses when changing tabs, opening the editor, or backgrounding the app, then refreshes on return. In-flight reads are combined; results predating settings changes cannot replace current state.
+Home reuses the shared realtime source and restart coordinator. Runtime data refreshes every second; subscriptions refresh independently every 30 seconds. Current configuration and quick settings share one SSH connection per cycle, checking every 5 seconds initially or after failure and every 15 seconds once successful. Manual refresh, reconnection and completed operations still trigger immediate reads. Hidden cards do not request their associated periodic reads. Home polling pauses when changing tabs, opening the editor, or backgrounding the app, then refreshes on return. In-flight reads are combined; results predating settings changes cannot replace current state.
 
 A single top-right loading indicator combines initial reads and active operations. Cards retain status text and disabled buttons; Overview layout is unchanged. Periodic refreshes with existing data do not show the indicator.
 

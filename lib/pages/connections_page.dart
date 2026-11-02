@@ -14,7 +14,6 @@ import '../services/connection_settings_store.dart';
 import '../services/web_panel_service.dart';
 import '../services/web_panel_scroll.dart';
 import '../services/web_panel_flag_font.dart';
-import '../services/app_platform.dart';
 import '../services/panel_load_monitor.dart';
 import '../services/web_panel_page_probe.dart';
 import '../widgets/panel_error_view.dart';
@@ -35,6 +34,8 @@ class _ConnectionsPageState extends State<ConnectionsPage>
   final _panelLoad = PanelLoadMonitor();
   Future<void>? _restarting;
   bool _needsRecovery = false;
+  bool _resumePending = false;
+  Future<void>? _resuming;
 
   void _handlePanelLoad() {
     if (mounted) setState(() => _webViewReady = _panelLoad.ready);
@@ -480,27 +481,45 @@ class _ConnectionsPageState extends State<ConnectionsPage>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (AppPlatform.isIOS) {
-      if (state == AppLifecycleState.paused ||
-          state == AppLifecycleState.hidden) {
-        _needsRecovery = true;
-      }
-      if (state == AppLifecycleState.resumed &&
-          _needsRecovery &&
-          WebPanelSync.instance.connectionsTabActive) {
-        unawaited(_recoverPanel());
-      }
-      return;
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden) {
+      _resumePending = true;
     }
     if (state == AppLifecycleState.resumed &&
-        _webViewReady &&
-        _webViewController != null &&
         WebPanelSync.instance.connectionsTabActive) {
-      _reloadWebView();
+      unawaited(_resumePanel());
     }
   }
 
+  Future<void> _resumePanel() =>
+      _resuming ??= _checkResumedPanel().whenComplete(() => _resuming = null);
+
+  Future<void> _checkResumedPanel() async {
+    if (!_resumePending && !_needsRecovery) return;
+    _resumePending = false;
+    final controller = _webViewController;
+    final bridge = _controllerBridge;
+    if (!_needsRecovery &&
+        _panelLoad.error == null &&
+        _webViewReady &&
+        controller != null &&
+        bridge != null &&
+        bridge.isCurrentConnection) {
+      final healthy =
+          await WebPanelPageProbe.canResume(controller, bridge.secondaryPath);
+      if (!mounted ||
+          controller != _webViewController ||
+          bridge != _controllerBridge) {
+        return;
+      }
+      if (healthy) return;
+    }
+    if (mounted) await _recoverPanel();
+  }
+
   Future<void> _reloadWebView() async {
+    if (_resumePending) await _resumePanel();
+    if (!mounted) return;
     if (_needsRecovery || _panelLoad.error != null) {
       await _recoverPanel();
       return;

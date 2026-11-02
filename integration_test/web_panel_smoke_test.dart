@@ -173,6 +173,8 @@ void main() {
         sshPassword: '');
     await tester.pumpWidget(const ProxlyApp());
     await tester.pump(const Duration(seconds: 2));
+    expect(find.byType(ProxyPage, skipOffstage: false), findsNothing);
+    expect(find.byType(ConnectionsPage, skipOffstage: false), findsNothing);
     expect(find.text('v1.19.0'), findsNothing);
     expect(requests, contains('/version'));
     controllerOnline = true;

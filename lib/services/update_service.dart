@@ -50,7 +50,11 @@ class ApkDownloadSizeGuard {
 }
 
 class UpdateService {
-  UpdateService._();
+  UpdateService._() : _temporaryDirectory = getTemporaryDirectory;
+  @visibleForTesting
+  UpdateService.forTesting(
+      {required Future<Directory> Function() temporaryDirectory})
+      : _temporaryDirectory = temporaryDirectory;
   static final instance = UpdateService._();
 
   static const int maxApkBytes = 250 * 1024 * 1024;
@@ -67,6 +71,38 @@ class UpdateService {
   static const _cachedTagKey = 'cached_apk_tag';
 
   final ValueNotifier<UpdateInfo?> availableUpdate = ValueNotifier(null);
+  final Future<Directory> Function() _temporaryDirectory;
+  Future<void>? _apkCleanup;
+
+  /// Remove only our obsolete installer, never a newer APK awaiting installation.
+  Future<void> cleanupInstalledApk() => _apkCleanup ??= _cleanupInstalledApk();
+
+  Future<void> _cleanupInstalledApk() async {
+    if (!AppPlatform.supportsApkUpdates) return;
+    try {
+      final prefs = await SharedPreferences.getInstance()
+          .timeout(const Duration(seconds: 1));
+      final cachedTag = prefs.getString(_cachedTagKey);
+      if (cachedTag != null) {
+        final installed = await PackageInfo.fromPlatform()
+            .timeout(const Duration(seconds: 1));
+        final comparison = compareNumericVersions(cachedTag, installed.version);
+        if (comparison == null || comparison > 0) return;
+      }
+      final directory =
+          await _temporaryDirectory().timeout(const Duration(seconds: 1));
+      final path = '${directory.path}/proxly_update.apk';
+      final type = FileSystemEntity.typeSync(path, followLinks: false);
+      if (type == FileSystemEntityType.file) {
+        File(path).deleteSync();
+      } else if (type != FileSystemEntityType.notFound) {
+        return;
+      }
+      await prefs.remove(_cachedTagKey);
+    } catch (_) {
+      // Cleanup must never prevent startup or remove a retryable update marker.
+    }
+  }
 
   /// silent=true：失败静默返回 null，受自动检测开关、24h 节流和跳过版本限制
   /// silent=false：失败 rethrow，仅受跳过版本限制（不受自动检测开关和节流）
@@ -198,7 +234,7 @@ class UpdateService {
   // Return a cached APK only when it still looks like an APK.
   Future<File?> _getCachedApk(String tag, String? expectedSha256) async {
     final prefs = await SharedPreferences.getInstance();
-    final tempDir = await getTemporaryDirectory();
+    final tempDir = await _temporaryDirectory();
     final file = File('${tempDir.path}/proxly_update.apk');
     if (prefs.getString(_cachedTagKey) != tag) {
       if (await file.exists()) await file.delete();
@@ -238,8 +274,12 @@ class UpdateService {
     if (!AppPlatform.supportsApkUpdates) {
       throw UnsupportedError('APK updates are only available on Android');
     }
+    // Finish startup cleanup before writing into the same installer cache path.
+    await cleanupInstalledApk();
+    if (cancelled.value) throw const _CancelException();
     // 优先使用缓存
     final cached = await _getCachedApk(tag, expectedSha256);
+    if (cancelled.value) throw const _CancelException();
     if (cached != null) {
       onProgress(1.0);
       return cached;
@@ -278,12 +318,19 @@ class UpdateService {
     void Function(double) onProgress,
     ValueNotifier<bool> cancelled,
   ) async {
-    final tempDir = await getTemporaryDirectory();
+    final tempDir = await _temporaryDirectory();
     final file = File('${tempDir.path}/proxly_update.apk');
     if (await file.exists()) await file.delete();
     final httpClient = HttpClient()
       ..connectionTimeout = const Duration(seconds: 12);
+    // Abort stalled headers or bodies without waiting for another data chunk.
+    void cancelDownload() {
+      if (cancelled.value) httpClient.close(force: true);
+    }
+
+    cancelled.addListener(cancelDownload);
     try {
+      if (cancelled.value) throw const _CancelException();
       final request = await httpClient
           .getUrl(Uri.parse(url))
           .timeout(const Duration(seconds: 12));
@@ -305,29 +352,23 @@ class UpdateService {
           response.contentLength > 0 ? response.contentLength : null;
       final sizeGuard = ApkDownloadSizeGuard(maxBytes: maxApkBytes)
         ..validateContentLength(contentLength);
-      final sink = file.openWrite();
-
+      final output = await file.open(mode: FileMode.write);
       try {
         await for (final chunk
             in response.timeout(const Duration(seconds: 30))) {
-          if (cancelled.value) {
-            await sink.close();
-            if (await file.exists()) await file.delete();
-            throw const _CancelException();
-          }
+          if (cancelled.value) throw const _CancelException();
           sizeGuard.addChunk(chunk.length);
-          sink.add(chunk);
+          // Await disk writes so a fast network cannot queue the entire APK.
+          await output.writeFrom(chunk);
+          if (cancelled.value) throw const _CancelException();
           if (contentLength != null && contentLength > 0) {
             onProgress(sizeGuard.receivedBytes / contentLength);
           } else {
             onProgress(-1);
           }
         }
-        await sink.close();
-      } catch (_) {
-        await sink.close();
-        if (await file.exists()) await file.delete();
-        rethrow;
+      } finally {
+        await output.close();
       }
 
       if (!await _isLikelyApk(file)) {
@@ -338,14 +379,17 @@ class UpdateService {
         if (await file.exists()) await file.delete();
         throw Exception(tr('下载内容 SHA256 校验失败'));
       }
+      if (cancelled.value) throw const _CancelException();
 
       // Cache marker is written by the caller after a successful attempt.
       return file;
     } catch (_) {
       if (await file.exists()) await file.delete();
+      if (cancelled.value) throw const _CancelException();
       rethrow;
     } finally {
-      httpClient.close();
+      cancelled.removeListener(cancelDownload);
+      httpClient.close(force: true);
     }
   }
 

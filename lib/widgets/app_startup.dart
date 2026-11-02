@@ -5,6 +5,7 @@ import '../l10n/app_locale.dart';
 import '../main.dart';
 import '../services/app_secure_storage.dart';
 import '../services/clash_service.dart';
+import '../services/startup_cache_maintenance.dart';
 import '../theme/app_theme.dart';
 
 /// Keep a retryable UI alive if iOS temporarily denies access to the Keychain.
@@ -23,6 +24,7 @@ class _AppStartupState extends State<AppStartup> {
   Future<bool> _initialize() async {
     await AppLocaleController.instance.load();
     await ClashService.instance.loadConfig();
+    await StartupCacheMaintenance.run();
     final prefs = await SharedPreferences.getInstance();
     return (prefs.getString('clash_host') ?? '').isEmpty;
   }

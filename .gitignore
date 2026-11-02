@@ -83,3 +83,6 @@ CLAUDE.local.md
 .metadata
 devtools_options.yaml
 icon.png
+
+# Ignore aoci files
+aoci*.txt

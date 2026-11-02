@@ -72,7 +72,7 @@ flowchart LR
 
 | 项目 | 当前实现 |
 | --- | --- |
-| 平台 | Android 与 iOS 18+ iPhone；应用包名 / Bundle ID 为 `top.canmoqiu.proxly` |
+| 平台 | Android 7.0+（ARM64、x86_64）与 iOS 18+ iPhone；应用包名 / Bundle ID 为 `top.canmoqiu.proxly` |
 | Clash 地址 | 接受本机地址、私有或链路本地 IP、`.local` / `.lan` 域名以及局域网主机名；默认控制器端口为 `9090` |
 | Clash API | 控制器需要启用 `external-controller`；配置了 `secret` 时使用对应控制器密钥 |
 | SSH | OpenClash 设置、YAML 管理和重启使用 `root` 账号及固定端口 `22` |
@@ -81,6 +81,8 @@ flowchart LR
 | Zashboard JSON | 文件最大 `5 MB`，顶层键最多 `2000` 个，单个值序列化后最大 `1 MB` |
 | Zashboard ZIP | 下载最大 `50 MB`、最多 `2000` 项、单文件最大 `20 MB`、解压总量最大 `100 MB`、压缩比最大 `100:1` |
 | 重启影响 | OpenClash 设置批量应用、活动 YAML 切换和部分配置修改需要重启 OpenClash，现有代理连接可能中断 |
+
+26.8 之后的 Android 构建不再支持 ARM32 位设备，保留 ARM64 与 x86_64。32 位安卓系统请继续使用 26.8，详见[架构与存储说明](docs/mobile-builds.zh-CN.md)。
 
 ## 安全机制
 

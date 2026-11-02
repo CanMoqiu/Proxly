@@ -239,7 +239,11 @@ class ClashConfigFileService {
 
   static Future<ClashActiveConfig> getActiveConfig({
     String? password,
+    Future<String> Function(String)? readRunner,
   }) async {
+    if (readRunner != null) {
+      return parseActiveConfigOutput(await readRunner(_activeConfigCommand()));
+    }
     final settings = await loadSettings(passwordOverride: password);
     final output = await SshService.runText(
       settings.host,

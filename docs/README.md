@@ -16,8 +16,6 @@
 | iPhone 自签与安装 | [阅读](ios-selfsign.zh-CN.md) | [iPhone self-signing](ios-selfsign.en.md) |
 | 弹窗交互规范 | [阅读](popup-interactions.zh-CN.md) | [Dialog interactions](popup-interactions.en.md) |
 | 内置 Zashboard | [阅读](bundled-zashboard.md) | [Bundled Zashboard](bundled-zashboard.en.md) |
-| 26.6 历史安全审查 | [阅读](beta-security-review-26.6.md) | [26.6 historical security review](beta-security-review-26.6.en.md) |
-| 26.6 发布说明 | [阅读](releases/26.6.0.md) | [26.6 release notes](releases/26.6.0.en.md) |
 | 仓库语言约定 | [阅读](repository-language.zh-CN.md) | [Repository language policy](repository-language.en.md) |
 | 内置字体 | [阅读](../assets/fonts/README.md) | [Bundled fonts](../assets/fonts/README.en.md) |
 | iOS 启动页资源 | [阅读](../ios/Runner/Assets.xcassets/LaunchImage.imageset/README.md) | [iOS launch assets](../ios/Runner/Assets.xcassets/LaunchImage.imageset/README.en.md) |
@@ -33,5 +31,4 @@
 - 先下载使用：[正式版本](https://github.com/CanMoqiu/Proxly/releases/latest)；iPhone 请先阅读自签说明。
 - 自行编译：按双端构建文档准备环境与签名，并在有权限的仓库副本运行手动工作流。
 - 许可证和上游声明保留英文原文，中文译本用于阅读，不替代原许可。
-- 历史审查描述的是当时基线，不代表当前版本完整安全结论。
 - GitHub 自带导航和设置界面无法由仓库文件统一切换语言；可配置的内容采用中文优先。详见仓库语言约定。

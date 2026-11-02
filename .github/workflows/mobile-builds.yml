@@ -25,9 +25,14 @@ on:
         options:
           - release
           - debug
+      draft_release_tag:
+        description: 私有草稿标签（留空使用 Artifact）/ Private draft tag (blank for artifacts)
+        required: false
+        default: ''
+        type: string
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: proxly-${{ inputs.platform }}-${{ inputs.ref }}
@@ -51,6 +56,12 @@ jobs:
         with:
           ref: ${{ inputs.ref }}
           persist-credentials: false
+      - name: 核对私有草稿 / Verify private draft
+        if: inputs.draft_release_tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRAFT_RELEASE_TAG: ${{ inputs.draft_release_tag }}
+        run: python3 scripts/upload_draft_build.py verify
       - name: 配置 Java / Set up Java
         uses: actions/setup-java@v4
         with:
@@ -94,7 +105,7 @@ jobs:
       - name: 构建 Android APK / Build Android APK
         run: |
           case "$ANDROID_BUILD_TYPE" in release|debug) ;; *) exit 1 ;; esac
-          flutter build apk "--$ANDROID_BUILD_TYPE" 2>&1 | tee build-logs/android-build.txt
+          flutter build apk "--$ANDROID_BUILD_TYPE" --target-platform android-arm64,android-x64 2>&1 | tee build-logs/android-build.txt
       - name: 核验并打包 Android / Verify and package Android
         env:
           ANDROID_CERT_SHA256: ${{ vars.ANDROID_CERT_SHA256 }}
@@ -105,7 +116,14 @@ jobs:
       - name: 清理签名材料 / Remove signing material
         if: always()
         run: rm -f -- android/key.properties "$RUNNER_TEMP/proxly-release.p12"
+      - name: 上传 Android 到私有草稿 / Upload Android to private draft
+        if: inputs.draft_release_tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRAFT_RELEASE_TAG: ${{ inputs.draft_release_tag }}
+        run: python3 scripts/upload_draft_build.py android
       - name: 保存 Android 安装包 / Save Android APK
+        if: inputs.draft_release_tag == ''
         uses: actions/upload-artifact@v4
         with:
           name: proxly-android-${{ inputs.android_build_type }}-${{ github.run_number }}
@@ -114,7 +132,7 @@ jobs:
           retention-days: 14
           compression-level: 0
       - name: 保存 Android 诊断 / Save Android diagnostics
-        if: always()
+        if: always() && inputs.draft_release_tag == ''
         uses: actions/upload-artifact@v4
         with:
           name: android-build-logs-${{ github.run_number }}-${{ github.run_attempt }}
@@ -138,6 +156,12 @@ jobs:
         with:
           ref: ${{ inputs.ref }}
           persist-credentials: false
+      - name: 核对私有草稿 / Verify private draft
+        if: inputs.draft_release_tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRAFT_RELEASE_TAG: ${{ inputs.draft_release_tag }}
+        run: python3 scripts/upload_draft_build.py verify
       - name: 记录源码与工具链 / Record source and toolchain
         run: |
           mkdir -p build-logs
@@ -187,7 +211,14 @@ jobs:
           git diff --exit-code -- ios/Podfile.lock
       - name: 核验并打包 IPA / Validate and package IPA
         run: python3 scripts/package_ios.py
+      - name: 上传 iOS 到私有草稿 / Upload iOS to private draft
+        if: inputs.draft_release_tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRAFT_RELEASE_TAG: ${{ inputs.draft_release_tag }}
+        run: python3 scripts/upload_draft_build.py ios
       - name: 保存 iOS 安装包 / Save iOS package
+        if: inputs.draft_release_tag == ''
         uses: actions/upload-artifact@v4
         with:
           name: proxly-ios-unsigned-${{ github.run_number }}
@@ -196,7 +227,7 @@ jobs:
           retention-days: 14
           compression-level: 0
       - name: 保存 iOS 诊断 / Save iOS diagnostics
-        if: always()
+        if: always() && inputs.draft_release_tag == ''
         uses: actions/upload-artifact@v4
         with:
           name: ios-build-logs-${{ github.run_number }}-${{ github.run_attempt }}

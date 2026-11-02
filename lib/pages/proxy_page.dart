@@ -44,6 +44,8 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
   final _panelLoad = PanelLoadMonitor();
   Future<void>? _restarting;
   bool _needsRecovery = false;
+  bool _resumePending = false;
+  Future<void>? _resuming;
 
   void _handlePanelLoad() {
     if (mounted) setState(() => _webViewReady = _panelLoad.ready);
@@ -341,7 +343,9 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
         return;
       }
       if (sanitized != raw) {
-        await prefs.setString(_prefLocalStorage, sanitized);
+        if (prefs.getString(_prefLocalStorage) != sanitized) {
+          await prefs.setString(_prefLocalStorage, sanitized);
+        }
         raw = sanitized;
       }
     } catch (_) {
@@ -572,29 +576,41 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (AppPlatform.isIOS) {
-      if (state == AppLifecycleState.paused ||
-          state == AppLifecycleState.hidden) {
-        _needsRecovery = true;
-        unawaited(_saveLocalStorage());
-      }
-      if (state == AppLifecycleState.resumed &&
-          _needsRecovery &&
-          (!widget.asTab || WebPanelSync.instance.proxyTabActive)) {
-        unawaited(_recoverPanel());
-      }
-      return;
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden) {
+      _resumePending = true;
+      unawaited(_saveLocalStorage());
     }
     if (state == AppLifecycleState.resumed &&
-        _webViewReady &&
-        _webViewController != null) {
-      // Bug 2：asTab 模式下只有用户正在看代理标签时才重载，
-      // 停留在其他标签时前台化不应触发 WebView 重载，避免产生无效 API 请求消耗订阅流量。
-      if (!widget.asTab || WebPanelSync.instance.proxyTabActive) {
-        setState(() => _webViewReady = false);
-        _webViewController!.reload();
-      }
+        (!widget.asTab || WebPanelSync.instance.proxyTabActive)) {
+      unawaited(_resumePanel());
     }
+  }
+
+  Future<void> _resumePanel() =>
+      _resuming ??= _checkResumedPanel().whenComplete(() => _resuming = null);
+
+  Future<void> _checkResumedPanel() async {
+    if (!_resumePending && !_needsRecovery) return;
+    _resumePending = false;
+    final controller = _webViewController;
+    final bridge = _controllerBridge;
+    if (!_needsRecovery &&
+        _panelLoad.error == null &&
+        _webViewReady &&
+        controller != null &&
+        bridge != null &&
+        bridge.isCurrentConnection) {
+      final healthy =
+          await WebPanelPageProbe.canResume(controller, bridge.secondaryPath);
+      if (!mounted ||
+          controller != _webViewController ||
+          bridge != _controllerBridge) {
+        return;
+      }
+      if (healthy) return;
+    }
+    if (mounted) await _recoverPanel();
   }
 
   /// 把当前 WebView 的 localStorage 全部导出并存入 SharedPreferences
@@ -621,7 +637,9 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
           await ZashboardSettingsImportService.instance.sanitizeSnapshot(raw);
       if (sanitized == null) return;
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_prefLocalStorage, sanitized);
+      if (prefs.getString(_prefLocalStorage) != sanitized) {
+        await prefs.setString(_prefLocalStorage, sanitized);
+      }
     } catch (e) {
       debugPrint('[ProxyPage] 保存 localStorage 失败: $e');
     }
@@ -630,6 +648,8 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
   /// 控制台关闭后，把最新的 SharedPreferences 数据注入到代理页已有的 WebView，
   /// 无需整页重载，用户不会看到加载动画。
   Future<void> _reloadFromPrefs() async {
+    if (_resumePending) await _resumePanel();
+    if (!mounted) return;
     if (_needsRecovery || _panelLoad.error != null) {
       await _recoverPanel();
       return;

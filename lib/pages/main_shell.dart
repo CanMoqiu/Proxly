@@ -10,11 +10,10 @@ import 'proxy_page.dart';
 import 'settings_page.dart';
 import 'connections_page.dart';
 import 'native_connections_page.dart';
-import '../services/clash_data_hub.dart';
 import '../services/update_service.dart';
 import '../services/app_platform.dart';
 import '../services/web_panel_service.dart';
-import '../theme/app_theme.dart';
+import '../widgets/app_bottom_navigation_bar.dart';
 import '../widgets/update_dialog.dart';
 
 class MainShell extends StatefulWidget {
@@ -26,6 +25,9 @@ class MainShell extends StatefulWidget {
 
 class _MainShellState extends State<MainShell> with RouteAware {
   int _currentIndex = 0;
+  final Set<int> _visitedTabs = {0};
+  int _tabRevision = 0;
+  bool _routeVisible = true;
   bool _showConsoleButton = false;
   String _connectionsTabMode = 'webview';
 
@@ -57,9 +59,15 @@ class _MainShellState extends State<MainShell> with RouteAware {
 
   @override
   void didPopNext() {
+    setState(() => _routeVisible = true);
     _loadPrefs();
     // Reconcile Web panel visibility after returning from the pushed console route.
     _syncWebPanelTabState();
+  }
+
+  @override
+  void didPushNext() {
+    setState(() => _routeVisible = false);
   }
 
   @override
@@ -93,7 +101,8 @@ class _MainShellState extends State<MainShell> with RouteAware {
     }
   }
 
-  Future<void> _syncAfterTabChange(int previousIndex, int index) async {
+  Future<void> _syncAfterTabChange(
+      int previousIndex, int index, int revision) async {
     try {
       if (previousIndex == 1 || index == 2) {
         try {
@@ -104,18 +113,19 @@ class _MainShellState extends State<MainShell> with RouteAware {
           // Continue activating the visible page if the hidden page is stalled.
         }
       }
-      if (!mounted || _currentIndex != index) return;
+      // First visits mount the page lazily; wait for its callbacks to register.
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted || _tabRevision != revision || _currentIndex != index) {
+        return;
+      }
       if (index == 1) {
         await WebPanelSync.instance
             .reload()
             .timeout(const Duration(seconds: 3));
-      } else if (index == 2) {
+      } else if (index == 2 && _connectionsTabMode == 'webview') {
         await WebPanelSync.instance
             .reloadConnections()
             .timeout(const Duration(seconds: 3));
-        if (_connectionsTabMode == 'native') {
-          await ClashDataHub.instance.refresh(force: true);
-        }
       }
     } catch (_) {
       // Panel errors/retry are owned by the page; navigation remains usable.
@@ -126,63 +136,52 @@ class _MainShellState extends State<MainShell> with RouteAware {
     return [
       HomePage(
           showConsoleButton: _showConsoleButton, active: _currentIndex == 0),
-      const ProxyPage(asTab: true),
-      if (_connectionsTabMode == 'native')
-        const NativeConnectionsPage()
+      if (!_visitedTabs.contains(1))
+        const SizedBox.shrink()
+      else
+        const ProxyPage(asTab: true),
+      if (!_visitedTabs.contains(2))
+        const SizedBox.shrink()
+      else if (_connectionsTabMode == 'native')
+        NativeConnectionsPage(active: _currentIndex == 2 && _routeVisible)
       else
         const ConnectionsPage(),
-      const SettingsPage(),
+      if (_visitedTabs.contains(3))
+        const SettingsPage()
+      else
+        const SizedBox.shrink(),
     ];
   }
-
-  List<BottomNavigationBarItem> get _navItems => [
-        BottomNavigationBarItem(
-            icon: Icon(Icons.home_rounded), label: tr('首页')),
-        BottomNavigationBarItem(
-            icon: Icon(Icons.hub_outlined),
-            activeIcon: Icon(Icons.hub_rounded),
-            label: tr('代理')),
-        BottomNavigationBarItem(
-            icon: Icon(Icons.lan_outlined),
-            activeIcon: Icon(Icons.lan_rounded),
-            label: tr('连接')),
-        BottomNavigationBarItem(
-            icon: Icon(Icons.settings_rounded), label: tr('设置')),
-      ];
 
   int get _maxIndex => 3;
 
   @override
   Widget build(BuildContext context) {
     AppLocaleScope.watch(context);
-    final palette = AppPalette.of(context);
-    final theme = Theme.of(context);
-    final accentColor = theme.colorScheme.primary;
-
     return Scaffold(
-      body: IndexedStack(index: _currentIndex, children: _pages),
-      bottomNavigationBar: Theme(
-        // Match Android's Material 3 ripple on iOS without changing page themes.
-        data: AppPlatform.isIOS
-            ? theme.copyWith(splashFactory: InkSparkle.splashFactory)
-            : theme,
-        child: BottomNavigationBar(
-          backgroundColor: palette.surface,
-          unselectedItemColor: palette.textSecondary,
-          currentIndex: _currentIndex,
-          onTap: (index) {
-            FocusManager.instance.primaryFocus?.unfocus();
-            if (index == _currentIndex) return;
-            final previousIndex = _currentIndex;
-            setState(() => _currentIndex = index);
-            _syncWebPanelTabState();
-            // A hidden WKWebView can suspend JavaScript. Never lock navigation
-            // while waiting for its preferences or controller requests.
-            unawaited(_syncAfterTabChange(previousIndex, index));
-          },
-          selectedItemColor: accentColor,
-          items: _navItems,
-        ),
+      body: IndexedStack(
+        index: _currentIndex,
+        children: [
+          for (final (index, page) in _pages.indexed)
+            TickerMode(enabled: index == _currentIndex, child: page),
+        ],
+      ),
+      bottomNavigationBar: AppBottomNavigationBar(
+        currentIndex: _currentIndex,
+        onTap: (index) {
+          FocusManager.instance.primaryFocus?.unfocus();
+          if (index == _currentIndex) return;
+          final previousIndex = _currentIndex;
+          final revision = ++_tabRevision;
+          setState(() {
+            _currentIndex = index;
+            _visitedTabs.add(index);
+          });
+          _syncWebPanelTabState();
+          // A hidden WKWebView can suspend JavaScript. Never lock navigation
+          // while waiting for its preferences or controller requests.
+          unawaited(_syncAfterTabChange(previousIndex, index, revision));
+        },
       ),
     );
   }

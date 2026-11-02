@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'dart:async';
 import '../services/clash_data_hub.dart';
 import '../services/clash_service.dart';
+import '../services/connection_list_projection.dart';
 import '../services/web_panel_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/traffic_formatter.dart';
@@ -13,11 +14,12 @@ import '../widgets/connection_detail_sheet.dart';
 import '../widgets/app_feedback.dart';
 
 class NativeConnectionsPage extends StatefulWidget {
+  final bool active;
   final Future<ClashRealtimeSnapshot> Function()? loadSnapshot;
   final Future<void> Function(String)? closeConnection;
 
   const NativeConnectionsPage(
-      {super.key, this.loadSnapshot, this.closeConnection});
+      {super.key, this.active = true, this.loadSnapshot, this.closeConnection});
 
   @override
   State<NativeConnectionsPage> createState() => _NativeConnectionsPageState();
@@ -31,6 +33,9 @@ class _NativeConnectionsPageState extends State<NativeConnectionsPage>
   String? _error;
   Future<void>? _fetchFuture;
   bool _forceFetchRequested = false;
+  bool _foreground = true;
+  int _activityGeneration = 0;
+  bool get _canPoll => mounted && widget.active && _foreground;
 
   List<ConnectionEntry> _connections = [];
   Map<String, int> _prevConnUpload = {};
@@ -44,6 +49,7 @@ class _NativeConnectionsPageState extends State<NativeConnectionsPage>
   int _lastSnapshotSequence = 0;
   final ClashDataHub _dataHub = ClashDataHub.instance;
   final Set<String> _closingConnections = {};
+  final _connectionList = ConnectionListProjection();
 
   @override
   void initState() {
@@ -53,13 +59,25 @@ class _NativeConnectionsPageState extends State<NativeConnectionsPage>
     WebPanelSync.instance.registerConnections(
       reload: () => _fetchData(force: true),
     );
-    _fetchData();
-    _startTimers();
+    _foreground = WidgetsBinding.instance.lifecycleState == null ||
+        WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed;
+    _syncPolling();
   }
 
-  void _startTimers() {
+  void _syncPolling() {
+    _activityGeneration++;
     _timer?.cancel();
     _clockTimer?.cancel();
+    _timer = null;
+    _clockTimer = null;
+    if (!_canPoll) {
+      _forceFetchRequested = false;
+      return;
+    }
+    _prevConnUpload.clear();
+    _prevConnDownload.clear();
+    _dataHub.resetBaseline();
+    unawaited(_fetchData(force: true));
     _timer = Timer.periodic(const Duration(seconds: 1), (_) => _fetchData());
     _clockTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted && _connections.isNotEmpty) setState(() {});
@@ -67,16 +85,17 @@ class _NativeConnectionsPageState extends State<NativeConnectionsPage>
   }
 
   @override
+  void didUpdateWidget(covariant NativeConnectionsPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.active != widget.active) _syncPolling();
+  }
+
+  @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    _timer?.cancel();
-    _clockTimer?.cancel();
-    if (state == AppLifecycleState.resumed) {
-      _prevConnUpload.clear();
-      _prevConnDownload.clear();
-      _dataHub.resetBaseline();
-      _startTimers();
-      _fetchData(force: true);
-    }
+    final foreground = state == AppLifecycleState.resumed;
+    if (_foreground == foreground) return;
+    _foreground = foreground;
+    _syncPolling();
   }
 
   @override
@@ -90,6 +109,7 @@ class _NativeConnectionsPageState extends State<NativeConnectionsPage>
   }
 
   Future<void> _fetchData({bool force = false}) {
+    if (!_canPoll) return Future.value();
     if (force) _forceFetchRequested = true;
     final active = _fetchFuture;
     if (active != null) return active;
@@ -105,13 +125,14 @@ class _NativeConnectionsPageState extends State<NativeConnectionsPage>
         final force = _forceFetchRequested;
         _forceFetchRequested = false;
         await _performFetch(force: force);
-      } while (_forceFetchRequested);
+      } while (_canPoll && _forceFetchRequested);
     } finally {
       _fetchFuture = null;
     }
   }
 
   Future<void> _performFetch({required bool force}) async {
+    final generation = _activityGeneration;
     try {
       if (widget.loadSnapshot == null && !ClashService.instance.isConfigured) {
         if (mounted) {
@@ -122,11 +143,12 @@ class _NativeConnectionsPageState extends State<NativeConnectionsPage>
         }
         return;
       }
-      final snapshot =
-          await (widget.loadSnapshot?.call() ?? _dataHub.refresh(force: force));
+      final snapshot = await (widget.loadSnapshot?.call() ??
+          _dataHub.refresh(force: force, includeProviders: false));
+      if (!_canPoll || generation != _activityGeneration) return;
       _applyRealtimeSnapshot(snapshot);
     } catch (e) {
-      if (mounted) {
+      if (_canPoll && generation == _activityGeneration) {
         setState(() {
           _loading = false;
           _error = ConnectionFeedback.forError(e);
@@ -137,7 +159,7 @@ class _NativeConnectionsPageState extends State<NativeConnectionsPage>
 
   void _handleDataHubChanged() {
     final snapshot = _dataHub.snapshot;
-    if (snapshot == null || !mounted) return;
+    if (snapshot == null || !_canPoll) return;
     _applyRealtimeSnapshot(snapshot);
   }
 
@@ -209,38 +231,14 @@ class _NativeConnectionsPageState extends State<NativeConnectionsPage>
     return '${elapsed.inHours}小时前';
   }
 
-  List<ConnectionEntry> get _filteredSortedConnections {
-    var list = List<ConnectionEntry>.from(_connections);
-    if (_filterIp.isNotEmpty) {
-      list = list.where((c) => c.sourceIp == _filterIp).toList();
-    }
-    switch (_connSortBy) {
-      case 'time_asc':
-        list.sort((a, b) => a.startTime.compareTo(b.startTime));
-        break;
-      case 'down_desc':
-        list.sort((a, b) => b.download.compareTo(a.download));
-        break;
-      case 'up_desc':
-        list.sort((a, b) => b.upload.compareTo(a.upload));
-        break;
-      case 'down_speed_desc':
-        list.sort(
-          (a, b) =>
-              (_connDownSpeed[b.id] ?? 0).compareTo(_connDownSpeed[a.id] ?? 0),
-        );
-        break;
-      case 'up_speed_desc':
-        list.sort(
-          (a, b) =>
-              (_connUpSpeed[b.id] ?? 0).compareTo(_connUpSpeed[a.id] ?? 0),
-        );
-        break;
-      default:
-        list.sort((a, b) => b.startTime.compareTo(a.startTime));
-    }
-    return list;
-  }
+  List<ConnectionEntry> get _filteredSortedConnections =>
+      _connectionList.select(
+        _connections,
+        sortBy: _connSortBy,
+        sourceIp: _filterIp,
+        uploadSpeeds: _connUpSpeed,
+        downloadSpeeds: _connDownSpeed,
+      );
 
   @override
   Widget build(BuildContext context) {

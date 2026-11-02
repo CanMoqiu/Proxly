@@ -8,6 +8,81 @@ import 'package:proxly/services/clash_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
+  testWidgets('hidden and background native connections stop polling',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({'app_language': 'zh_CN'});
+    await AppLocaleController.instance.load();
+    var active = false;
+    var calls = 0;
+    late StateSetter update;
+    await tester.pumpWidget(AppLocaleScope(
+      controller: AppLocaleController.instance,
+      child: MaterialApp(home: StatefulBuilder(builder: (context, setState) {
+        update = setState;
+        return NativeConnectionsPage(
+          active: active,
+          loadSnapshot: () async => _emptySnapshot(++calls),
+        );
+      })),
+    ));
+    await tester.pump(const Duration(seconds: 5));
+    expect(calls, 0);
+    update(() => active = true);
+    await tester.pump();
+    expect(calls, 1);
+    await tester.pump(const Duration(seconds: 1));
+    expect(calls, 2);
+    update(() => active = false);
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 5));
+    expect(calls, 2);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    update(() => active = true);
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 5));
+    expect(calls, 2);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    expect(calls, 3);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('late hidden request cannot overwrite resumed data',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({'app_language': 'zh_CN'});
+    await AppLocaleController.instance.load();
+    var active = true;
+    var calls = 0;
+    final pending = Completer<ClashRealtimeSnapshot>();
+    late StateSetter update;
+    await tester.pumpWidget(AppLocaleScope(
+      controller: AppLocaleController.instance,
+      child: MaterialApp(home: StatefulBuilder(builder: (context, setState) {
+        update = setState;
+        return NativeConnectionsPage(
+            active: active,
+            loadSnapshot: () {
+              calls++;
+              return calls == 1
+                  ? pending.future
+                  : Future.value(_emptySnapshot(2));
+            });
+      })),
+    ));
+    update(() => active = false);
+    await tester.pump();
+    update(() => active = true);
+    await tester.pump();
+    expect(calls, 1, reason: 'Do not overlap the existing request');
+    pending.completeError(StateError('stale failure'));
+    await tester.pumpAndSettle();
+    expect(calls, 2,
+        reason: 'Resume refreshes after the old request completes');
+    expect(find.textContaining('stale failure'), findsNothing);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('close waits for confirmation, keeps failures and allows retry',
       (tester) async {
     SharedPreferences.setMockInitialValues({'app_language': 'zh_CN'});
@@ -117,3 +192,15 @@ void main() {
 }
 
 final _testStartTime = DateTime(2026);
+
+ClashRealtimeSnapshot _emptySnapshot(int sequence) => ClashRealtimeSnapshot(
+      sequence: sequence,
+      updatedAt: DateTime.now(),
+      downloadTotal: 0,
+      uploadTotal: 0,
+      activeConnections: 0,
+      downloadSpeed: 0,
+      uploadSpeed: 0,
+      connections: const [],
+      providers: const [],
+    );

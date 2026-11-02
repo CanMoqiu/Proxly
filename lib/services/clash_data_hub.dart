@@ -1,4 +1,5 @@
 import '../l10n/app_locale.dart';
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import 'clash_service.dart';
@@ -56,6 +57,16 @@ class ClashDataHub extends ChangeNotifier {
   ClashDataHub._();
   static final instance = ClashDataHub._();
 
+  @visibleForTesting
+  ClashDataHub.forTesting(
+      {required ClashService service, DateTime Function()? now})
+      : _serviceOverride = service,
+        _nowOverride = now;
+  ClashService? _serviceOverride;
+  DateTime Function()? _nowOverride;
+  ClashService get _service => _serviceOverride ?? ClashService.instance;
+  DateTime get _now => _nowOverride?.call() ?? DateTime.now();
+
   static const _cacheWindow = Duration(milliseconds: 750);
 
   ClashRealtimeSnapshot? _snapshot;
@@ -65,6 +76,12 @@ class ClashDataHub extends ChangeNotifier {
   int _lastUpload = -1;
   DateTime? _lastPollTime;
   bool _baselineResetPending = false;
+  int _epoch = 0;
+  bool _disposed = false;
+  Future<void>? _providerRequest;
+  DateTime? _providerRequestedAt;
+  List<ProviderTraffic> _providers = const [];
+  static const providerRefreshInterval = Duration(seconds: 30);
 
   ClashRealtimeSnapshot? get snapshot => _snapshot;
 
@@ -74,6 +91,10 @@ class ClashDataHub extends ChangeNotifier {
     _lastPollTime = null;
     _baselineResetPending = true;
     if (clearSnapshot) {
+      _epoch++;
+      _providerRequest = null;
+      _providerRequestedAt = null;
+      _providers = const [];
       _inFlight = null;
       _snapshot = null;
       notifyListeners();
@@ -88,13 +109,15 @@ class ClashDataHub extends ChangeNotifier {
     }
   }
 
-  Future<ClashRealtimeSnapshot> refresh({bool force = false}) async {
-    if (!ClashService.instance.isConfigured) {
+  Future<ClashRealtimeSnapshot> refresh(
+      {bool force = false, bool includeProviders = true}) async {
+    if (!_service.isConfigured) {
       throw Exception(tr('请先在设置页填写 Clash 地址'));
     }
 
     final current = _snapshot;
-    final now = DateTime.now();
+    final now = _now;
+    if (includeProviders) _refreshProviders(force: force);
     if (!_baselineResetPending &&
         !force &&
         current != null &&
@@ -115,23 +138,21 @@ class ClashDataHub extends ChangeNotifier {
   }
 
   Future<ClashRealtimeSnapshot> _load() async {
+    final epoch = _epoch;
     final generation = ControllerConnectionState.instance.generation;
-    final results = await Future.wait([
-      ClashService.instance.getTrafficSnapshot(),
-      ClashService.instance.getProviderTraffic(),
-    ]);
-    if (generation != ControllerConnectionState.instance.generation) {
+    final rawSnapshot = await _service.getTrafficSnapshot();
+    if (_disposed ||
+        epoch != _epoch ||
+        generation != ControllerConnectionState.instance.generation) {
       throw StateError('Discarded stale controller data');
     }
 
-    final rawSnapshot = results[0] as Map<String, dynamic>;
-    final providers = results[1] as List<ProviderTraffic>;
     final connections =
         List<ConnectionEntry>.from(rawSnapshot['connections'] as List? ?? []);
     final downloadTotal = rawSnapshot['downloadTotal'] as int? ?? 0;
     final uploadTotal = rawSnapshot['uploadTotal'] as int? ?? 0;
 
-    final now = DateTime.now();
+    final now = _now;
     double downloadSpeed = 0;
     double uploadSpeed = 0;
     if (_lastDownload >= 0 && _lastPollTime != null) {
@@ -161,11 +182,56 @@ class ClashDataHub extends ChangeNotifier {
       downloadSpeed: downloadSpeed,
       uploadSpeed: uploadSpeed,
       connections: connections,
-      providers: providers,
+      providers: _providers,
     );
     _snapshot = nextSnapshot;
     notifyListeners();
     return nextSnapshot;
+  }
+
+  void _refreshProviders({required bool force}) {
+    if (_providerRequest != null ||
+        (!force &&
+            _providerRequestedAt != null &&
+            _now.difference(_providerRequestedAt!) < providerRefreshInterval)) {
+      return;
+    }
+    _providerRequestedAt = _now;
+    final epoch = _epoch;
+    final generation = ControllerConnectionState.instance.generation;
+    final request = _loadProviders(epoch, generation);
+    _providerRequest = request;
+    unawaited(request.whenComplete(() {
+      if (identical(_providerRequest, request)) _providerRequest = null;
+    }));
+  }
+
+  Future<void> _loadProviders(int epoch, int generation) async {
+    try {
+      final providers = await _service.getProviderTraffic();
+      if (_disposed ||
+          epoch != _epoch ||
+          generation != ControllerConnectionState.instance.generation) {
+        return;
+      }
+      if (listEquals(
+          _providers.map((p) => (p.name, p.used, p.total, p.expire)).toList(),
+          providers.map((p) => (p.name, p.used, p.total, p.expire)).toList())) {
+        return;
+      }
+      _providers = List.unmodifiable(providers);
+      // Provider-only changes must not advance traffic samples or speed baselines.
+      _snapshot = _snapshot?.copyWith(providers: _providers);
+      notifyListeners();
+    } catch (_) {
+      // An optional subscription endpoint must not block live controller data.
+    }
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
   }
 
   void removeConnection(String id) {

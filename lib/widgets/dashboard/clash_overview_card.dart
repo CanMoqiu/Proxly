@@ -1,5 +1,6 @@
 import 'dashboard_card_titles.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import '../../l10n/app_locale.dart';
 import '../../theme/app_theme.dart';
 import '../adaptive_ui.dart';
@@ -310,6 +311,6 @@ class _SpeedChartPainter extends CustomPainter {
       old.gridColor != gridColor ||
       old.maxSpeed != maxSpeed ||
       old.primary != primary ||
-      old.downloadSpeeds.last != downloadSpeeds.last ||
-      old.uploadSpeeds.last != uploadSpeeds.last;
+      !listEquals(old.downloadSpeeds, downloadSpeeds) ||
+      !listEquals(old.uploadSpeeds, uploadSpeeds);
 }
