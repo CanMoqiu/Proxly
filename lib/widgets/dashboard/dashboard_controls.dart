@@ -11,6 +11,7 @@ import '../../services/clash_service.dart';
 import '../../services/connection_settings_store.dart';
 import '../../services/openclash_quick_settings_service.dart';
 import '../../services/openclash_restart_coordinator.dart';
+import '../../services/ssh_service.dart';
 import '../../theme/app_theme.dart';
 import '../app_feedback.dart';
 import '../../pages/clash_config_editor_page.dart';
@@ -18,6 +19,7 @@ import '../yaml_config_picker.dart';
 import 'current_yaml_card.dart';
 import 'clash_operations_card.dart';
 import 'quick_settings_card.dart';
+import 'dashboard_card_cache.dart';
 
 class DashboardControls extends StatefulWidget {
   final bool autoLoad;
@@ -32,6 +34,9 @@ class DashboardControls extends StatefulWidget {
   final Future<void> Function(String)? activateConfig;
   final OpenClashQuickSettingsService? quickSettingsService;
   final OpenClashRestartCoordinator? restartCoordinator;
+  @visibleForTesting
+  final Future<void> Function(Future<void> Function(OpenClashCommandRunner))?
+      readSession;
 
   const DashboardControls({
     super.key,
@@ -47,6 +52,7 @@ class DashboardControls extends StatefulWidget {
     this.activateConfig,
     this.quickSettingsService,
     this.restartCoordinator,
+    this.readSession,
   });
 
   @override
@@ -59,6 +65,12 @@ class _DashboardControlsState extends State<DashboardControls>
         RouteAware,
         TransientFeedbackStateMixin<DashboardControls> {
   static const _autoSyncInterval = Duration(seconds: 5);
+  final _yamlCard = DashboardCardCache();
+  final _operationsCard = DashboardCardCache();
+  final _quickCard = DashboardCardCache();
+  int _stableTicks = 0;
+  int _lastTimerTick = 0;
+  Future<void>? _refreshFuture;
 
   late final OpenClashQuickSettingsService _quickSettingsService;
   late final OpenClashRestartCoordinator _restartCoordinator;
@@ -204,15 +216,27 @@ class _DashboardControlsState extends State<DashboardControls>
     if (!_autoSyncEnabled) {
       _autoSyncTimer?.cancel();
       _autoSyncTimer = null;
+      _lastTimerTick = 0;
       return;
     }
     _autoSyncTimer ??= Timer.periodic(
       _autoSyncInterval,
-      (_) => _refreshVisibleStatus(),
+      (timer) {
+        final elapsedTicks = timer.tick - _lastTimerTick;
+        _lastTimerTick = timer.tick;
+        final stable = (!widget.refreshConfig ||
+                !_configReadFailed && _activeConfig != null) &&
+            (!widget.refreshQuickSettings ||
+                !_quickSettingsReadFailed && _quickSettings != null);
+        _stableTicks += elapsedTicks;
+        if (stable && _stableTicks < 3) return;
+        _refreshVisibleStatus();
+      },
     );
   }
 
   void _refreshVisibleStatus() {
+    _stableTicks = 0;
     if (!_autoSyncEnabled) return;
     unawaited(_refreshPage(silent: true));
   }
@@ -246,13 +270,106 @@ class _DashboardControlsState extends State<DashboardControls>
 
   Future<void> _refreshPage({bool silent = false}) async {
     if (_operationBusy && silent) return;
+    if (_refreshFuture != null) return _refreshFuture;
+    final revision =
+        (_connectionEpoch, _configMutationEpoch, _quickSettingsMutationEpoch);
+    final next = _readPage(silent: silent);
+    _refreshFuture = next;
+    try {
+      await next;
+    } finally {
+      _refreshFuture = null;
+      if (_autoSyncEnabled &&
+          revision !=
+              (
+                _connectionEpoch,
+                _configMutationEpoch,
+                _quickSettingsMutationEpoch
+              )) {
+        _refreshVisibleStatus();
+      }
+    }
+  }
+
+  Future<void> _readPage({required bool silent}) async {
+    if (widget.refreshConfig &&
+        widget.refreshQuickSettings &&
+        (widget.readSession != null ||
+            widget.loadActiveConfig == null &&
+                widget.quickSettingsService == null) &&
+        !_readingConfig &&
+        !_readingQuickSettings &&
+        !_operationBusy) {
+      final epoch = _connectionEpoch;
+      final revision = (_configMutationEpoch, _quickSettingsMutationEpoch);
+      final showConfigLoading =
+          !silent || (_activeConfig == null && !_configReadFailed);
+      final showQuickLoading =
+          !silent || (_quickSettings == null && !_quickSettingsReadFailed);
+      if (showConfigLoading || showQuickLoading) {
+        setState(() {
+          if (showConfigLoading) _loadingConfig = true;
+          if (showQuickLoading) _loadingQuickSettings = true;
+        });
+      }
+      try {
+        Future<void> read(OpenClashCommandRunner run) async {
+          if (!mounted ||
+              epoch != _connectionEpoch ||
+              _operationBusy ||
+              revision != (_configMutationEpoch, _quickSettingsMutationEpoch)) {
+            return;
+          }
+          await Future.wait([
+            _loadQuickSettings(silent: silent, readRunner: run),
+            _loadActiveConfig(silent: silent, readRunner: run),
+          ]);
+        }
+
+        if (widget.readSession != null) {
+          await widget.readSession!(read);
+        } else {
+          final settings = await ClashConfigFileService.loadSettings();
+          if (!mounted || epoch != _connectionEpoch || _operationBusy) return;
+          await SshService.withClient(
+              settings.host,
+              settings.password,
+              (client) => read((command) async =>
+                  (await SshService.runCommandOnClient(client, command))
+                      .stdout),
+              username: settings.username,
+              port: settings.port,
+              operationTimeout: const Duration(seconds: 35));
+        }
+      } catch (error) {
+        if (!mounted ||
+            epoch != _connectionEpoch ||
+            revision != (_configMutationEpoch, _quickSettingsMutationEpoch)) {
+          return;
+        }
+        Future<String> failed(String _) async => throw error;
+        await Future.wait([
+          _loadQuickSettings(silent: silent, readRunner: failed),
+          _loadActiveConfig(silent: silent, readRunner: failed),
+        ]);
+      } finally {
+        if (mounted && (showConfigLoading || showQuickLoading)) {
+          setState(() {
+            if (showConfigLoading) _loadingConfig = false;
+            if (showQuickLoading) _loadingQuickSettings = false;
+          });
+        }
+      }
+      return;
+    }
     await Future.wait([
       if (widget.refreshQuickSettings) _loadQuickSettings(silent: silent),
       if (widget.refreshConfig) _loadActiveConfig(silent: silent),
     ]);
   }
 
-  Future<void> _loadQuickSettings({bool silent = false}) async {
+  Future<void> _loadQuickSettings(
+      {bool silent = false, OpenClashCommandRunner? readRunner}) async {
     if (_readingQuickSettings || _operationBusy) return;
     _readingQuickSettings = true;
     final connectionEpoch = _connectionEpoch;
@@ -261,7 +378,7 @@ class _DashboardControlsState extends State<DashboardControls>
         !silent || (_quickSettings == null && !_quickSettingsReadFailed);
     if (showLoading) setState(() => _loadingQuickSettings = true);
     try {
-      final settings = await _quickSettingsService.load();
+      final settings = await _quickSettingsService.load(readRunner: readRunner);
       if (!mounted || connectionEpoch != _connectionEpoch) return;
       if (_applyingQuickSetting != null ||
           startedEpoch != _quickSettingsMutationEpoch) {
@@ -296,13 +413,15 @@ class _DashboardControlsState extends State<DashboardControls>
       if ((connectionEpoch != _connectionEpoch ||
               startedEpoch != _quickSettingsMutationEpoch) &&
           _autoSyncEnabled &&
-          widget.refreshQuickSettings) {
+          widget.refreshQuickSettings &&
+          _refreshFuture == null) {
         unawaited(_loadQuickSettings(silent: true));
       }
     }
   }
 
-  Future<void> _loadActiveConfig({bool silent = false}) async {
+  Future<void> _loadActiveConfig(
+      {bool silent = false, OpenClashCommandRunner? readRunner}) async {
     if (_readingConfig || _operationBusy) return;
     _readingConfig = true;
     final connectionEpoch = _connectionEpoch;
@@ -318,8 +437,8 @@ class _DashboardControlsState extends State<DashboardControls>
       });
     }
     try {
-      final active = await (widget.loadActiveConfig ??
-          ClashConfigFileService.getActiveConfig)();
+      final active = await (widget.loadActiveConfig?.call() ??
+          ClashConfigFileService.getActiveConfig(readRunner: readRunner));
       if (!mounted ||
           connectionEpoch != _connectionEpoch ||
           mutationEpoch != _configMutationEpoch ||
@@ -360,7 +479,8 @@ class _DashboardControlsState extends State<DashboardControls>
       if ((connectionEpoch != _connectionEpoch ||
               mutationEpoch != _configMutationEpoch) &&
           _autoSyncEnabled &&
-          widget.refreshConfig) {
+          widget.refreshConfig &&
+          _refreshFuture == null) {
         unawaited(_loadActiveConfig(silent: true));
       }
     }
@@ -863,53 +983,80 @@ class _DashboardControlsState extends State<DashboardControls>
 
   @override
   Widget build(BuildContext context) {
-    AppLocaleScope.watch(context);
+    final language = AppLocaleScope.watch(context).language;
     final palette = AppPalette.of(context);
     return widget.builder(
         context,
         DashboardControlCards(
           activityLabel: _showAppBarActivity ? tr(_appBarActivityLabel) : null,
           refresh: _refreshPage,
-          currentYaml: CurrentYamlCard(
-            activeConfig: _activeConfig,
-            loading: _loadingConfig,
-            switching: _switchingConfig,
-            operationBusy: _operationBusy,
-            message: _configMessage,
-            messageIsError: _configMessageIsError,
-            cardBg: palette.surface,
-            cardBorder: palette.border,
-            textColor: palette.textPrimary,
-            hintColor: palette.textSecondary,
-            onRefresh: () => unawaited(_loadActiveConfig()),
-            onSwitch: _chooseActiveConfig,
-            onEdit: _editConfig,
-          ),
-          operations: ClashOperationsCard(
-            restartLabel: _restartStatusLabel,
-            busy: _operationBusy,
-            flushingDns: _flushingDns,
-            closingConnections: _closingConnections,
-            onRestart: _restartOpenClash,
-            onFlushDns: _flushDnsCache,
-            onCloseConnections: _closeAllConnections,
-          ),
-          quickSettings: OpenClashQuickSettingsCard(
-            settings: _quickSettings,
-            readFailed: _quickSettingsReadFailed,
-            busy: _operationBusy,
-            cardBg: palette.surface,
-            cardBorder: palette.border,
-            textColor: palette.textPrimary,
-            hintColor: palette.textSecondary,
-            onBaseModeChanged: _changeBaseMode,
-            onRunVariantChanged: _changeRunVariant,
-            onProxyModeChanged: _changeProxyMode,
-            onAreaBypassChanged: _changeAreaBypass,
-            onSnifferChanged: _changeSniffer,
-            onDnsProxyChanged: _changeDnsProxy,
-            onStreamUnlockChanged: _changeStreamUnlock,
-          ),
+          currentYaml: _yamlCard.resolve(
+              (
+                language,
+                palette,
+                _activeConfig,
+                _loadingConfig,
+                _switchingConfig,
+                _operationBusy,
+                _configMessage,
+                _configMessageIsError
+              ),
+              () => CurrentYamlCard(
+                    activeConfig: _activeConfig,
+                    loading: _loadingConfig,
+                    switching: _switchingConfig,
+                    operationBusy: _operationBusy,
+                    message: _configMessage,
+                    messageIsError: _configMessageIsError,
+                    cardBg: palette.surface,
+                    cardBorder: palette.border,
+                    textColor: palette.textPrimary,
+                    hintColor: palette.textSecondary,
+                    onRefresh: () => unawaited(_loadActiveConfig()),
+                    onSwitch: _chooseActiveConfig,
+                    onEdit: _editConfig,
+                  )),
+          operations: _operationsCard.resolve(
+              (
+                language,
+                _restartStatusLabel,
+                _operationBusy,
+                _flushingDns,
+                _closingConnections
+              ),
+              () => ClashOperationsCard(
+                    restartLabel: _restartStatusLabel,
+                    busy: _operationBusy,
+                    flushingDns: _flushingDns,
+                    closingConnections: _closingConnections,
+                    onRestart: _restartOpenClash,
+                    onFlushDns: _flushDnsCache,
+                    onCloseConnections: _closeAllConnections,
+                  )),
+          quickSettings: _quickCard.resolve(
+              (
+                language,
+                palette,
+                _quickSettings,
+                _quickSettingsReadFailed,
+                _operationBusy
+              ),
+              () => OpenClashQuickSettingsCard(
+                    settings: _quickSettings,
+                    readFailed: _quickSettingsReadFailed,
+                    busy: _operationBusy,
+                    cardBg: palette.surface,
+                    cardBorder: palette.border,
+                    textColor: palette.textPrimary,
+                    hintColor: palette.textSecondary,
+                    onBaseModeChanged: _changeBaseMode,
+                    onRunVariantChanged: _changeRunVariant,
+                    onProxyModeChanged: _changeProxyMode,
+                    onAreaBypassChanged: _changeAreaBypass,
+                    onSnifferChanged: _changeSniffer,
+                    onDnsProxyChanged: _changeDnsProxy,
+                    onStreamUnlockChanged: _changeStreamUnlock,
+                  )),
         ));
   }
 }

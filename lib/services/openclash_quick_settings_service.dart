@@ -190,8 +190,11 @@ class OpenClashQuickSettingsService {
        _transactionIdFactory =
            transactionIdFactory ?? OpenClashScriptSafety.transactionId;
 
-  Future<OpenClashQuickSettings> load({bool preferLiveProxyMode = true}) async {
-    final values = _parseKeyValues(await _run(_readCommand));
+  Future<OpenClashQuickSettings> load({
+    bool preferLiveProxyMode = true,
+    OpenClashCommandRunner? readRunner,
+  }) async {
+    final values = _parseKeyValues(await (readRunner ?? _run)(_readCommand));
     final rawRunMode = values['en_mode'] ?? '';
     var parsedRunMode = _parseRunMode(rawRunMode);
     var proxyMode =

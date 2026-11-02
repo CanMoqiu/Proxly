@@ -14,7 +14,7 @@ class WebPanelFlagFont {
     try {
       final bytes = await rootBundle.load(asset);
       request.response.headers.contentType = ContentType('font', 'woff2');
-      request.response.headers.set(HttpHeaders.cacheControlHeader, 'no-cache');
+      request.response.headers.set(HttpHeaders.cacheControlHeader, 'no-store');
       request.response.add(bytes.buffer.asUint8List(
         bytes.offsetInBytes,
         bytes.lengthInBytes,

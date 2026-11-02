@@ -3,6 +3,8 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:convert';
 import 'dart:math';
+import 'dart:isolate';
+import 'package:archive/archive_io.dart' show InputFileStream;
 import 'package:crypto/crypto.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:http/http.dart' as http;
@@ -82,26 +84,27 @@ class WebPanelService {
     return parts.join('/');
   }
 
-  static List<WebPanelArchiveEntry> validateArchive(Archive archive) {
+  static List<WebPanelArchiveEntry> validateArchive(Archive archive,
+      {String Function(String) message = tr}) {
     if (archive.length > maxArchiveEntries) {
-      throw FormatException(tr('发布包文件数量超过 2000 项'));
+      throw FormatException(message('发布包文件数量超过 2000 项'));
     }
 
     final rawEntries = <WebPanelArchiveEntry>[];
     final rawPaths = <String>{};
     for (final file in archive) {
       if (file.name.isEmpty || file.size < 0) {
-        throw FormatException(tr('发布包包含异常条目'));
+        throw FormatException(message('发布包包含异常条目'));
       }
       if (file.isSymbolicLink) {
-        throw FormatException(tr('发布包包含不支持的符号链接: ${file.name}'));
+        throw FormatException(message('发布包包含不支持的符号链接: ${file.name}'));
       }
       final safeName = _safeArchivePath(file.name);
       if (safeName == null) {
-        throw FormatException(tr('发布包包含不安全路径: ${file.name}'));
+        throw FormatException(message('发布包包含不安全路径: ${file.name}'));
       }
       if (!rawPaths.add(safeName.toLowerCase())) {
-        throw FormatException(tr('发布包包含重复路径: ${file.name}'));
+        throw FormatException(message('发布包包含重复路径: ${file.name}'));
       }
       rawEntries.add(WebPanelArchiveEntry(file: file, path: safeName));
     }
@@ -135,39 +138,39 @@ class WebPanelService {
       if (name.isEmpty) continue;
       final safeName = _safeArchivePath(name);
       if (safeName == null) {
-        throw FormatException(tr('发布包包含不安全路径: ${file.name}'));
+        throw FormatException(message('发布包包含不安全路径: ${file.name}'));
       }
 
       if (file.isFile) {
         if (file.size > maxArchiveFileBytes) {
-          throw FormatException(tr('发布包中的单个文件超过 20 MB: ${file.name}'));
+          throw FormatException(message('发布包中的单个文件超过 20 MB: ${file.name}'));
         }
         extractedBytes += file.size;
         if (extractedBytes > maxArchiveExtractedBytes) {
-          throw FormatException(tr('发布包解压后的总大小超过 100 MB'));
+          throw FormatException(message('发布包解压后的总大小超过 100 MB'));
         }
         final compressedBytes = file.rawContent?.length ?? file.size;
         if (file.size > 0 &&
             (compressedBytes <= 0 ||
                 file.size / compressedBytes > maxArchiveCompressionRatio)) {
-          throw FormatException(tr('发布包包含异常压缩文件: ${file.name}'));
+          throw FormatException(message('发布包包含异常压缩文件: ${file.name}'));
         }
       }
 
       final normalized = safeName.toLowerCase();
       if (pathKinds.containsKey(normalized)) {
-        throw FormatException(tr('发布包包含重复路径: ${file.name}'));
+        throw FormatException(message('发布包包含重复路径: ${file.name}'));
       }
       final parts = normalized.split('/');
       for (var i = 1; i < parts.length; i++) {
         final parent = parts.take(i).join('/');
         if (pathKinds[parent] == true) {
-          throw FormatException(tr('发布包包含冲突路径: ${file.name}'));
+          throw FormatException(message('发布包包含冲突路径: ${file.name}'));
         }
       }
       if (file.isFile &&
           pathKinds.keys.any((path) => path.startsWith('$normalized/'))) {
-        throw FormatException(tr('发布包包含冲突路径: ${file.name}'));
+        throw FormatException(message('发布包包含冲突路径: ${file.name}'));
       }
       pathKinds[normalized] = file.isFile;
       validated.add(WebPanelArchiveEntry(file: file, path: safeName));
@@ -196,7 +199,7 @@ class WebPanelService {
         throw Exception(tr('发布包超过 50 MB，已停止下载'));
       }
       int received = 0;
-      final sink = zipFile.openWrite();
+      final output = await zipFile.open(mode: FileMode.write);
       try {
         await for (final chunk
             in response.stream.timeout(const Duration(seconds: 30))) {
@@ -204,19 +207,12 @@ class WebPanelService {
           if (received > maxArchiveBytes) {
             throw Exception(tr('发布包超过 50 MB，已停止下载'));
           }
-          sink.add(chunk);
+          // Bound pending writes to one chunk on slower mobile storage.
+          await output.writeFrom(chunk);
           if (total > 0) onProgress(received / total * 0.75);
         }
       } finally {
-        await sink.flush();
-        await sink.close();
-      }
-
-      final actualSha256 =
-          (await sha256.bind(zipFile.openRead()).first).toString();
-      if (actualSha256.toLowerCase() != info.sha256.toLowerCase()) {
-        if (zipFile.existsSync()) await zipFile.delete();
-        throw Exception(tr('面板发布包校验失败，请稍后重试'));
+        await output.close();
       }
     } catch (_) {
       if (zipFile.existsSync()) await zipFile.delete();
@@ -326,7 +322,108 @@ class WebPanelService {
     }
   }
 
+  static bool _installing = false;
+  static Future<void>? _cleanup;
+
   static Future<void> downloadAndInstall(
+    WebPanelVersionInfo info,
+    void Function(double progress) onProgress,
+  ) async {
+    await _cleanup;
+    if (_installing) throw StateError('Panel installation is already running');
+    _installing = true;
+    try {
+      await _install(info, onProgress);
+    } finally {
+      _installing = false;
+    }
+  }
+
+  /// Hash and decompress off the UI isolate, reading compressed data from disk.
+  static Future<void> _extractArchive(
+      String path, String destination, String digest) async {
+    if ((await sha256.bind(File(path).openRead()).first)
+            .toString()
+            .toLowerCase() !=
+        digest.toLowerCase()) {
+      throw const FormatException('面板发布包校验失败，请稍后重试');
+    }
+    final input = InputFileStream(path);
+    try {
+      final archive = ZipDecoder().decodeBuffer(input);
+      final validated = validateArchive(archive, message: (value) => value);
+      final staging = Directory(destination);
+      if (staging.existsSync()) staging.deleteSync(recursive: true);
+      staging.createSync(recursive: true);
+      for (final entry in validated) {
+        final target = '$destination/${entry.path}';
+        if (entry.file.isFile) {
+          final output = File(target)..createSync(recursive: true);
+          final bytes = entry.file.content as List<int>;
+          if (bytes.length != entry.file.size ||
+              getCrc32(bytes) != entry.file.crc32) {
+            throw const FormatException('面板发布包校验失败，请稍后重试');
+          }
+          output.writeAsBytesSync(bytes);
+          entry.file.clear();
+        } else {
+          Directory(target).createSync(recursive: true);
+        }
+      }
+      if (!File('$destination/index.html').existsSync()) {
+        throw const FormatException('解压后未找到 index.html，发布包格式有误');
+      }
+    } finally {
+      input.closeSync();
+    }
+  }
+
+  /// Clean only abandoned temporary names under the app-owned panel directory.
+  static Future<void> cleanupTemporaryFiles() =>
+      _cleanup ??= _cleanupTemporaryFiles().whenComplete(() => _cleanup = null);
+
+  static Future<void> _cleanupTemporaryFiles() async {
+    if (_installing) return;
+    final appDir = await getApplicationSupportDirectory();
+    final base = Directory('${appDir.path}/zashboard');
+    if (await FileSystemEntity.type(base.path, followLinks: false) !=
+        FileSystemEntityType.directory) {
+      return;
+    }
+    final root = await base.resolveSymbolicLinks();
+    final prefs = await SharedPreferences.getInstance();
+    final active = prefs.getString(_prefPath);
+    String? resolvedActive;
+    if (active != null) {
+      try {
+        resolvedActive = await Directory(active).resolveSymbolicLinks();
+      } catch (_) {
+        // An unreadable active path is not a safe cleanup boundary.
+        return;
+      }
+    }
+    await for (final entry in base.list(followLinks: false)) {
+      if (_installing) return;
+      final name =
+          entry.uri.pathSegments.where((value) => value.isNotEmpty).last;
+      final temporary = name == 'download.zip' ||
+          RegExp(r'^v?\d+(?:\.\d+)+\.staging$').hasMatch(name);
+      if (!temporary || entry.path == active || entry is Link) continue;
+      final resolved = await entry.resolveSymbolicLinks();
+      if (resolvedActive != null &&
+          (Platform.isWindows
+              ? resolved.toLowerCase() == resolvedActive.toLowerCase()
+              : resolved == resolvedActive)) {
+        continue;
+      }
+      if (!resolved.startsWith('$root${Platform.pathSeparator}')) continue;
+      if (entry is File || entry is Directory && name.endsWith('.staging')) {
+        await entry.delete(recursive: entry is Directory);
+      }
+    }
+  }
+
+  static Future<void> _install(
     WebPanelVersionInfo info,
     void Function(double progress) onProgress,
   ) async {
@@ -348,31 +445,14 @@ class WebPanelService {
       await _downloadArchive(info, zipFile, onProgress);
       onProgress(0.80);
 
-      // 第二步：完整验证归档，再解压到暂存目录。
-      final bytes = await zipFile.readAsBytes();
-      final archive = ZipDecoder().decodeBytes(bytes);
-      onProgress(0.85);
-
-      final validated = validateArchive(archive);
-
-      if (stagingDir.existsSync()) await stagingDir.delete(recursive: true);
-      await stagingDir.create(recursive: true);
-      for (final entry in validated) {
-        final file = entry.file;
-        final outPath = '${stagingDir.path}/${entry.path}';
-
-        if (file.isFile) {
-          final outFile = File(outPath);
-          await outFile.create(recursive: true);
-          await outFile.writeAsBytes(file.content as List<int>);
-        } else {
-          await Directory(outPath).create(recursive: true);
-        }
-      }
-
-      // 验证 index.html 存在，确保解压结果有效
-      if (!File('${stagingDir.path}/index.html').existsSync()) {
-        throw Exception(tr('解压后未找到 index.html，发布包格式有误'));
+      final archivePath = zipFile.path;
+      final destination = stagingDir.path;
+      final expectedDigest = info.sha256;
+      try {
+        await Isolate.run(
+            () => _extractArchive(archivePath, destination, expectedDigest));
+      } on FormatException catch (error) {
+        throw FormatException(tr(error.message));
       }
       onProgress(0.95);
 
@@ -788,6 +868,8 @@ class FileHttpServer {
 
   Future<void> _handle(HttpRequest request) async {
     if (await controllerBridge?.handle(request) == true) return;
+    // Local resources already exist on disk; random ports must not duplicate them.
+    request.response.headers.set(HttpHeaders.cacheControlHeader, 'no-store');
     if (await WebPanelFlagFont.handle(request)) return;
     final root = await Directory(rootPath).resolveSymbolicLinks();
     final requestedSegments = request.uri.pathSegments.isEmpty
@@ -891,6 +973,7 @@ class AssetHttpServer {
 
   Future<void> _handle(HttpRequest request) async {
     if (await controllerBridge?.handle(request) == true) return;
+    request.response.headers.set(HttpHeaders.cacheControlHeader, 'no-store');
     if (await WebPanelFlagFont.handle(request)) return;
     final requestedSegments = request.uri.pathSegments.isEmpty
         ? const ['index.html']

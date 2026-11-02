@@ -38,10 +38,26 @@ void main() {
           .getUrl(Uri.parse('http://127.0.0.1:$port${WebPanelFlagFont.path}'));
       final response = await request.close();
       expect(response.statusCode, 200);
+      expect(
+          response.headers.value(HttpHeaders.cacheControlHeader), 'no-store');
       expect(response.headers.contentType?.mimeType, 'font/woff2');
       final bytes = await response
           .fold<List<int>>([], (buffer, chunk) => buffer..addAll(chunk));
       expect(bytes, orderedEquals(expected));
+    }
+    for (final server in [bundled, downloaded]) {
+      final port = server == bundled ? bundled.port : downloaded.port;
+      for (final path in ['/', '/proxies']) {
+        final response = await (await client
+                .getUrl(Uri.parse('http://127.0.0.1:$port$path')))
+            .close();
+        expect(response.statusCode, 200);
+        expect(
+            response.headers.value(HttpHeaders.cacheControlHeader), 'no-store');
+        final content = await utf8.decoder.bind(response).join();
+        expect(content,
+            server == downloaded ? 'downloaded panel' : contains('<html'));
+      }
     }
   });
 

@@ -36,6 +36,18 @@ class WebPanelPageProbe {
     throw StateError(failureMessage(value));
   }
 
+  /// Keep a healthy page and its scroll position after a short background stay.
+  static Future<bool> canResume(
+      InAppWebViewController controller, String secondaryPath) async {
+    try {
+      await waitUntilReady(controller, secondaryPath)
+          .timeout(const Duration(seconds: 3));
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   static String failureMessage(dynamic value) {
     if (value is Map && value['state'] == 'api') {
       final status = value['status'];

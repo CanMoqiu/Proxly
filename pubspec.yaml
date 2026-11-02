@@ -2,7 +2,7 @@ name: proxly
 description: "Clash proxy monitor and control panel."
 publish_to: 'none'
 
-version: 26.8.0+37
+version: 26.9.0+38
 
 environment:
   sdk: ^3.6.2

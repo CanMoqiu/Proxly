@@ -16,8 +16,6 @@ Simplified Chinese is the repository default; every public document has a comple
 | iPhone self-signing | [iPhone 自签与安装](ios-selfsign.zh-CN.md) | [Read](ios-selfsign.en.md) |
 | Dialog interactions | [弹窗交互规范](popup-interactions.zh-CN.md) | [Read](popup-interactions.en.md) |
 | Bundled Zashboard | [内置 Zashboard](bundled-zashboard.md) | [Read](bundled-zashboard.en.md) |
-| 26.6 historical security review | [26.6 历史安全审查](beta-security-review-26.6.md) | [Read](beta-security-review-26.6.en.md) |
-| 26.6 release notes | [26.6 发布说明](releases/26.6.0.md) | [Read](releases/26.6.0.en.md) |
 | Repository language policy | [仓库语言约定](repository-language.zh-CN.md) | [Read](repository-language.en.md) |
 | Bundled fonts | [内置字体](../assets/fonts/README.md) | [Read](../assets/fonts/README.en.md) |
 | iOS launch assets | [iOS 启动页资源](../ios/Runner/Assets.xcassets/LaunchImage.imageset/README.md) | [Read](../ios/Runner/Assets.xcassets/LaunchImage.imageset/README.en.md) |
@@ -33,5 +31,4 @@ Simplified Chinese is the repository default; every public document has a comple
 - To use the app, download an [official release](https://github.com/CanMoqiu/Proxly/releases/latest). Read the self-signing guide first for iPhone.
 - To compile your own copy, follow the mobile build guide for environment and signing setup, then run the manual workflow in a repository where you have permission.
 - Original English licenses and upstream notices remain intact. Chinese translations aid reading and do not replace the original licenses.
-- Historical reviews describe their original baselines, not a complete security assessment of the current version.
 - Repository files cannot change GitHub's own navigation or settings language. Configurable repository content is Chinese first; see the repository language policy.

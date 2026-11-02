@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'clash_status_card.dart';
 import 'clash_overview_card.dart';
 import 'clash_traffic_card.dart';
+import 'dashboard_card_cache.dart';
 import 'dart:async';
 import '../../services/clash_service.dart';
 import '../../services/clash_data_hub.dart';
@@ -30,6 +31,9 @@ class DashboardStatus extends StatefulWidget {
 
 class _DashboardStatusState extends State<DashboardStatus>
     with WidgetsBindingObserver {
+  final _statusCard = DashboardCardCache();
+  final _trafficCard = DashboardCardCache();
+  final _overviewCard = DashboardCardCache();
   bool _foreground = true;
   Timer? _timer;
   bool _loading = true;
@@ -273,7 +277,13 @@ class _DashboardStatusState extends State<DashboardStatus>
       _connection.phase != ControllerConnectionPhase.restarting;
 
   void _applyRealtimeSnapshot(ClashRealtimeSnapshot snapshot) {
-    if (!mounted || snapshot.sequence == _lastSnapshotSequence) return;
+    if (!mounted) return;
+    if (snapshot.sequence == _lastSnapshotSequence) {
+      if (!identical(_displayProviders, snapshot.providers)) {
+        setState(() => _displayProviders = snapshot.providers);
+      }
+      return;
+    }
     // Cold launches can happen offline. Query again on reconnection and keep
     // retrying a temporarily unavailable version endpoint at a bounded rate.
     final reconnected = !_clashOnline;
@@ -304,30 +314,43 @@ class _DashboardStatusState extends State<DashboardStatus>
 
   @override
   Widget build(BuildContext context) {
-    AppLocaleScope.watch(context);
+    final language = AppLocaleScope.watch(context).language;
     return widget.builder(
         context,
         DashboardStatusCards(
           activityLabel: _loading && widget.active ? tr('正在读取...') : null,
           recoveryRevision: _recoveryRevision,
-          status: ClashStatusCard(
-              loading: _loading && widget.active,
-              error: _error,
-              online: _clashOnline,
-              coreVersion: _coreVersion,
-              restartBusy: _restartCoordinator.isBusy,
-              restartFailed:
-                  _restartCoordinator.phase == OpenClashRestartPhase.failed,
-              onRetry: () => _fetchData(force: true)),
-          traffic: ClashTrafficCard(providers: _displayProviders),
-          overview: ClashOverviewCard(
-              activeConnections: _activeConnections,
-              totalDownload: _totalDownload,
-              totalUpload: _totalUpload,
-              downloadSpeeds: List.of(_downloadSpeeds),
-              uploadSpeeds: List.of(_uploadSpeeds),
-              currentDownSpeed: _currentDownSpeed,
-              currentUpSpeed: _currentUpSpeed),
+          status: _statusCard.resolve(
+              (
+                language,
+                _loading && widget.active,
+                _error,
+                _clashOnline,
+                _coreVersion,
+                _restartCoordinator.isBusy,
+                _restartCoordinator.phase
+              ),
+              () => ClashStatusCard(
+                  loading: _loading && widget.active,
+                  error: _error,
+                  online: _clashOnline,
+                  coreVersion: _coreVersion,
+                  restartBusy: _restartCoordinator.isBusy,
+                  restartFailed:
+                      _restartCoordinator.phase == OpenClashRestartPhase.failed,
+                  onRetry: () => _fetchData(force: true))),
+          traffic: _trafficCard.resolve((language, _displayProviders),
+              () => ClashTrafficCard(providers: _displayProviders)),
+          overview: _overviewCard.resolve(
+              (language, _lastSnapshotSequence),
+              () => ClashOverviewCard(
+                  activeConnections: _activeConnections,
+                  totalDownload: _totalDownload,
+                  totalUpload: _totalUpload,
+                  downloadSpeeds: List.of(_downloadSpeeds),
+                  uploadSpeeds: List.of(_uploadSpeeds),
+                  currentDownSpeed: _currentDownSpeed,
+                  currentUpSpeed: _currentUpSpeed)),
         ));
   }
 }

@@ -72,7 +72,7 @@ flowchart LR
 
 | Item | Current implementation |
 | --- | --- |
-| Platform | Android and iOS 18+ iPhone; application ID / Bundle ID `top.canmoqiu.proxly` |
+| Platform | Android 7.0+ (ARM64, x86_64) and iOS 18+ iPhone; application ID / Bundle ID `top.canmoqiu.proxly` |
 | Clash address | Accepts localhost, private or link-local IP addresses, `.local` / `.lan` domains, and local hostnames; the default controller port is `9090` |
 | Clash API | The controller must expose `external-controller`; environments configured with a `secret` use the corresponding controller secret |
 | SSH | OpenClash settings, YAML management, and restart operations use the `root` account on fixed port `22` |
@@ -81,6 +81,8 @@ flowchart LR
 | Zashboard JSON | Maximum `5 MB`, `2,000` top-level keys, and `1 MB` per serialized value |
 | Zashboard ZIP | Maximum `50 MB` download, `2,000` entries, `20 MB` per file, `100 MB` extracted total, and `100:1` compression ratio |
 | Restart impact | Applying OpenClash settings, changing the active YAML, and some configuration operations require an OpenClash restart and may interrupt existing proxy connections |
+
+Android builds after 26.8 no longer support ARM32 devices; ARM64 and x86_64 remain supported. Devices running a 32-bit Android OS should stay on 26.8. See the [architecture and storage guide](docs/mobile-builds.en.md).
 
 ## Security mechanisms
 

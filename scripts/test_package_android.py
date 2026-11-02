@@ -1,9 +1,27 @@
 import unittest
-from package_android import signer_fingerprints
+from package_android import signer_fingerprints, validate_native_architectures
 from package_version import display_version
 
 
 class PackageValidationTest(unittest.TestCase):
+    def test_release_requires_complete_arm64_and_x86_64_libraries(self):
+        names = {f'lib/{abi}/{library}'
+                 for abi in ('arm64-v8a', 'x86_64')
+                 for library in ('libflutter.so', 'libapp.so')}
+        self.assertEqual(validate_native_architectures(names, 'release'),
+                         ['arm64-v8a', 'x86_64'])
+        for invalid in (names | {'lib/armeabi-v7a/libflutter.so'},
+                        names | {'lib/x86/libflutter.so'},
+                        names - {'lib/x86_64/libapp.so'},
+                        {name for name in names if 'x86_64' not in name}):
+            with self.subTest(names=invalid), self.assertRaises(ValueError):
+                validate_native_architectures(invalid, 'release')
+
+    def test_debug_retains_both_engines_without_requiring_aot(self):
+        names = ['lib/arm64-v8a/libflutter.so', 'lib/x86_64/libflutter.so']
+        self.assertEqual(validate_native_architectures(names, 'debug'),
+                         ['arm64-v8a', 'x86_64'])
+
     def test_numbered_signer(self):
         digest = 'a1' * 32
         self.assertEqual(signer_fingerprints(

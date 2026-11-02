@@ -822,7 +822,7 @@ void main() {
 
     expect(service.loadCount, 1);
 
-    await tester.pump(const Duration(seconds: 5));
+    await tester.pump(const Duration(seconds: 15));
     await tester.pump();
     expect(service.loadCount, 2);
 
@@ -866,7 +866,7 @@ void main() {
     expect(service.loadCount, 1);
 
     service.loadGate = Completer<void>();
-    await tester.pump(const Duration(seconds: 5));
+    await tester.pump(const Duration(seconds: 15));
     await tester.pump();
     expect(service.loadCount, 2);
 
@@ -908,7 +908,7 @@ void main() {
     expect(service.loadCount, 1);
 
     service.loadError = Exception('boom');
-    await tester.pump(const Duration(seconds: 5));
+    await tester.pump(const Duration(seconds: 15));
     await tester.pump();
 
     expect(service.loadCount, 2);
@@ -1071,7 +1071,9 @@ class _FakeQuickSettingsService extends OpenClashQuickSettingsService {
   OpenClashQuickSettings _settings = _initialSettings;
 
   @override
-  Future<OpenClashQuickSettings> load({bool preferLiveProxyMode = true}) async {
+  Future<OpenClashQuickSettings> load(
+      {bool preferLiveProxyMode = true,
+      OpenClashCommandRunner? readRunner}) async {
     loadCount++;
     final error = loadError;
     if (error != null) throw error;

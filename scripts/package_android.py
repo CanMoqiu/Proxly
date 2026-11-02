@@ -21,6 +21,20 @@ def signer_fingerprints(output):
         output, re.M)}
 
 
+def validate_native_architectures(names, build_type):
+    names = set(names)
+    architectures = {name.split('/')[1] for name in names
+                     if name.startswith('lib/') and name.endswith('.so')}
+    if architectures != {'arm64-v8a', 'x86_64'}:
+        raise ValueError(f'Expected ARM64 and x86_64 only, found {sorted(architectures)}')
+    libraries = ['libflutter.so', 'libapp.so'] if build_type == 'release' else ['libflutter.so']
+    for architecture in architectures:
+        for library in libraries:
+            if f'lib/{architecture}/{library}' not in names:
+                raise ValueError(f'Missing {architecture}/{library}')
+    return sorted(architectures)
+
+
 def package(build_type):
     if build_type not in ('release', 'debug'):
         raise ValueError('Unknown Android build type')
@@ -50,6 +64,7 @@ def package(build_type):
         assert re.fullmatch(r'[0-9a-f]{64}', expected), 'Expected release certificate is not configured'
         assert fingerprint == expected, 'Unexpected release signing certificate'
     with zipfile.ZipFile(source) as archive:
+        architectures = validate_native_architectures(archive.namelist(), build_type)
         required = [
             'AndroidManifest.xml', 'lib/arm64-v8a/libflutter.so',
             'assets/flutter_assets/assets/web_panel/index.html',
@@ -72,6 +87,7 @@ def package(build_type):
     (output / 'build-info-android.json').write_text(json.dumps({
         'version': version, 'commit': commit, 'package': package_id,
         'build_type': build_type, 'certificate_sha256': fingerprint,
+        'architectures': architectures,
         'file': apk.name, 'sha256': digest,
         'workflow_run': os.environ.get('GITHUB_RUN_ID'),
     }, indent=2) + '\n', encoding='utf-8')

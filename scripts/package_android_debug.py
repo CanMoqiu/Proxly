@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import zipfile
 from package_version import display_version
+from package_android import validate_native_architectures
 
 
 def main():
@@ -17,6 +18,7 @@ def main():
     source = root / "build/app/outputs/flutter-apk/app-debug.apk"
     with zipfile.ZipFile(source) as archive:
         names = set(archive.namelist())
+        architectures = validate_native_architectures(names, 'debug')
         for entry in (
             "AndroidManifest.xml",
             "lib/arm64-v8a/libflutter.so",
@@ -37,6 +39,7 @@ def main():
         "commit": commit,
         "package": "top.canmoqiu.proxly.debug",
         "build_type": "debug",
+        "architectures": architectures,
         "signing": "CI Android debug key; separate installation from the release app",
         "file": apk.name,
         "sha256": digest,
