@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -6,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../l10n/app_locale.dart';
 import '../services/app_platform.dart';
 import '../services/app_version.dart';
+import '../services/release_notes.dart';
 import '../services/update_service.dart';
 import '../theme/app_theme.dart';
 import 'app_popup.dart';
@@ -24,7 +24,6 @@ class UpdateDialog extends StatefulWidget {
 class _UpdateDialogState extends State<UpdateDialog> {
   bool _busy = false;
   bool _downloading = false;
-  bool _permissionRequired = false;
   double _progress = 0;
   String? _error;
   final _cancelled = ValueNotifier(false);
@@ -64,18 +63,17 @@ class _UpdateDialogState extends State<UpdateDialog> {
           }
           return;
         }
-        if (Platform.isAndroid) {
+        if (AppPlatform.supportsApkUpdates) {
           final status = await Permission.requestInstallPackages.status;
           if (!mounted || _cancelled.value) return;
           if (!status.isGranted) {
-            setState(() => _permissionRequired = true);
+            await Permission.requestInstallPackages.request();
             return;
           }
         }
         if (!mounted || _cancelled.value) return;
         setState(() {
           _downloading = true;
-          _permissionRequired = false;
           _progress = 0;
         });
         try {
@@ -141,17 +139,6 @@ class _UpdateDialogState extends State<UpdateDialog> {
                       body: widget.info.body,
                       hintColor: palette.textSecondary,
                       textColor: palette.textPrimary),
-                if (_permissionRequired) ...[
-                  Text(tr('请允许"安装未知应用"\n开启后重新点击更新')),
-                  TextButton(
-                      onPressed: _busy
-                          ? null
-                          : () => _perform(() async {
-                                await Permission.requestInstallPackages
-                                    .request();
-                              }),
-                      child: Text(tr('去开启'))),
-                ],
                 if (_error != null)
                   Text(_error!, style: TextStyle(color: palette.error)),
                 if (_busy && !_downloading) const LinearProgressIndicator(),
@@ -190,8 +177,10 @@ class _AvailableContent extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    AppLocaleScope.watch(context);
-    if (body == null || body!.trim().isEmpty) {
+    final locale = AppLocaleScope.watch(context).effectiveLocale;
+    final notes =
+        localizedReleaseNotes(body, languageCode: locale.languageCode);
+    if (notes.isEmpty) {
       return Padding(
         padding: const EdgeInsets.only(bottom: 12),
         child: Text(
@@ -257,7 +246,7 @@ class _AvailableContent extends StatelessWidget {
     );
 
     return MarkdownBody(
-      data: body!.trim(),
+      data: notes,
       styleSheet: mdStyle,
       onTapLink: (_, __, ___) {},
     );

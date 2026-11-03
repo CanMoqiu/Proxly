@@ -15,6 +15,8 @@ import '../services/web_panel_service.dart';
 import '../services/web_panel_scroll.dart';
 import '../services/web_panel_flag_font.dart';
 import '../services/panel_load_monitor.dart';
+import '../services/app_platform.dart';
+import '../services/web_panel_resume_state.dart';
 import '../services/web_panel_page_probe.dart';
 import '../widgets/panel_error_view.dart';
 import '../widgets/panel_connection_gate.dart';
@@ -23,7 +25,8 @@ import '../services/zashboard_settings_import_service.dart';
 import '../theme/app_theme.dart';
 
 class ConnectionsPage extends StatefulWidget {
-  const ConnectionsPage({super.key});
+  final VoidCallback? onSettled;
+  const ConnectionsPage({super.key, this.onSettled});
 
   @override
   State<ConnectionsPage> createState() => _ConnectionsPageState();
@@ -32,13 +35,19 @@ class ConnectionsPage extends StatefulWidget {
 class _ConnectionsPageState extends State<ConnectionsPage>
     with WidgetsBindingObserver {
   final _panelLoad = PanelLoadMonitor();
+  final _resumeState = WebPanelResumeState();
   Future<void>? _restarting;
   bool _needsRecovery = false;
   bool _resumePending = false;
   Future<void>? _resuming;
 
   void _handlePanelLoad() {
-    if (mounted) setState(() => _webViewReady = _panelLoad.ready);
+    if (mounted) {
+      setState(() => _webViewReady = _panelLoad.ready);
+      if (_panelLoad.ready || _panelLoad.error != null) {
+        widget.onSettled?.call();
+      }
+    }
   }
 
   Future<void> _recoverPanel() async {
@@ -85,7 +94,7 @@ class _ConnectionsPageState extends State<ConnectionsPage>
       'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 '
       '(KHTML, like Gecko) Chrome/125.0.0.0 Mobile Safari/537.36';
 
-  /// 屏蔽 Service Worker，防止在 Virtual Display 0×0 时挂起加载。
+  /// Disable service workers to avoid stalled loads in a zero-sized Virtual Display.
   static final UserScript _noSwScript = UserScript(
     source: WebPanelPageProbe.disableServiceWorker,
     injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
@@ -279,7 +288,7 @@ class _ConnectionsPageState extends State<ConnectionsPage>
     WebPanelSync.instance.registerWebView(
       this,
       _reloadAfterImportedSettings,
-      restartServer: _restartLocalServer,
+      restartServer: _activatePanelUpdate,
     );
     ConnectionSettingsStore.instance
         .addListener(_handleConnectionSettingsChanged);
@@ -421,6 +430,30 @@ class _ConnectionsPageState extends State<ConnectionsPage>
     }
   }
 
+  Future<void> _activatePanelUpdate() async {
+    if (WebPanelSync.instance.connectionsTabActive) {
+      await _restartLocalServer();
+      return;
+    }
+    // Hidden WKWebViews may suspend JavaScript indefinitely. Retire the old
+    // origin now and activate the installed resources when this page is shown.
+    _serverGeneration++;
+    _webViewController = null;
+    _needsRecovery = true;
+    await _assetServer?.close();
+    await _fileServer?.close();
+    _assetServer = null;
+    _fileServer = null;
+    _controllerBridge = null;
+    if (mounted) {
+      setState(() {
+        _serverStarted = false;
+        _webViewReady = false;
+        _targetUrl = '';
+      });
+    }
+  }
+
   Future<void> _restartLocalServer() {
     return _restarting ??=
         _restartAndWait().whenComplete(() => _restarting = null);
@@ -481,6 +514,11 @@ class _ConnectionsPageState extends State<ConnectionsPage>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    _resumeState.didChangeState(state);
+    if (state == AppLifecycleState.resumed &&
+        _resumeState.consumeLongBackground(isIOS: AppPlatform.isIOS)) {
+      _retireSuspendedPage();
+    }
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.hidden) {
       _resumePending = true;
@@ -491,16 +529,30 @@ class _ConnectionsPageState extends State<ConnectionsPage>
     }
   }
 
-  Future<void> _resumePanel() =>
-      _resuming ??= _checkResumedPanel().whenComplete(() => _resuming = null);
+  void _retireSuspendedPage() {
+    // Drop the stale native view before awaiting storage or server cleanup.
+    // Reuse saved preferences; suspended JavaScript may never return.
+    _serverGeneration++;
+    _webViewController = null;
+    _needsRecovery = true;
+    if (mounted) setState(() => _serverStarted = false);
+    _panelLoad.suspend();
+  }
+
+  Future<void> _resumePanel() => _resuming ??= (() async {
+        try {
+          await _checkResumedPanel();
+        } finally {
+          _resuming = null;
+        }
+      })();
 
   Future<void> _checkResumedPanel() async {
     if (!_resumePending && !_needsRecovery) return;
     _resumePending = false;
     final controller = _webViewController;
     final bridge = _controllerBridge;
-    if (!_needsRecovery &&
-        _panelLoad.error == null &&
+    if (_panelLoad.error == null &&
         _webViewReady &&
         controller != null &&
         bridge != null &&
@@ -512,13 +564,16 @@ class _ConnectionsPageState extends State<ConnectionsPage>
           bridge != _controllerBridge) {
         return;
       }
-      if (healthy) return;
+      if (healthy) {
+        _needsRecovery = false;
+        return;
+      }
     }
     if (mounted) await _recoverPanel();
   }
 
   Future<void> _reloadWebView() async {
-    if (_resumePending) await _resumePanel();
+    if (_resumePending || _resuming != null) await _resumePanel();
     if (!mounted) return;
     if (_needsRecovery || _panelLoad.error != null) {
       await _recoverPanel();
@@ -636,7 +691,8 @@ class _ConnectionsPageState extends State<ConnectionsPage>
   }
 
   static final UserScript _nativeScrollScript = UserScript(
-    source: WebPanelScroll.buildScript(),
+    source:
+        '${WebPanelLayoutScript.nativeInsets}\n${WebPanelScroll.buildScript()}',
     injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
   );
 
@@ -859,9 +915,9 @@ class _ConnectionsPageState extends State<ConnectionsPage>
                   JsAlertResponse(handledByClient: true),
               onWebContentProcessDidTerminate: (controller) {
                 if (!_isCurrentController(controller)) return;
-                _needsRecovery = true;
-                _panelLoad.fail('面板进程已停止，请重试');
-                if (WebPanelSync.instance.connectionsTabActive) {
+                _retireSuspendedPage();
+                if (_resumeState.foreground &&
+                    WebPanelSync.instance.connectionsTabActive) {
                   unawaited(_recoverPanel());
                 }
               },
@@ -947,8 +1003,6 @@ class _ConnectionsPageState extends State<ConnectionsPage>
     );
   }
 }
-
-// ─── 加载动画遮罩 ──────────────────────────────────────────────────────────────
 
 class _LoadingOverlay extends StatefulWidget {
   final bool isDark;

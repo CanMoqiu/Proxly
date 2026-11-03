@@ -36,7 +36,7 @@ class WebPanelArchiveEntry {
 }
 
 class WebPanelService {
-  static const builtinVersion = 'v3.29.1';
+  static const builtinVersion = 'v3.30.0';
   static const maxArchiveBytes = 50 * 1024 * 1024;
   static const maxArchiveEntries = 2000;
   static const maxArchiveFileBytes = 20 * 1024 * 1024;
@@ -472,7 +472,6 @@ class WebPanelService {
         rethrow;
       }
 
-      // 第三步：持久化版本号和安装路径
       final prefs = await SharedPreferences.getInstance();
       final oldPath = prefs.getString(_prefPath);
       await prefs.setString(_prefVersion, info.tag);
@@ -486,13 +485,13 @@ class WebPanelService {
           final oldDir = Directory(oldPath);
           if (oldDir.existsSync()) await oldDir.delete(recursive: true);
         } catch (_) {
-          // 新面板已经安全切换，旧缓存清理失败不影响本次更新。
+          // The new panel is active; stale-cache cleanup must not fail this update.
         }
       }
 
       onProgress(1.0);
     } catch (_) {
-      // 下载或解压失败时清理残留文件
+      // Clean up staging files if download or extraction fails.
       if (zipFile.existsSync()) await zipFile.delete();
       if (stagingDir.existsSync()) await stagingDir.delete(recursive: true);
       if (switched) {
@@ -843,7 +842,7 @@ class _NoRedirectWebSocketClient implements HttpClient {
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
-/// 本地 HTTP 文件服务器，供 InAppWebView 加载已下载的面板版本
+/// Serves installed panel files to the local WebView.
 class FileHttpServer {
   HttpServer? _server;
   final String rootPath;
@@ -905,7 +904,7 @@ class FileHttpServer {
       request.response.headers.set('Access-Control-Allow-Origin', '*');
       await request.response.addStream(File(resolvedFile).openRead());
     } else {
-      // SPA 路由兜底：未知路径统一返回 index.html
+      // Return index.html for SPA routes without a matching static file.
       final index = File('$root${Platform.pathSeparator}index.html');
       if (index.existsSync()) {
         request.response.headers
@@ -1213,6 +1212,26 @@ class WebPanelCoreSettingsSyncScript {
 class WebPanelLayoutScript {
   WebPanelLayoutScript._();
 
+  // Flutter already positions the WebView below its status bar and app bar.
+  static const nativeInsets = r'''
+(() => {
+  function apply() {
+    if (document.getElementById('__proxly_native_insets')) return;
+    const style = document.createElement('style');
+    style.id = '__proxly_native_insets';
+    style.textContent = `
+      #app-content .home-page .overlay-glass.top-0.left-0.right-0 {
+        padding-top: 0 !important;
+      }
+      #app-content > .status-bar-tint { display: none !important; }
+    `;
+    (document.head || document.documentElement).appendChild(style);
+  }
+  if (document.documentElement) apply();
+  else document.addEventListener('DOMContentLoaded', apply, {once: true});
+})();
+''';
+
   static String buildDockless({
     bool proxyTab = false,
     bool connectionsTab = false,
@@ -1420,8 +1439,8 @@ class WebPanelSync {
   /// Whether the connections tab is currently visible in WebView mode.
   bool connectionsTabActive = false;
 
-  /// Bug 2：记录代理标签是否是当前活跃标签。
-  /// 由 MainShell 在切换标签时维护，ProxyPage 据此决定是否响应生命周期重载。
+  /// Whether the proxy tab is currently active.
+  /// MainShell updates this flag to gate ProxyPage lifecycle reloads.
   bool proxyTabActive = false;
 
   void register({
@@ -1474,14 +1493,14 @@ class WebPanelSync {
     final callbacks =
         Map<Object, Future<void> Function()>.from(_webViewRestarters);
     final results = <Object, bool>{};
-    await Future.wait(callbacks.entries.map((entry) async {
+    for (final entry in callbacks.entries) {
       try {
         await entry.value().timeout(timeout);
         results[entry.key] = true;
       } catch (_) {
         results[entry.key] = false;
       }
-    }));
+    }
     return WebPanelReloadResult(
       total: callbacks.length,
       failed: results.values.where((succeeded) => !succeeded).length,

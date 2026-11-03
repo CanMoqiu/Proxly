@@ -41,6 +41,15 @@ class PanelLoadMonitor extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// A retired hidden page must not time out before it becomes visible again.
+  void suspend() {
+    _finish(false);
+    _loaded = null;
+    ready = false;
+    error = null;
+    notifyListeners();
+  }
+
   void _finish(bool success) {
     _timer?.cancel();
     if (_loaded != null && !_loaded!.isCompleted) _loaded!.complete(success);

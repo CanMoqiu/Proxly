@@ -2,6 +2,22 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:proxly/services/panel_load_monitor.dart';
 
 void main() {
+  testWidgets('suspended hidden page does not report a stale load error',
+      (tester) async {
+    final monitor = PanelLoadMonitor(timeout: const Duration(seconds: 2));
+    addTearDown(monitor.dispose);
+    monitor.begin();
+    final pending = expectLater(monitor.waitUntilReady(), throwsStateError);
+    monitor.suspend();
+    await pending;
+    await tester.pump(const Duration(minutes: 1));
+    expect(monitor.error, isNull);
+    expect(monitor.ready, isFalse);
+    monitor.navigationStarted();
+    monitor.succeed();
+    await monitor.waitUntilReady();
+  });
+
   test('native load-start keeps the server activation waiter', () async {
     final monitor = PanelLoadMonitor()..begin();
     addTearDown(monitor.dispose);

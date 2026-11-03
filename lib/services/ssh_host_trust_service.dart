@@ -8,11 +8,41 @@ import '../app_navigator.dart';
 import '../l10n/app_locale.dart';
 import 'app_secure_storage.dart';
 
-class SshHostTrustService {
+class SshHostTrustService extends ChangeNotifier {
   SshHostTrustService._();
+  @visibleForTesting
+  SshHostTrustService.forTesting();
 
   static final instance = SshHostTrustService._();
   static const _storageKey = 'ssh_host_fingerprints';
+  static const _rejectedKey = 'ssh_rejected_endpoints';
+  final Set<String> _rejected = {};
+  Future<void>? _rejectionsLoaded;
+
+  Future<void> loadRejections() => _rejectionsLoaded ??= _loadRejections();
+
+  Future<void> _loadRejections() async {
+    try {
+      final raw = await AppSecureStorage.read(_rejectedKey);
+      if (raw != null) {
+        _rejected.addAll((jsonDecode(raw) as List).cast<String>());
+      }
+    } catch (_) {
+      _rejectionsLoaded = null;
+      rethrow;
+    }
+  }
+
+  static String _endpoint(String host, int port) {
+    final normalized =
+        host.trim().toLowerCase().replaceAll(RegExp(r'^\[|\]$'), '');
+    return normalized.contains(':')
+        ? '[$normalized]:$port'
+        : '$normalized:$port';
+  }
+
+  bool isRejected(String host, [int port = 22]) =>
+      _rejected.contains(_endpoint(host, port));
 
   final Map<String, Future<bool>> _pendingPrompts = {};
 
@@ -20,21 +50,19 @@ class SshHostTrustService {
     String host,
     int port,
     String algorithm,
-    Uint8List fingerprintBytes,
-  ) async {
+    Uint8List fingerprintBytes, {
+    bool requestTrust = false,
+  }) async {
     final fingerprint = _standardSha256Fingerprint(fingerprintBytes);
-    final normalizedHost = host.trim().toLowerCase().replaceAll(
-          RegExp(r'^\[|\]$'),
-          '',
-        );
-    final endpoint = normalizedHost.contains(':')
-        ? '[$normalizedHost]:$port'
-        : '$normalizedHost:$port';
+    final endpoint = _endpoint(host, port);
+    await loadRejections();
+    if (_rejected.contains(endpoint) && !requestTrust) return false;
     final trusted = await _readTrusted();
     final previous = trusted[endpoint];
     if (previous != null &&
         previous['algorithm'] == algorithm &&
-        previous['fingerprint'] == fingerprint) {
+        previous['fingerprint'] == fingerprint &&
+        !_rejected.contains(endpoint)) {
       return true;
     }
 
@@ -60,6 +88,10 @@ class SshHostTrustService {
 
   Future<void> clearAll() async {
     await AppSecureStorage.delete(_storageKey);
+    await AppSecureStorage.delete(_rejectedKey);
+    _rejected.clear();
+    _rejectionsLoaded = null;
+    notifyListeners();
   }
 
   Future<bool> _promptAndStore({
@@ -115,7 +147,17 @@ class SshHostTrustService {
         ],
       ),
     );
-    if (accepted != true) return false;
+    // A suppressed or unavailable route is not an explicit refusal.
+    if (accepted == null) return false;
+    if (!accepted) {
+      // A refusal survives polling and app restarts; only an explicit review
+      // may prompt again. It never replaces an already trusted fingerprint.
+      _rejected.add(endpoint);
+      notifyListeners();
+      await AppSecureStorage.write(
+          _rejectedKey, jsonEncode(_rejected.toList()));
+      return false;
+    }
 
     final trusted = await _readTrusted();
     trusted[endpoint] = {
@@ -123,6 +165,9 @@ class SshHostTrustService {
       'fingerprint': fingerprint,
     };
     await AppSecureStorage.write(_storageKey, jsonEncode(trusted));
+    _rejected.remove(endpoint);
+    await AppSecureStorage.write(_rejectedKey, jsonEncode(_rejected.toList()));
+    notifyListeners();
     return true;
   }
 

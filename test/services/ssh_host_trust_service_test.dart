@@ -36,6 +36,42 @@ void main() {
       }
       return null;
     });
+    await SshHostTrustService.instance.clearAll();
+  });
+
+  testWidgets('refusal suppresses automatic prompts until explicit review',
+      (tester) async {
+    await tester.pumpWidget(
+        MaterialApp(navigatorKey: rootNavigatorKey, home: const Scaffold()));
+    final trust = SshHostTrustService.instance;
+    final fingerprint = Uint8List.fromList(utf8.encode('SHA256:rejected'));
+    final first = trust.verify('router.local', 22, 'ssh-ed25519', fingerprint);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('取消'));
+    await tester.pumpAndSettle();
+    expect(await first, isFalse);
+    expect(trust.isRejected('Router.Local'), isTrue);
+    expect(jsonDecode(values['ssh_rejected_endpoints']!), ['router.local:22']);
+    final restartedService = SshHostTrustService.forTesting();
+    expect(
+        await restartedService.verify(
+            'router.local', 22, 'ssh-ed25519', fingerprint),
+        isFalse);
+    restartedService.dispose();
+    for (var i = 0; i < 3; i++) {
+      expect(await trust.verify('router.local', 22, 'ssh-ed25519', fingerprint),
+          isFalse);
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsNothing);
+    }
+    final review = trust.verify('router.local', 22, 'ssh-ed25519', fingerprint,
+        requestTrust: true);
+    await tester.pumpAndSettle();
+    expect(find.text('确认 SSH 设备身份'), findsOneWidget);
+    await tester.tap(find.text('信任并继续'));
+    await tester.pumpAndSettle();
+    expect(await review, isTrue);
+    expect(trust.isRejected('router.local'), isFalse);
   });
 
   tearDown(() {

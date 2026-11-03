@@ -175,6 +175,15 @@ String _languageLabel(AppLanguage language) => switch (language) {
     };
 
 const _english = <String, String>{
+  '打开外部链接': 'Open external link',
+  '将在浏览器中打开以下链接：': 'Open this link in your browser:',
+  'SSH 设备尚未信任': 'SSH device not trusted',
+  '已暂停 SSH 连接。确认设备指纹后可恢复配置与快捷操作。':
+      'SSH connections are paused. Review the device fingerprint to restore configuration and quick controls.',
+  '查看并确认 SSH 身份': 'Review SSH identity',
+  '正在连接…': 'Connecting…',
+  'SSH 连接未建立，请检查设备和凭据后重试':
+      'SSH connection failed. Check the device and credentials, then retry.',
   '暂时无法连接软路由。请连接软路由所在网络，并确认 Clash 已启动。连接恢复后会自动重试。':
       'Router unavailable. Connect to its network and make sure Clash is running. Retrying automatically when the connection recovers.',
   '控制器认证失败，请在设置中检查 Token。':

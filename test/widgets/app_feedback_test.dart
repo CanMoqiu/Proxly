@@ -75,6 +75,42 @@ class _RouteFeedbackPage extends StatelessWidget {
 }
 
 void main() {
+  testWidgets('feedback clears the bottom navigation and device safe area',
+      (tester) async {
+    tester.view.physicalSize = const Size(390, 800);
+    tester.view.devicePixelRatio = 1;
+    tester.view.viewPadding = const FakeViewPadding(bottom: 34);
+    tester.view.padding = const FakeViewPadding(bottom: 34);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetViewPadding);
+    addTearDown(tester.view.resetPadding);
+    await tester.pumpWidget(MaterialApp(
+      theme: AppTheme.light(),
+      home: Builder(
+          builder: (context) => Scaffold(
+                bottomNavigationBar: BottomNavigationBar(items: const [
+                  BottomNavigationBarItem(
+                      icon: Icon(Icons.home), label: 'Home'),
+                  BottomNavigationBarItem(
+                      icon: Icon(Icons.settings), label: 'Settings'),
+                ]),
+                body: TextButton(
+                    onPressed: () =>
+                        AppFeedback.showSnackBar(context, 'Notice'),
+                    child: const Text('Show')),
+              )),
+    ));
+    await tester.tap(find.text('Show'));
+    await tester.pumpAndSettle();
+    final banner =
+        tester.getRect(find.byKey(const ValueKey('app_feedback_banner')));
+    final bar = tester.getRect(find.byType(BottomNavigationBar));
+    expect(bar.top - banner.bottom, greaterThanOrEqualTo(12));
+    await tester.pump(const Duration(seconds: 4));
+    await tester.pumpAndSettle();
+  });
+
   testWidgets('transient feedback uses 3 and 6 second lifetimes',
       (tester) async {
     await tester.pumpWidget(

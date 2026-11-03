@@ -40,6 +40,12 @@ class WebPanelPageProbe {
   static Future<bool> canResume(
       InAppWebViewController controller, String secondaryPath) async {
     try {
+      // Zashboard restarts its backend session on visibility changes. A native
+      // tab switch does not reliably produce this event in every WebView.
+      await controller
+          .evaluateJavascript(
+              source: "document.dispatchEvent(new Event('visibilitychange'));")
+          .timeout(const Duration(seconds: 1));
       await waitUntilReady(controller, secondaryPath)
           .timeout(const Duration(seconds: 3));
       return true;
@@ -81,9 +87,12 @@ try {
   clearTimeout(timer);
 }
 const deadline = Date.now() + 10000;
-while (!document.querySelector('#app-content') && Date.now() < deadline) {
+const backendError = '[class~="fixed"][class~="inset-0"][class~="z-[100000]"] h1';
+while ((!document.querySelector('#app-content') ||
+        document.querySelector(backendError)) && Date.now() < deadline) {
   await new Promise(resolve => setTimeout(resolve, 100));
 }
-return {state: document.querySelector('#app-content') ? 'ready' : 'app_timeout'};
+return {state: document.querySelector('#app-content') &&
+  !document.querySelector(backendError) ? 'ready' : 'app_timeout'};
 ''';
 }

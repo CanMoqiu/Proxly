@@ -5,6 +5,31 @@
 class WebPanelScroll {
   static const managedPreference = 'config/disable-pull-to-refresh';
 
+  /// WebKit already animates history navigation; suppress the SPA's second slide.
+  static const nativeHistoryTransitions = r'''
+    (function() {
+      function apply() {
+        if (!document.documentElement ||
+            document.getElementById('__proxly_native_history')) return;
+        const style = document.createElement('style');
+        style.id = '__proxly_native_history';
+        style.textContent = `
+          #app-content .home-page > .relative.flex-1 > .absolute > :is(
+            [class*="slide-left-"], [class*="slide-right-"],
+            [class*="page-enter-"], [class*="page-leave-"]
+          ) {
+            transition: none !important;
+            transform: none !important;
+            opacity: 1 !important;
+          }
+        `;
+        (document.head || document.documentElement).appendChild(style);
+      }
+      document.addEventListener('DOMContentLoaded', apply, { once: true });
+      apply();
+    })();
+  ''';
+
   static String buildScript() => r'''
     (function() {
       const stateKey = '__proxlyNativeScrollV1';

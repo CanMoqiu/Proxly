@@ -7,6 +7,10 @@ class _Controller implements InAppWebViewController {
   _Controller(this.response);
   final Future<CallAsyncJavaScriptResult?> response;
   @override
+  Future<dynamic> evaluateJavascript(
+          {required String source, ContentWorld? contentWorld}) async =>
+      null;
+  @override
   Future<CallAsyncJavaScriptResult?> callAsyncJavaScript(
           {required String functionBody,
           Map<String, dynamic> arguments = const {},
@@ -37,6 +41,7 @@ void main() {
     final pending = Completer<CallAsyncJavaScriptResult?>();
     final result =
         WebPanelPageProbe.canResume(_Controller(pending.future), '/bridge');
+    await tester.pump();
     await tester.pump(const Duration(seconds: 3));
     expect(await result, isFalse);
     pending.complete(CallAsyncJavaScriptResult(value: {'state': 'ready'}));

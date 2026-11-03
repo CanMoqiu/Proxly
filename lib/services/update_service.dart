@@ -104,15 +104,14 @@ class UpdateService {
     }
   }
 
-  /// silent=true：失败静默返回 null，受自动检测开关、24h 节流和跳过版本限制
-  /// silent=false：失败 rethrow，仅受跳过版本限制（不受自动检测开关和节流）
+  /// Silent checks suppress failures and respect automatic-check settings,
+  /// 24-hour throttling and skipped versions. Manual checks only honor skips.
   Future<UpdateInfo?> checkForUpdate({required bool silent}) async {
     if (!AppPlatform.supportsUpdateChecks) return null;
     final prefs = await SharedPreferences.getInstance();
 
     if (silent) {
       if (!(prefs.getBool(_autoCheckKey) ?? true)) return null;
-      // 24h 节流
       final last = prefs.getInt(_prefKey) ?? 0;
       final elapsed = DateTime.now().millisecondsSinceEpoch - last;
       if (elapsed < const Duration(hours: 24).inMilliseconds) return null;
@@ -140,7 +139,7 @@ class UpdateService {
       final info = await PackageInfo.fromPlatform();
       final localTag = 'v${info.version}';
 
-      // 写时间戳（无论有无新版）
+      // Throttle successful checks even when no newer release is available.
       await prefs.setInt(_prefKey, DateTime.now().millisecondsSinceEpoch);
 
       if (tag.isEmpty) return null;
@@ -150,7 +149,6 @@ class UpdateService {
       }
       if (comparison <= 0) return null;
 
-      // 已跳过此版本
       if (prefs.getString(_skipKey) == tag) return null;
 
       // iOS checks release metadata only; installation happens in the browser.
@@ -205,7 +203,7 @@ class UpdateService {
     return match?.group(1);
   }
 
-  /// 跳过指定版本，后续自动检测不再弹出该版本
+  /// Skip this version in subsequent automatic and manual checks.
   Future<void> skipVersion(String tag) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_skipKey, tag);
@@ -262,8 +260,8 @@ class UpdateService {
     return actual.toLowerCase() == expectedSha256.toLowerCase();
   }
 
-  /// 流式下载 APK，优先复用缓存；通过 [onProgress] 回调进度 0.0~1.0，未知大小回调 -1。
-  /// [cancelled] 设为 true 可中断下载（会删除临时文件并抛异常）。
+  /// Stream an APK, reusing a valid cache. [onProgress] reports 0.0 to 1.0,
+  /// or -1 for unknown size. [cancelled] aborts with cleanup and an exception.
   Future<File> downloadApk(
     String url,
     String tag,
@@ -277,7 +275,6 @@ class UpdateService {
     // Finish startup cleanup before writing into the same installer cache path.
     await cleanupInstalledApk();
     if (cancelled.value) throw const _CancelException();
-    // 优先使用缓存
     final cached = await _getCachedApk(tag, expectedSha256);
     if (cancelled.value) throw const _CancelException();
     if (cached != null) {

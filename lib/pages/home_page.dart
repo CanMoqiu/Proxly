@@ -142,6 +142,7 @@ class _HomePageState extends State<HomePage> with RouteAware {
                           ? controls.activityLabel ?? status.activityLabel
                           : null),
                   body: DashboardCardList(
+                      sshTrustNotice: controls.trustNotice,
                       layout: _layout,
                       editing: _editing,
                       onEditPressed: () => setState(() => _editing = !_editing),
