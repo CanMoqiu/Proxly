@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:proxly/l10n/app_locale.dart';
 import 'package:proxly/services/update_service.dart';
@@ -9,6 +10,63 @@ import 'package:proxly/widgets/app_popup.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
+  testWidgets('Android install permission opens system settings directly',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({'app_language': 'en'});
+    await AppLocaleController.instance.load();
+    const channel = MethodChannel('flutter.baseflow.com/permissions/methods');
+    final calls = <String>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel,
+        (call) async {
+      calls.add(call.method);
+      return call.method == 'requestPermissions' ? <int, int>{24: 0} : 0;
+    });
+    addTearDown(() => tester.binding.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, null));
+    await tester.pumpWidget(AppLocaleScope(
+        controller: AppLocaleController.instance,
+        child: const MaterialApp(
+            home: Scaffold(
+                body: UpdateDialog(info: UpdateInfo(tag: 'v26.9.0'))))));
+    await tester.tap(find.text('Update now'));
+    await tester.pumpAndSettle();
+    expect(calls, ['checkPermissionStatus', 'requestPermissions']);
+    expect(find.text('Open settings'), findsNothing);
+    expect(find.byType(LinearProgressIndicator), findsNothing);
+  }, variant: TargetPlatformVariant.only(TargetPlatform.android));
+  for (final automatic in [false, true]) {
+    testWidgets('release notes follow app language for automatic=$automatic',
+        (tester) async {
+      SharedPreferences.setMockInitialValues({'app_language': 'zh_CN'});
+      final controller = AppLocaleController.instance;
+      await controller.load();
+      const chinese = '## 更新内容\n\n- 优化性能。';
+      const english = '## Updates\n\n- Improve performance.';
+      const info = UpdateInfo(
+          tag: 'v26.9.0',
+          body: '$chinese\n\n<details>\n<summary>English</summary>\n\n'
+              '$english\n\n</details>');
+      await tester.pumpWidget(AppLocaleScope(
+          controller: controller,
+          child: MaterialApp(
+              home: Scaffold(
+                  body: UpdateDialog(info: info, autoTriggered: automatic)))));
+      expect(
+          tester.widget<MarkdownBody>(find.byType(MarkdownBody)).data, chinese);
+      await controller.setLanguage(AppLanguage.english);
+      await tester.pumpAndSettle();
+      expect(
+          tester.widget<MarkdownBody>(find.byType(MarkdownBody)).data, english);
+      await controller.setLanguage(AppLanguage.simplifiedChinese);
+      await tester.pumpAndSettle();
+      expect(
+          tester.widget<MarkdownBody>(find.byType(MarkdownBody)).data, chinese);
+      expect(tester.takeException(), isNull);
+    },
+        variant: TargetPlatformVariant(
+            {TargetPlatform.android, TargetPlatform.iOS}));
+  }
+
   testWidgets(
       'iOS repeated update taps and late browser completion keep the owning page',
       (tester) async {

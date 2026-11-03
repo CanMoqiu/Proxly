@@ -3,6 +3,25 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:proxly/widgets/app_popup.dart';
 
 void main() {
+  testWidgets('short download content keeps a usable dialog width',
+      (tester) async {
+    tester.view.physicalSize = const Size(390, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(const MaterialApp(
+        home: Scaffold(
+            body: AppDialog(
+                title: Text('26.9'),
+                content: Column(mainAxisSize: MainAxisSize.min, children: [
+                  LinearProgressIndicator(value: .5),
+                  Text('50%')
+                ]),
+                actions: []))));
+    expect(tester.getSize(find.byType(LinearProgressIndicator)).width,
+        greaterThan(280));
+    expect(tester.takeException(), isNull);
+  });
   Widget options() => const AppOptionsSheet<int>(
         title: 'Choose an action',
         selectedValue: 1,

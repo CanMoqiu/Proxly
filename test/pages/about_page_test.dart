@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart' show CupertinoSwitch;
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:proxly/l10n/app_locale.dart';
@@ -7,6 +9,32 @@ import 'package:proxly/services/update_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
+  testWidgets('support link requires confirmation and cancel does not launch',
+      (tester) async {
+    const channel = MethodChannel('plugins.flutter.io/url_launcher');
+    var launches = 0;
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel,
+        (_) async {
+      launches++;
+      return true;
+    });
+    addTearDown(() => tester.binding.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, null));
+    await _pumpAboutPage(tester, 'zh_CN');
+    await tester.ensureVisible(find.text('功能介绍'));
+    await tester.tap(find.text('功能介绍'));
+    await tester.pumpAndSettle();
+    expect(find.text('打开外部链接'), findsOneWidget);
+    expect(launches, 0);
+    await tester.tap(find.text('取消'));
+    await tester.pumpAndSettle();
+    expect(launches, 0);
+    await tester.tap(find.text('功能介绍'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('继续'));
+    await tester.pumpAndSettle();
+    expect(launches, 1);
+  });
   setUp(() {
     PackageInfo.setMockInitialValues(
       appName: 'Proxly',
@@ -34,6 +62,7 @@ void main() {
     expect(find.text('更新'), findsOneWidget);
     expect(find.byKey(const ValueKey('about_automatic_update_switch')),
         findsOneWidget);
+    expect(find.byType(CupertinoSwitch), findsNothing);
     expect(find.textContaining('26.3.9'), findsOneWidget);
   }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
 

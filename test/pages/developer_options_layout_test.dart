@@ -44,6 +44,32 @@ void main() {
     expect(languageY, lessThan(connectionsY));
   });
 
+  testWidgets('phone language description wraps beside the language picker',
+      (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    SharedPreferences.setMockInitialValues({'app_language': 'zh_CN'});
+    await AppLocaleController.instance.load();
+    await tester.pumpWidget(AppLocaleScope(
+      controller: AppLocaleController.instance,
+      child: const MaterialApp(home: DeveloperOptionsPage()),
+    ));
+    await tester.pumpAndSettle();
+
+    final title = tester.getRect(find.text('应用语言'));
+    final picker = tester.getRect(find.byType(AppLanguagePicker));
+    final description =
+        tester.getRect(find.text('语言切换会立即应用，并同步内置 Zashboard 面板。'));
+    expect(title.right, lessThan(picker.left));
+    expect(description.right, lessThan(picker.left));
+    expect(description.top, greaterThan(title.bottom));
+    expect(description.height, greaterThan(20));
+    expect(picker.center.dy, inInclusiveRange(title.top, description.bottom));
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('console preference defaults to hidden and persists changes',
       (tester) async {
     SharedPreferences.setMockInitialValues({

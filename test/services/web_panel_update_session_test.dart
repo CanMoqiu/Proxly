@@ -11,6 +11,33 @@ const release = WebPanelVersionInfo(
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  test('panel activation is sequential and continues after a failure',
+      () async {
+    final sync = WebPanelSync.instance;
+    final first = Object(), second = Object();
+    final blocked = Completer<void>();
+    final events = <String>[];
+    sync.registerWebView(first, () async {}, restartServer: () async {
+      events.add('first');
+      await blocked.future;
+      throw StateError('failed');
+    });
+    sync.registerWebView(second, () async {}, restartServer: () async {
+      events.add('second');
+    });
+    addTearDown(() {
+      sync.unregisterWebView(first);
+      sync.unregisterWebView(second);
+    });
+    final pending = sync.restartAllWebViews();
+    await Future<void>.delayed(Duration.zero);
+    expect(events, ['first']);
+    blocked.complete();
+    final result = await pending;
+    expect(events, ['first', 'second']);
+    expect(result.results, {first: false, second: true});
+  });
+
   test('iOS activates all panels and exits busy state without process restart',
       () async {
     final events = <String>[];

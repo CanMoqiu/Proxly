@@ -12,6 +12,8 @@ import '../../services/connection_settings_store.dart';
 import '../../services/openclash_quick_settings_service.dart';
 import '../../services/openclash_restart_coordinator.dart';
 import '../../services/ssh_service.dart';
+import '../../services/ssh_host_trust_service.dart';
+import 'ssh_trust_card.dart';
 import '../../theme/app_theme.dart';
 import '../app_feedback.dart';
 import '../../pages/clash_config_editor_page.dart';
@@ -96,6 +98,54 @@ class _DashboardControlsState extends State<DashboardControls>
   bool _configMessageIsError = false;
   bool _routeVisible = false;
   bool _appForeground = true;
+  bool _sshRejected = false;
+  bool _reviewingTrust = false;
+  int _trustRevision = 0;
+
+  Future<void> _syncTrustState() async {
+    final revision = ++_trustRevision;
+    try {
+      final trust = SshHostTrustService.instance;
+      await trust.loadRejections();
+      final host = await ClashConfigFileService.routerHost();
+      if (!mounted || revision != _trustRevision) return;
+      final rejected = trust.isRejected(host);
+      if (_sshRejected == rejected) return;
+      setState(() => _sshRejected = rejected);
+      _syncAutoSyncTimer();
+      if (!rejected) _refreshVisibleStatus();
+    } catch (_) {
+      // Storage errors remain retryable through the existing read path.
+    }
+  }
+
+  void _trustChanged() => unawaited(_syncTrustState());
+
+  Future<void> _reviewTrust() async {
+    if (_reviewingTrust) return;
+    var declined = false;
+    setState(() => _reviewingTrust = true);
+    try {
+      final settings = await ClashConfigFileService.loadSettings();
+      await SshService.withClient(
+          settings.host, settings.password, (_) async {},
+          username: settings.username,
+          port: settings.port, onVerifyHostKey: (algorithm, fingerprint) async {
+        final accepted = await SshHostTrustService.instance.verify(
+            settings.host, settings.port, algorithm, fingerprint,
+            requestTrust: true);
+        declined = !accepted;
+        return accepted;
+      });
+    } catch (_) {
+      if (mounted && !declined) {
+        _showSnack('SSH 连接未建立，请检查设备和凭据后重试', success: false);
+      }
+    } finally {
+      if (mounted) setState(() => _reviewingTrust = false);
+      await _syncTrustState();
+    }
+  }
 
   bool get _operationBusy =>
       _switchingConfig ||
@@ -105,6 +155,7 @@ class _DashboardControlsState extends State<DashboardControls>
       _applyingQuickSetting != null;
 
   bool get _autoSyncEnabled =>
+      !_sshRejected &&
       widget.autoLoad &&
       (widget.refreshConfig || widget.refreshQuickSettings) &&
       widget.active &&
@@ -125,6 +176,8 @@ class _DashboardControlsState extends State<DashboardControls>
     WidgetsBinding.instance.addObserver(this);
     _restartCoordinator.addListener(_handleRestartStateChanged);
     ConnectionSettingsStore.instance.addListener(_handleConnectionChanged);
+    SshHostTrustService.instance.addListener(_trustChanged);
+    unawaited(_syncTrustState());
     if (widget.autoLoad) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
@@ -174,6 +227,7 @@ class _DashboardControlsState extends State<DashboardControls>
     WidgetsBinding.instance.removeObserver(this);
     _restartCoordinator.removeListener(_handleRestartStateChanged);
     ConnectionSettingsStore.instance.removeListener(_handleConnectionChanged);
+    SshHostTrustService.instance.removeListener(_trustChanged);
     disposeTransientFeedback();
     super.dispose();
   }
@@ -243,6 +297,7 @@ class _DashboardControlsState extends State<DashboardControls>
 
   void _handleConnectionChanged() {
     if (!mounted) return;
+    unawaited(_syncTrustState());
     _connectionEpoch++;
     _quickSettingsMutationEpoch++;
     _configMutationEpoch++;
@@ -269,6 +324,7 @@ class _DashboardControlsState extends State<DashboardControls>
   }
 
   Future<void> _refreshPage({bool silent = false}) async {
+    if (_sshRejected) return;
     if (_operationBusy && silent) return;
     if (_refreshFuture != null) return _refreshFuture;
     final revision =
@@ -988,6 +1044,9 @@ class _DashboardControlsState extends State<DashboardControls>
     return widget.builder(
         context,
         DashboardControlCards(
+          trustNotice: _sshRejected
+              ? SshTrustCard(busy: _reviewingTrust, onReview: _reviewTrust)
+              : null,
           activityLabel: _showAppBarActivity ? tr(_appBarActivityLabel) : null,
           refresh: _refreshPage,
           currentYaml: _yamlCard.resolve(
@@ -1062,11 +1121,13 @@ class _DashboardControlsState extends State<DashboardControls>
 }
 
 class DashboardControlCards {
+  final Widget? trustNotice;
   final Widget currentYaml, operations, quickSettings;
   final String? activityLabel;
   final Future<void> Function() refresh;
   const DashboardControlCards(
-      {required this.currentYaml,
+      {this.trustNotice,
+      required this.currentYaml,
       required this.operations,
       required this.quickSettings,
       required this.activityLabel,

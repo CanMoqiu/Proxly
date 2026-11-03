@@ -282,51 +282,35 @@ class _DeveloperOptionsPageState extends State<DeveloperOptionsPage> {
                     Divider(height: 0, color: cardBorder),
                     Padding(
                       padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
-                      child: LayoutBuilder(
-                        builder: (context, constraints) {
-                          final details = Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                tr('应用语言'),
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w500,
-                                  color: textColor,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                tr('语言切换会立即应用，并同步内置 Zashboard 面板。'),
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: hintColor,
-                                  height: 1.4,
-                                ),
-                              ),
-                            ],
-                          );
-                          if (constraints.maxWidth < 340) {
-                            return Column(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                details,
-                                const SizedBox(height: 12),
-                                const Align(
-                                  alignment: Alignment.centerRight,
-                                  child: AppLanguagePicker(compact: true),
+                                Text(
+                                  tr('应用语言'),
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w500,
+                                    color: textColor,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  tr('语言切换会立即应用，并同步内置 Zashboard 面板。'),
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: hintColor,
+                                    height: 1.4,
+                                  ),
                                 ),
                               ],
-                            );
-                          }
-                          return Row(
-                            children: [
-                              Expanded(child: details),
-                              const SizedBox(width: 12),
-                              const AppLanguagePicker(compact: true),
-                            ],
-                          );
-                        },
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          const AppLanguagePicker(compact: true),
+                        ],
                       ),
                     ),
                     Divider(height: 0, color: cardBorder),

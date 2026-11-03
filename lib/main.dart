@@ -9,6 +9,7 @@ import 'app_route_observer.dart';
 import 'l10n/app_locale.dart';
 import 'theme/app_theme.dart';
 import 'widgets/app_startup.dart';
+import 'widgets/keyboard_focus_reveal.dart';
 import 'services/web_panel_service.dart';
 import 'pages/main_shell.dart' show MainShell;
 import 'pages/setup_wizard_page.dart';
@@ -25,7 +26,7 @@ class ProxlyApp extends StatefulWidget {
   final bool showSetupWizard;
   const ProxlyApp({super.key, this.showSetupWizard = false});
 
-  // 静态变量，供子页面同步读取，无需本地副本
+  // Shared state lets child pages read the theme without local copies.
   static ThemeMode activeThemeMode = ThemeMode.system;
 
   static void toggleThemeOf(BuildContext context) {
@@ -151,19 +152,19 @@ class _ProxlyAppState extends State<ProxlyApp> with WidgetsBindingObserver {
                   isDark ? Brightness.light : Brightness.dark,
             ),
             child: Stack(
-              children: [child!, if (_showBall) const _FloatingThemeBall()],
+              children: [
+                KeyboardFocusReveal(child: child!),
+                if (_showBall) const _FloatingThemeBall()
+              ],
             ),
           ),
         );
       },
-      // 首次启动（未配置地址）显示设置向导，否则直接进入主界面
       home:
           widget.showSetupWizard ? const SetupWizardPage() : const MainShell(),
     );
   }
 }
-
-// ─── 悬浮主题切换球 ────────────────────────────────────────────────────────────
 
 class _FloatingThemeBall extends StatefulWidget {
   const _FloatingThemeBall();

@@ -185,6 +185,22 @@ void main() {
     expect(find.text('v1.19.0'), findsOneWidget,
         reason: 'Version must recover after an offline cold start');
 
+    // Warm one native view at a time while the home page remains visible.
+    for (var i = 0; i < 160; i++) {
+      if (find
+          .byType(ConnectionsPage, skipOffstage: false)
+          .evaluate()
+          .isNotEmpty) {
+        expect(
+            find.byKey(const ValueKey('proxy_panel_ready'),
+                skipOffstage: false),
+            findsOneWidget);
+        break;
+      }
+      await tester.pump(const Duration(milliseconds: 250));
+    }
+    expect(find.byType(ConnectionsPage, skipOffstage: false), findsOneWidget);
+
     // These checks exercise the native WebView, Keychain, ATS and localhost
     // bridge together. Unit tests cannot observe their integration failures.
     tester
@@ -282,6 +298,7 @@ Future<void> verifyBundledPanelLayoutAndFlags(
   InAppWebViewController? web;
   final scripts = [
     WebPanelPageProbe.disableServiceWorker,
+    WebPanelLayoutScript.nativeInsets,
     WebPanelScroll.buildScript(),
     WebPanelAuthScript.build(
       hostname: '127.0.0.1',
@@ -318,6 +335,18 @@ Future<void> verifyBundledPanelLayoutAndFlags(
     if (ready) break;
   }
   expect(ready, isTrue);
+  final nativePadding = await web!.evaluateJavascript(source: r'''
+(() => {
+  const toolbar = document.createElement('div');
+  toolbar.className = 'overlay-glass top-0 left-0 right-0';
+  toolbar.style.paddingTop = '32px';
+  document.querySelector('.home-page').appendChild(toolbar);
+  const padding = getComputedStyle(toolbar).paddingTop;
+  toolbar.remove();
+  return padding;
+})()
+''');
+  expect(nativePadding, '0px');
   Future<void> verifyScroll() async {
     final result = await web!.callAsyncJavaScript(
       functionBody: webPanelScrollProbe,

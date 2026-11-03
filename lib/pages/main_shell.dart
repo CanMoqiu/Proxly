@@ -12,6 +12,7 @@ import 'connections_page.dart';
 import 'native_connections_page.dart';
 import '../services/update_service.dart';
 import '../services/app_platform.dart';
+import '../services/controller_connection_state.dart';
 import '../services/web_panel_service.dart';
 import '../widgets/app_bottom_navigation_bar.dart';
 import '../widgets/update_dialog.dart';
@@ -23,17 +24,61 @@ class MainShell extends StatefulWidget {
   State<MainShell> createState() => _MainShellState();
 }
 
-class _MainShellState extends State<MainShell> with RouteAware {
+class _MainShellState extends State<MainShell>
+    with RouteAware, WidgetsBindingObserver {
   int _currentIndex = 0;
   final Set<int> _visitedTabs = {0};
   int _tabRevision = 0;
   bool _routeVisible = true;
   bool _showConsoleButton = false;
   String _connectionsTabMode = 'webview';
+  Timer? _warmupTimer;
+  int? _warmingTab;
+  bool _foreground = true;
+
+  bool get _canWarm =>
+      mounted &&
+      _foreground &&
+      _routeVisible &&
+      _currentIndex == 0 &&
+      ControllerConnectionState.instance.phase ==
+          ControllerConnectionPhase.online;
+
+  void _scheduleWarmup() {
+    _warmupTimer?.cancel();
+    if (!_canWarm || _warmingTab != null) return;
+    _warmupTimer = Timer(const Duration(milliseconds: 800), () {
+      if (!_canWarm || _warmingTab != null) return;
+      final next = !_visitedTabs.contains(1)
+          ? 1
+          : _connectionsTabMode == 'webview' && !_visitedTabs.contains(2)
+              ? 2
+              : null;
+      if (next == null) return;
+      setState(() {
+        _warmingTab = next;
+        _visitedTabs.add(next);
+      });
+    });
+  }
+
+  void _panelSettled(int index) {
+    if (_warmingTab != index) return;
+    _warmingTab = null;
+    _scheduleWarmup();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _foreground = state == AppLifecycleState.resumed;
+    _scheduleWarmup();
+  }
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    ControllerConnectionState.instance.addListener(_scheduleWarmup);
     _loadPrefs();
     if (AppPlatform.supportsUpdateChecks) {
       Future.delayed(const Duration(seconds: 3), _autoCheckUpdate);
@@ -63,16 +108,21 @@ class _MainShellState extends State<MainShell> with RouteAware {
     _loadPrefs();
     // Reconcile Web panel visibility after returning from the pushed console route.
     _syncWebPanelTabState();
+    _scheduleWarmup();
   }
 
   @override
   void didPushNext() {
     setState(() => _routeVisible = false);
+    _scheduleWarmup();
   }
 
   @override
   void dispose() {
     shellRouteObserver.unsubscribe(this);
+    _warmupTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    ControllerConnectionState.instance.removeListener(_scheduleWarmup);
     super.dispose();
   }
 
@@ -98,6 +148,7 @@ class _MainShellState extends State<MainShell> with RouteAware {
         }
       });
       _syncWebPanelTabState();
+      _scheduleWarmup();
     }
   }
 
@@ -139,13 +190,13 @@ class _MainShellState extends State<MainShell> with RouteAware {
       if (!_visitedTabs.contains(1))
         const SizedBox.shrink()
       else
-        const ProxyPage(asTab: true),
+        ProxyPage(asTab: true, onSettled: () => _panelSettled(1)),
       if (!_visitedTabs.contains(2))
         const SizedBox.shrink()
       else if (_connectionsTabMode == 'native')
         NativeConnectionsPage(active: _currentIndex == 2 && _routeVisible)
       else
-        const ConnectionsPage(),
+        ConnectionsPage(onSettled: () => _panelSettled(2)),
       if (_visitedTabs.contains(3))
         const SettingsPage()
       else
@@ -159,6 +210,8 @@ class _MainShellState extends State<MainShell> with RouteAware {
   Widget build(BuildContext context) {
     AppLocaleScope.watch(context);
     return Scaffold(
+      // The visible page owns keyboard insets; do not consume them twice.
+      resizeToAvoidBottomInset: false,
       body: IndexedStack(
         index: _currentIndex,
         children: [
@@ -166,23 +219,26 @@ class _MainShellState extends State<MainShell> with RouteAware {
             TickerMode(enabled: index == _currentIndex, child: page),
         ],
       ),
-      bottomNavigationBar: AppBottomNavigationBar(
-        currentIndex: _currentIndex,
-        onTap: (index) {
-          FocusManager.instance.primaryFocus?.unfocus();
-          if (index == _currentIndex) return;
-          final previousIndex = _currentIndex;
-          final revision = ++_tabRevision;
-          setState(() {
-            _currentIndex = index;
-            _visitedTabs.add(index);
-          });
-          _syncWebPanelTabState();
-          // A hidden WKWebView can suspend JavaScript. Never lock navigation
-          // while waiting for its preferences or controller requests.
-          unawaited(_syncAfterTabChange(previousIndex, index, revision));
-        },
-      ),
+      bottomNavigationBar: MediaQuery.viewInsetsOf(context).bottom > 0
+          ? null
+          : AppBottomNavigationBar(
+              currentIndex: _currentIndex,
+              onTap: (index) {
+                FocusManager.instance.primaryFocus?.unfocus();
+                if (index == _currentIndex) return;
+                final previousIndex = _currentIndex;
+                final revision = ++_tabRevision;
+                setState(() {
+                  _currentIndex = index;
+                  _visitedTabs.add(index);
+                });
+                _syncWebPanelTabState();
+                _scheduleWarmup();
+                // A hidden WKWebView can suspend JavaScript. Never lock navigation
+                // while waiting for its preferences or controller requests.
+                unawaited(_syncAfterTabChange(previousIndex, index, revision));
+              },
+            ),
     );
   }
 }

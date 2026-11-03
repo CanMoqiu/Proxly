@@ -170,6 +170,30 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
   }
 
   Future<void> _openUrl(String url) async {
+    final confirmed = await AppPopup.dialog<bool>(
+      context: context,
+      builder: (context) => AppDialog(
+        title: Text(tr('打开外部链接')),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(tr('将在浏览器中打开以下链接：')),
+            const SizedBox(height: 12),
+            SelectableText(url),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => AppPopup.close(context, false),
+              child: Text(tr('取消'))),
+          FilledButton(
+              onPressed: () => AppPopup.close(context, true),
+              child: Text(tr('继续'))),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
     try {
       if (await launchUrl(Uri.parse(url),
           mode: LaunchMode.externalApplication)) {
@@ -322,7 +346,6 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 24, 16, 48),
         children: [
-          // ── App 标识 ──
           Center(
             child: Column(
               children: [
@@ -401,12 +424,10 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
                                   ),
                                 ),
                               )
-                            : Switch.adaptive(
+                            : Switch(
                                 key: const ValueKey(
                                   'about_automatic_update_switch',
                                 ),
-                                activeTrackColor:
-                                    Theme.of(context).colorScheme.primary,
                                 value: _automaticCheckEnabled!,
                                 onChanged: _changingAutomaticCheck
                                     ? null
@@ -448,7 +469,6 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
           ),
           const SizedBox(height: 28),
 
-          // ── 链接 ──
           _SectionTitle('使用与支持', textColor),
           const SizedBox(height: 10),
           ClipRRect(
@@ -598,7 +618,6 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
           ),
           const SizedBox(height: 12),
 
-          // ── 第三方依赖 ──
           _SectionTitle('开源致谢', textColor),
           const SizedBox(height: 10),
           Container(
@@ -635,7 +654,6 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
           ),
           const SizedBox(height: 28),
 
-          // ── 底部声明 ──
           Center(
             child: Text(
               tr('Proxly 与 Clash / OpenClash / Mihomo 项目无官方关联'),
@@ -648,8 +666,6 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
     );
   }
 }
-
-// ─── 小组件 ────────────────────────────────────────────────────────────────────
 
 class _SectionTitle extends StatelessWidget {
   final String text;

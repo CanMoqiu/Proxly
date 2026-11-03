@@ -13,8 +13,8 @@ import '../widgets/adaptive_ui.dart';
 import '../widgets/app_feedback.dart';
 import 'main_shell.dart';
 
-/// 首次启动引导页：帮助新用户快速完成 Clash 连接配置。
-/// 当 SharedPreferences 中 clash_host 为空时，由 main.dart 展示此页。
+/// Guides initial Clash connection setup.
+/// Shown by AppStartup when no controller address is configured.
 class SetupWizardPage extends StatefulWidget {
   const SetupWizardPage({super.key});
 
@@ -197,7 +197,7 @@ class _SetupWizardPageState extends State<SetupWizardPage>
       );
       await ClashService.instance.loadConfig();
       if (!mounted) return;
-      // 配置保存完成，替换路由栈，进入主界面
+      // Replace the route stack only after settings are persisted.
       Navigator.of(
         context,
       ).pushReplacement(MaterialPageRoute(builder: (_) => const MainShell()));
@@ -237,6 +237,7 @@ class _SetupWizardPageState extends State<SetupWizardPage>
       resizeToAvoidBottomInset: false,
       backgroundColor: bgColor,
       body: SafeArea(
+        bottom: false,
         child: PageView(
           controller: _pageController,
           physics: const NeverScrollableScrollPhysics(),
@@ -274,32 +275,33 @@ class _SetupWizardPageState extends State<SetupWizardPage>
           ],
         ),
       ),
-      // 步骤指示器
-      bottomNavigationBar: Container(
-        height: 36,
-        color: bgColor,
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: List.generate(_setupPageCount, (i) {
-            final active = i == _currentStep;
-            return AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              margin: const EdgeInsets.symmetric(horizontal: 4),
-              width: active ? 20 : 6,
-              height: 6,
-              decoration: BoxDecoration(
-                color: active ? primary : palette.textDisabled,
-                borderRadius: BorderRadius.circular(3),
-              ),
-            );
-          }),
+      bottomNavigationBar: SafeArea(
+        top: false,
+        maintainBottomViewPadding: true,
+        child: Container(
+          height: 36,
+          color: bgColor,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: List.generate(_setupPageCount, (i) {
+              final active = i == _currentStep;
+              return AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                margin: const EdgeInsets.symmetric(horizontal: 4),
+                width: active ? 20 : 6,
+                height: 6,
+                decoration: BoxDecoration(
+                  color: active ? primary : palette.textDisabled,
+                  borderRadius: BorderRadius.circular(3),
+                ),
+              );
+            }),
+          ),
         ),
       ),
     );
   }
 }
-
-// ─── 第一步：欢迎页 ────────────────────────────────────────────────────────────
 
 class _WelcomePage extends StatelessWidget {
   final VoidCallback onNext;
@@ -478,8 +480,6 @@ class _Highlight {
   });
 }
 
-// ─── 第二步：连接配置页 ────────────────────────────────────────────────────────
-
 class _ConfigPage extends StatelessWidget {
   final TextEditingController hostController;
   final FocusNode hostFocusNode;
@@ -553,252 +553,262 @@ class _ConfigPage extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Expanded(
-                child: SingleChildScrollView(
-                  key: const ValueKey('setup_config_scroll'),
-                  keyboardDismissBehavior:
-                      ScrollViewKeyboardDismissBehavior.onDrag,
+                child: Padding(
+                  // Only shrink the form viewport; navigation stays behind the
+                  // keyboard. Account for the fixed footer outside this area.
                   padding: EdgeInsets.only(
-                    bottom: MediaQuery.viewInsetsOf(context).bottom,
+                    bottom: (MediaQuery.viewInsetsOf(context).bottom -
+                            MediaQuery.viewPaddingOf(context).bottom -
+                            36 -
+                            18 -
+                            64)
+                        .clamp(0.0, double.infinity),
                   ),
-                  child: SizedBox(
-                    width: constraints.maxWidth,
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          tr('连接设置'),
-                          style: TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.w700,
-                            color: textColor,
+                  child: SingleChildScrollView(
+                    key: const ValueKey('setup_config_scroll'),
+                    keyboardDismissBehavior:
+                        ScrollViewKeyboardDismissBehavior.onDrag,
+                    child: SizedBox(
+                      width: constraints.maxWidth,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            tr('连接设置'),
+                            style: TextStyle(
+                              fontSize: 22,
+                              fontWeight: FontWeight.w700,
+                              color: textColor,
+                            ),
                           ),
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          tr('填写控制器地址；密钥和 SSH 密码可按需填写，之后可在设置页修改'),
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: hintColor,
-                            height: 1.5,
+                          const SizedBox(height: 6),
+                          Text(
+                            tr('填写控制器地址；密钥和 SSH 密码可按需填写，之后可在设置页修改'),
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: hintColor,
+                              height: 1.5,
+                            ),
                           ),
-                        ),
-                        const SizedBox(height: 18),
-                        // ── 地址 + 密钥输入卡片 ──────────────────────────────────────────────
-                        Container(
-                          decoration: BoxDecoration(
-                            color: cardBg,
-                            borderRadius: BorderRadius.circular(18),
-                            border: Border.all(color: cardBorder, width: 0.5),
-                          ),
-                          padding: const EdgeInsets.all(16),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              LabeledInputField(
-                                title: tr('控制器地址'),
-                                description: tr(
-                                  '填写 OpenClash 外部控制地址，格式为 IP:端口',
-                                ),
-                                titleColor: textColor,
-                                descriptionColor: labelColor,
-                                child: TextField(
-                                  controller: hostController,
-                                  focusNode: hostFocusNode,
-                                  style: TextStyle(
-                                    fontSize: 14,
-                                    color: textColor,
-                                  ),
-                                  keyboardType: TextInputType.url,
-                                  textInputAction: TextInputAction.next,
-                                  autocorrect: false,
-                                  enableSuggestions: false,
-                                  decoration: InputDecoration(
-                                    hintText: tr('IP:端口'),
-                                    hintStyle: TextStyle(color: hintColor),
-                                    filled: true,
-                                    fillColor: inputBg,
-                                    border: inputBorder,
-                                    enabledBorder: hostEnabledBorder,
-                                    focusedBorder: hostFocusedBorder,
-                                    contentPadding: const EdgeInsets.symmetric(
-                                      horizontal: 14,
-                                      vertical: 12,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(height: 16),
-                              LabeledInputField(
-                                title: tr('控制器密钥'),
-                                description: tr('用于访问已设置密钥的控制器，未设置可留空'),
-                                titleColor: textColor,
-                                descriptionColor: labelColor,
-                                child: TextField(
-                                  controller: tokenController,
-                                  obscureText: obscureToken,
-                                  style: TextStyle(
-                                    fontSize: 14,
-                                    color: textColor,
-                                  ),
-                                  textInputAction: TextInputAction.next,
-                                  autocorrect: false,
-                                  enableSuggestions: false,
-                                  decoration: InputDecoration(
-                                    hintText: tr('请输入密钥'),
-                                    hintStyle: TextStyle(color: hintColor),
-                                    filled: true,
-                                    fillColor: inputBg,
-                                    border: inputBorder,
-                                    enabledBorder: inputBorder,
-                                    focusedBorder: focusedBorder,
-                                    contentPadding: const EdgeInsets.symmetric(
-                                      horizontal: 14,
-                                      vertical: 12,
-                                    ),
-                                    suffixIcon: IconButton(
-                                      icon: Icon(
-                                        obscureToken
-                                            ? Icons.visibility_off_outlined
-                                            : Icons.visibility_outlined,
-                                        color: hintColor,
-                                        size: 20,
-                                      ),
-                                      onPressed: onToggleObscure,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(height: 16),
-                              LabeledInputField(
-                                title: tr('SSH 密码（可选）'),
-                                description: tr(
-                                  '用于管理 YAML 配置和重启 OpenClash，未使用 SSH 可留空',
-                                ),
-                                titleColor: textColor,
-                                descriptionColor: labelColor,
-                                child: TextField(
-                                  controller: sshPasswordController,
-                                  obscureText: obscureSshPassword,
-                                  style: TextStyle(
-                                    fontSize: 14,
-                                    color: textColor,
-                                  ),
-                                  textInputAction: TextInputAction.done,
-                                  autocorrect: false,
-                                  enableSuggestions: false,
-                                  decoration: InputDecoration(
-                                    hintText: tr('请输入密码'),
-                                    hintStyle: TextStyle(color: hintColor),
-                                    filled: true,
-                                    fillColor: inputBg,
-                                    border: inputBorder,
-                                    enabledBorder: inputBorder,
-                                    focusedBorder: focusedBorder,
-                                    contentPadding: const EdgeInsets.symmetric(
-                                      horizontal: 14,
-                                      vertical: 12,
-                                    ),
-                                    suffixIcon: IconButton(
-                                      icon: Icon(
-                                        obscureSshPassword
-                                            ? Icons.visibility_off_outlined
-                                            : Icons.visibility_outlined,
-                                        color: hintColor,
-                                        size: 20,
-                                      ),
-                                      onPressed: onToggleSshObscure,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        // ── 测试连接 ─────────────────────────────────────────────────────────
-                        GestureDetector(
-                          onTap: testing ? null : onTest,
-                          child: Container(
-                            width: double.infinity,
+                          const SizedBox(height: 18),
+                          Container(
                             decoration: BoxDecoration(
                               color: cardBg,
-                              borderRadius: BorderRadius.circular(14),
+                              borderRadius: BorderRadius.circular(18),
                               border: Border.all(color: cardBorder, width: 0.5),
                             ),
-                            padding: const EdgeInsets.all(14),
-                            child: Center(
-                              child: testing
-                                  ? SizedBox(
-                                      width: 18,
-                                      height: 18,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                        color: primary,
-                                      ),
-                                    )
-                                  : AdaptiveSingleLineText(
-                                      tr('检查连接'),
-                                      style: TextStyle(
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.w500,
-                                        color: primary,
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                LabeledInputField(
+                                  title: tr('控制器地址'),
+                                  description: tr(
+                                    '填写 OpenClash 外部控制地址，格式为 IP:端口',
+                                  ),
+                                  titleColor: textColor,
+                                  descriptionColor: labelColor,
+                                  child: TextField(
+                                    controller: hostController,
+                                    focusNode: hostFocusNode,
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      color: textColor,
+                                    ),
+                                    keyboardType: TextInputType.url,
+                                    textInputAction: TextInputAction.next,
+                                    autocorrect: false,
+                                    enableSuggestions: false,
+                                    decoration: InputDecoration(
+                                      hintText: tr('IP:端口'),
+                                      hintStyle: TextStyle(color: hintColor),
+                                      filled: true,
+                                      fillColor: inputBg,
+                                      border: inputBorder,
+                                      enabledBorder: hostEnabledBorder,
+                                      focusedBorder: hostFocusedBorder,
+                                      contentPadding:
+                                          const EdgeInsets.symmetric(
+                                        horizontal: 14,
+                                        vertical: 12,
                                       ),
                                     ),
-                            ),
-                          ),
-                        ),
-                        // ── 测试结果提示 ─────────────────────────────────────────────────────
-                        if (testResult != null) ...[
-                          const SizedBox(height: 10),
-                          Container(
-                            width: double.infinity,
-                            decoration: BoxDecoration(
-                              color: (testSuccess
-                                      ? palette.success
-                                      : palette.error)
-                                  .withValues(alpha: 0.10),
-                              borderRadius: BorderRadius.circular(14),
-                              border: Border.all(
-                                color: testSuccess
-                                    ? palette.success
-                                    : palette.error,
-                                width: 0.5,
-                              ),
-                            ),
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 12,
-                            ),
-                            child: Row(
-                              children: [
-                                Container(
-                                  width: 8,
-                                  height: 8,
-                                  decoration: BoxDecoration(
-                                    color: testSuccess
-                                        ? palette.success
-                                        : palette.error,
-                                    shape: BoxShape.circle,
                                   ),
                                 ),
-                                const SizedBox(width: 10),
-                                Expanded(
-                                  child: Text(
-                                    tr(testResult!),
+                                const SizedBox(height: 16),
+                                LabeledInputField(
+                                  title: tr('控制器密钥'),
+                                  description: tr('用于访问已设置密钥的控制器，未设置可留空'),
+                                  titleColor: textColor,
+                                  descriptionColor: labelColor,
+                                  child: TextField(
+                                    controller: tokenController,
+                                    obscureText: obscureToken,
                                     style: TextStyle(
-                                      fontSize: 13,
-                                      color: testSuccess
-                                          ? palette.success
-                                          : palette.error,
+                                      fontSize: 14,
+                                      color: textColor,
+                                    ),
+                                    textInputAction: TextInputAction.next,
+                                    autocorrect: false,
+                                    enableSuggestions: false,
+                                    decoration: InputDecoration(
+                                      hintText: tr('请输入密钥'),
+                                      hintStyle: TextStyle(color: hintColor),
+                                      filled: true,
+                                      fillColor: inputBg,
+                                      border: inputBorder,
+                                      enabledBorder: inputBorder,
+                                      focusedBorder: focusedBorder,
+                                      contentPadding:
+                                          const EdgeInsets.symmetric(
+                                        horizontal: 14,
+                                        vertical: 12,
+                                      ),
+                                      suffixIcon: IconButton(
+                                        icon: Icon(
+                                          obscureToken
+                                              ? Icons.visibility_off_outlined
+                                              : Icons.visibility_outlined,
+                                          color: hintColor,
+                                          size: 20,
+                                        ),
+                                        onPressed: onToggleObscure,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 16),
+                                LabeledInputField(
+                                  title: tr('SSH 密码（可选）'),
+                                  description: tr(
+                                    '用于管理 YAML 配置和重启 OpenClash，未使用 SSH 可留空',
+                                  ),
+                                  titleColor: textColor,
+                                  descriptionColor: labelColor,
+                                  child: TextField(
+                                    controller: sshPasswordController,
+                                    obscureText: obscureSshPassword,
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      color: textColor,
+                                    ),
+                                    textInputAction: TextInputAction.done,
+                                    autocorrect: false,
+                                    enableSuggestions: false,
+                                    decoration: InputDecoration(
+                                      hintText: tr('请输入密码'),
+                                      hintStyle: TextStyle(color: hintColor),
+                                      filled: true,
+                                      fillColor: inputBg,
+                                      border: inputBorder,
+                                      enabledBorder: inputBorder,
+                                      focusedBorder: focusedBorder,
+                                      contentPadding:
+                                          const EdgeInsets.symmetric(
+                                        horizontal: 14,
+                                        vertical: 12,
+                                      ),
+                                      suffixIcon: IconButton(
+                                        icon: Icon(
+                                          obscureSshPassword
+                                              ? Icons.visibility_off_outlined
+                                              : Icons.visibility_outlined,
+                                          color: hintColor,
+                                          size: 20,
+                                        ),
+                                        onPressed: onToggleSshObscure,
+                                      ),
                                     ),
                                   ),
                                 ),
                               ],
                             ),
                           ),
+                          const SizedBox(height: 12),
+                          GestureDetector(
+                            onTap: testing ? null : onTest,
+                            child: Container(
+                              width: double.infinity,
+                              decoration: BoxDecoration(
+                                color: cardBg,
+                                borderRadius: BorderRadius.circular(14),
+                                border:
+                                    Border.all(color: cardBorder, width: 0.5),
+                              ),
+                              padding: const EdgeInsets.all(14),
+                              child: Center(
+                                child: testing
+                                    ? SizedBox(
+                                        width: 18,
+                                        height: 18,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          color: primary,
+                                        ),
+                                      )
+                                    : AdaptiveSingleLineText(
+                                        tr('检查连接'),
+                                        style: TextStyle(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w500,
+                                          color: primary,
+                                        ),
+                                      ),
+                              ),
+                            ),
+                          ),
+                          if (testResult != null) ...[
+                            const SizedBox(height: 10),
+                            Container(
+                              width: double.infinity,
+                              decoration: BoxDecoration(
+                                color: (testSuccess
+                                        ? palette.success
+                                        : palette.error)
+                                    .withValues(alpha: 0.10),
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(
+                                  color: testSuccess
+                                      ? palette.success
+                                      : palette.error,
+                                  width: 0.5,
+                                ),
+                              ),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 12,
+                              ),
+                              child: Row(
+                                children: [
+                                  Container(
+                                    width: 8,
+                                    height: 8,
+                                    decoration: BoxDecoration(
+                                      color: testSuccess
+                                          ? palette.success
+                                          : palette.error,
+                                      shape: BoxShape.circle,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Text(
+                                      tr(testResult!),
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        color: testSuccess
+                                            ? palette.success
+                                            : palette.error,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
                         ],
-                      ],
+                      ),
                     ),
                   ),
                 ),
@@ -894,8 +904,6 @@ class _WizardNavButtons extends StatelessWidget {
     );
   }
 }
-
-// ─── 第三步：功能偏好 ────────────────────────────────────────────────────────
 
 class _PreferencesPage extends StatelessWidget {
   final bool saving;
@@ -1061,8 +1069,6 @@ class _PreferenceSection extends StatelessWidget {
     );
   }
 }
-
-// ─── 出站链路模式选择按钮 ──────────────────────────────────────────────────────
 
 class _ModeButton extends StatelessWidget {
   final String label;

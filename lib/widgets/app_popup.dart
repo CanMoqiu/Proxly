@@ -92,7 +92,10 @@ class AppDialog extends StatelessWidget {
         title: title,
         content: content,
         scrollable: true,
-        constraints: const BoxConstraints(maxWidth: 400),
+        constraints: BoxConstraints(
+          minWidth: (MediaQuery.sizeOf(context).width - 48).clamp(0, 400),
+          maxWidth: 400,
+        ),
         insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
         titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
         contentPadding: const EdgeInsets.fromLTRB(20, 14, 20, 12),

@@ -7,7 +7,7 @@ import 'package:proxly/services/web_panel_service.dart';
 
 void main() {
   test('bundled panel version matches the imported release', () {
-    expect(WebPanelService.builtinVersion, 'v3.29.1');
+    expect(WebPanelService.builtinVersion, 'v3.30.0');
   });
 
   testWidgets('new image and font formats are included in the asset bundle',

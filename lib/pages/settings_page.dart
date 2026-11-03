@@ -86,8 +86,9 @@ class _SettingsPageState extends State<SettingsPage>
   }
 
   Future<void> _setTheme(ThemeMode mode) async {
-    ProxlyApp.setThemeModeOf(context, mode); // 同步更新静态变量 + 触发父级重建
-    if (mounted) setState(() {}); // 强制重建，确保 Switch/ThemeButton 即时响应
+    ProxlyApp.setThemeModeOf(context, mode);
+    // Refresh local controls after changing the shared theme.
+    if (mounted) setState(() {});
     final prefs = await SharedPreferences.getInstance();
     final str = mode == ThemeMode.light
         ? 'light'
@@ -264,8 +265,6 @@ class _SettingsPageState extends State<SettingsPage>
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // ── 外观主题卡片 ─────────────────────────────────────────────────
-              // ── 连接配置卡片 ─────────────────────────────────────────────────
               Container(
                 key: const ValueKey('settings_connection_card'),
                 decoration: BoxDecoration(
@@ -388,7 +387,6 @@ class _SettingsPageState extends State<SettingsPage>
                         ),
                       ),
                     ),
-                    // 测试结果内嵌
                     if (_testResult != null) ...[
                       const SizedBox(height: 12),
                       Row(
@@ -419,7 +417,6 @@ class _SettingsPageState extends State<SettingsPage>
                       ),
                     ],
                     const SizedBox(height: 16),
-                    // 按钮行
                     Row(
                       children: [
                         Expanded(
@@ -492,7 +489,6 @@ class _SettingsPageState extends State<SettingsPage>
                 ),
               ),
               const SizedBox(height: 12),
-
               Container(
                 key: const ValueKey('settings_theme_card'),
                 decoration: BoxDecoration(
@@ -525,7 +521,6 @@ class _SettingsPageState extends State<SettingsPage>
                 ),
               ),
               const SizedBox(height: 12),
-
               _NavRow(
                 icon: Icons.code_rounded,
                 title: tr('高级选项'),
@@ -542,8 +537,6 @@ class _SettingsPageState extends State<SettingsPage>
                 ),
               ),
               const SizedBox(height: 12),
-
-              // ── 关于 ─────────────────────────────────────────────────────────
               _NavRow(
                 icon: Icons.info_outline_rounded,
                 title: tr('关于 Proxly'),
@@ -564,8 +557,6 @@ class _SettingsPageState extends State<SettingsPage>
     );
   }
 }
-
-// ── 通用导航行组件 ──────────────────────────────────────────────────────────
 
 class _NavRow extends StatelessWidget {
   final IconData icon;

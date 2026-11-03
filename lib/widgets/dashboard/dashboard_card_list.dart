@@ -11,6 +11,7 @@ class DashboardCardList extends StatefulWidget {
   final DashboardLayoutStore layout;
   final Map<DashboardCardId, Widget> cards;
   final bool editing;
+  final Widget? sshTrustNotice;
   final VoidCallback onEditPressed;
   final void Function(Future<void>) onSave;
   const DashboardCardList(
@@ -18,6 +19,7 @@ class DashboardCardList extends StatefulWidget {
       required this.layout,
       required this.cards,
       required this.editing,
+      this.sshTrustNotice,
       required this.onEditPressed,
       required this.onSave});
 
@@ -57,7 +59,15 @@ class _DashboardCardListState extends State<DashboardCardList> {
   Widget build(BuildContext context) {
     final layout = widget.layout;
     final editing = widget.editing;
-    final ids = editing ? layout.order : layout.visible;
+    const sshCards = {
+      DashboardCardId.currentYaml,
+      DashboardCardId.operations,
+      DashboardCardId.quickSettings
+    };
+    final ids = (editing ? layout.order : layout.visible)
+        .where((id) =>
+            editing || widget.sshTrustNotice == null || !sshCards.contains(id))
+        .toList();
     final palette = AppPalette.of(context);
     return DashboardReorderableList(
       editing: editing,
@@ -69,6 +79,10 @@ class _DashboardCardListState extends State<DashboardCardList> {
       footer: Padding(
         padding: const EdgeInsets.symmetric(vertical: 8),
         child: Column(children: [
+          if (widget.sshTrustNotice != null) ...[
+            widget.sshTrustNotice!,
+            const SizedBox(height: 12),
+          ],
           if (editing) ...[
             Text(tr('长按卡片拖动排序，关闭开关隐藏卡片'),
                 textAlign: TextAlign.center,
@@ -122,7 +136,9 @@ class _DashboardCardListState extends State<DashboardCardList> {
                                 onChanged: (value) => widget.onSave(
                                     layout.setVisible(ids[index], value))),
                           ])),
-                    if (layout.isVisible(ids[index]))
+                    if (layout.isVisible(ids[index]) &&
+                        !(widget.sshTrustNotice != null &&
+                            sshCards.contains(ids[index])))
                       if (!editing)
                         widget.cards[ids[index]]!
                       else

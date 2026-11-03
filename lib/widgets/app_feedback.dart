@@ -180,7 +180,7 @@ class _AppFeedbackBannerState extends State<_AppFeedbackBanner>
     final media = MediaQuery.of(context);
     final keyboardInset = media.viewInsets.bottom;
     final restingBottom =
-        keyboardInset > 0 ? keyboardInset + 12 : media.viewPadding.bottom + 56;
+        keyboardInset > 0 ? keyboardInset + 12 : media.viewPadding.bottom + 80;
     final lowerHalfHeight =
         media.size.height - restingBottom - media.size.height * 0.5 - 16;
     final maxBannerHeight = math.max(40.0, lowerHalfHeight);

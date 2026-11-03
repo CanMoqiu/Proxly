@@ -4,9 +4,49 @@ import 'package:proxly/l10n/app_locale.dart';
 import 'package:proxly/pages/setup_wizard_page.dart';
 import 'package:proxly/theme/app_theme.dart';
 import 'package:proxly/widgets/adaptive_ui.dart';
+import 'package:proxly/widgets/keyboard_focus_reveal.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
+  testWidgets('keyboard reveals setup inputs without lifting navigation',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({'app_language': 'en'});
+    await AppLocaleController.instance.load();
+    tester.view.physicalSize = const Size(390, 800);
+    tester.view.devicePixelRatio = 1;
+    tester.view.viewPadding = const FakeViewPadding(bottom: 34);
+    tester.view.padding = const FakeViewPadding(bottom: 34);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetViewInsets);
+    addTearDown(tester.view.resetViewPadding);
+    addTearDown(tester.view.resetPadding);
+    await tester.pumpWidget(AppLocaleScope(
+      controller: AppLocaleController.instance,
+      child: MaterialApp(
+        theme: AppTheme.light(),
+        builder: (_, child) => KeyboardFocusReveal(child: child!),
+        home: const SetupWizardPage(),
+      ),
+    ));
+    await tester.tap(find.text('Get started'));
+    await tester.pumpAndSettle();
+    final backBefore = tester.getRect(find.text('Back'));
+    final nextBefore = tester.getRect(find.text('Continue'));
+    final field = find.byType(TextField).last;
+    await tester.ensureVisible(field);
+    await tester.tap(field);
+    await tester.enterText(field, 'test-only');
+    tester.view.viewInsets = const FakeViewPadding(bottom: 320);
+    tester.view.padding = FakeViewPadding.zero;
+    await tester.pumpAndSettle(const Duration(milliseconds: 250));
+    expect(tester.getRect(find.text('Back')), backBefore);
+    expect(tester.getRect(find.text('Continue')), nextBefore);
+    expect(tester.getBottomLeft(field).dy, lessThanOrEqualTo(480));
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
+
   testWidgets('English setup preferences scroll without scaling the page',
       (tester) async {
     SharedPreferences.setMockInitialValues({});
