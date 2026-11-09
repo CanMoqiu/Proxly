@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import 'clash_config_file_service.dart';
+import 'connection_settings_store.dart';
 import 'clash_data_hub.dart';
 import 'clash_service.dart';
 
@@ -96,6 +97,7 @@ class OpenClashRestartCoordinator extends ChangeNotifier {
     Future<void> Function()? beforeRestart,
     Future<void> Function()? verify,
     OpenClashRestartReason reason = OpenClashRestartReason.manual,
+    bool retryPersistence = true,
   }) {
     final current = _inFlight;
     if (current != null) return current;
@@ -104,6 +106,8 @@ class OpenClashRestartCoordinator extends ChangeNotifier {
       beforeRestart: beforeRestart,
       verify: verify,
       reason: reason,
+      retryPersistence: retryPersistence,
+      connectionRevision: ConnectionSettingsStore.instance.revision,
     );
     return _start(request);
   }
@@ -139,6 +143,15 @@ class OpenClashRestartCoordinator extends ChangeNotifier {
   Future<OpenClashRestartResult> _run(_RestartRequest request) async {
     var changesPersisted = request.changesAlreadyPersisted;
     try {
+      void checkTarget() {
+        if (request.connectionRevision !=
+            ConnectionSettingsStore.instance.revision) {
+          throw StateError(
+              'Connection settings changed; refresh before restarting');
+        }
+      }
+
+      checkTarget();
       final beforeRestart = request.beforeRestart;
       if (beforeRestart != null) {
         _setPhase(OpenClashRestartPhase.saving);
@@ -148,11 +161,13 @@ class OpenClashRestartCoordinator extends ChangeNotifier {
       }
 
       _setPhase(OpenClashRestartPhase.restarting);
+      checkTarget();
       await _restartCommand(request.password);
 
       _setPhase(OpenClashRestartPhase.waitingForOnline);
       await _delay(initialWait);
       await _waitUntilHealthy();
+      checkTarget();
 
       final verify = request.verify;
       if (verify != null) {
@@ -170,9 +185,11 @@ class OpenClashRestartCoordinator extends ChangeNotifier {
     } catch (error) {
       _error = error;
       _changesPersisted = changesPersisted;
-      _retryRequest =
-          (changesPersisted ? request.withoutPersistenceStep() : request)
-              .withoutPassword();
+      _retryRequest = changesPersisted
+          ? request.withoutPersistenceStep().withoutPassword()
+          : request.retryPersistence
+              ? request.withoutPassword()
+              : null;
       _setPhase(OpenClashRestartPhase.failed);
       return OpenClashRestartResult(
         success: false,
@@ -251,6 +268,8 @@ class _RestartRequest {
   final Future<void> Function()? verify;
   final OpenClashRestartReason reason;
   final bool changesAlreadyPersisted;
+  final bool retryPersistence;
+  final int connectionRevision;
 
   const _RestartRequest({
     required this.password,
@@ -258,6 +277,8 @@ class _RestartRequest {
     required this.verify,
     required this.reason,
     this.changesAlreadyPersisted = false,
+    this.retryPersistence = true,
+    required this.connectionRevision,
   });
 
   _RestartRequest withoutPersistenceStep() {
@@ -267,6 +288,8 @@ class _RestartRequest {
       verify: verify,
       reason: reason,
       changesAlreadyPersisted: true,
+      retryPersistence: retryPersistence,
+      connectionRevision: connectionRevision,
     );
   }
 
@@ -277,6 +300,8 @@ class _RestartRequest {
       verify: verify,
       reason: reason,
       changesAlreadyPersisted: changesAlreadyPersisted,
+      retryPersistence: retryPersistence,
+      connectionRevision: connectionRevision,
     );
   }
 
@@ -287,6 +312,8 @@ class _RestartRequest {
       verify: verify,
       reason: reason,
       changesAlreadyPersisted: changesAlreadyPersisted,
+      retryPersistence: retryPersistence,
+      connectionRevision: connectionRevision,
     );
   }
 }

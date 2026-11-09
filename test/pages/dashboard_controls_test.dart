@@ -954,7 +954,7 @@ void main() {
   });
 
   testWidgets('saved run mode failure offers a restart retry', (tester) async {
-    SharedPreferences.setMockInitialValues({'app_language': 'zh'});
+    SharedPreferences.setMockInitialValues({'app_language': 'zh_CN'});
     await AppLocaleController.instance.load();
     final service = _FakeQuickSettingsService()
       ..failureCode = 'restart_failed'
@@ -979,7 +979,7 @@ void main() {
     await tester.pump();
 
     expect(
-      find.textContaining('设置已保存，但 OpenClash 未恢复正常'),
+      find.textContaining('设置已保存，但代理服务未恢复正常'),
       findsOneWidget,
     );
     expect(find.textContaining('可使用重启按钮重试'), findsOneWidget);
@@ -1013,7 +1013,7 @@ void main() {
       ),
     );
     await tester.pump();
-    expect(find.text('Restarting OpenClash...'), findsOneWidget);
+    expect(find.text('Restarting proxy service...'), findsOneWidget);
     expect(
       find.byKey(
         const ValueKey('dashboard_activity_indicator'),
@@ -1046,7 +1046,7 @@ void main() {
       ),
     );
     await tester.pump();
-    expect(find.text('Restarting OpenClash...'), findsOneWidget);
+    expect(find.text('Restarting proxy service...'), findsOneWidget);
 
     gate.complete();
     await restart;

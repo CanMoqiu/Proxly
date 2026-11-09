@@ -11,6 +11,7 @@ class DashboardCardList extends StatefulWidget {
   final DashboardLayoutStore layout;
   final Map<DashboardCardId, Widget> cards;
   final bool editing;
+  final Set<DashboardCardId> unavailable;
   final Widget? sshTrustNotice;
   final VoidCallback onEditPressed;
   final void Function(Future<void>) onSave;
@@ -19,6 +20,7 @@ class DashboardCardList extends StatefulWidget {
       required this.layout,
       required this.cards,
       required this.editing,
+      this.unavailable = const {},
       this.sshTrustNotice,
       required this.onEditPressed,
       required this.onSave});
@@ -65,6 +67,7 @@ class _DashboardCardListState extends State<DashboardCardList> {
       DashboardCardId.quickSettings
     };
     final ids = (editing ? layout.order : layout.visible)
+        .where((id) => !widget.unavailable.contains(id))
         .where((id) =>
             editing || widget.sshTrustNotice == null || !sshCards.contains(id))
         .toList();
@@ -74,7 +77,10 @@ class _DashboardCardListState extends State<DashboardCardList> {
       controller: _scrollController,
       padding: AdaptiveScrollPadding.page(context, top: 16),
       onReorder: (oldIndex, newIndex) {
-        if (editing) widget.onSave(layout.reorder(oldIndex, newIndex));
+        if (editing) {
+          widget.onSave(layout.reorder(layout.order.indexOf(ids[oldIndex]),
+              layout.order.indexOf(ids[newIndex])));
+        }
       },
       footer: Padding(
         padding: const EdgeInsets.symmetric(vertical: 8),

@@ -7,141 +7,11 @@ import 'clash_service.dart';
 import 'openclash_restart_coordinator.dart';
 import 'openclash_script_safety.dart';
 import 'ssh_service.dart';
-
-enum OpenClashBaseMode { fakeIp, redirHost, unknown }
-
-enum OpenClashRunVariant { compatibility, tun, mix }
-
-enum OpenClashProxyMode { rule, global, direct }
-
-enum OpenClashAreaBypass { mainland, overseas, disabled }
-
-enum OpenClashQuickSettingKey {
-  baseMode,
-  runVariant,
-  proxyMode,
-  areaBypass,
-  sniffer,
-  dnsProxy,
-  streamUnlock,
-}
-
-class OpenClashQuickSettings {
-  final OpenClashBaseMode baseMode;
-  final OpenClashRunVariant? runVariant;
-  final OpenClashProxyMode proxyMode;
-  final OpenClashAreaBypass areaBypass;
-  final bool snifferEnabled;
-  final bool dnsProxyEnabled;
-  final bool streamUnlockEnabled;
-  final bool routerSelfProxyEnabled;
-  final bool streamUnlockSupported;
-  final String rawRunMode;
-
-  const OpenClashQuickSettings({
-    required this.baseMode,
-    required this.runVariant,
-    required this.proxyMode,
-    required this.areaBypass,
-    required this.snifferEnabled,
-    required this.dnsProxyEnabled,
-    required this.streamUnlockEnabled,
-    required this.routerSelfProxyEnabled,
-    required this.streamUnlockSupported,
-    required this.rawRunMode,
-  });
-
-  OpenClashQuickSettings copyWith({
-    OpenClashBaseMode? baseMode,
-    OpenClashRunVariant? runVariant,
-    OpenClashProxyMode? proxyMode,
-    OpenClashAreaBypass? areaBypass,
-    bool? snifferEnabled,
-    bool? dnsProxyEnabled,
-    bool? streamUnlockEnabled,
-    bool? routerSelfProxyEnabled,
-    bool? streamUnlockSupported,
-    String? rawRunMode,
-  }) {
-    return OpenClashQuickSettings(
-      baseMode: baseMode ?? this.baseMode,
-      runVariant: runVariant ?? this.runVariant,
-      proxyMode: proxyMode ?? this.proxyMode,
-      areaBypass: areaBypass ?? this.areaBypass,
-      snifferEnabled: snifferEnabled ?? this.snifferEnabled,
-      dnsProxyEnabled: dnsProxyEnabled ?? this.dnsProxyEnabled,
-      streamUnlockEnabled: streamUnlockEnabled ?? this.streamUnlockEnabled,
-      routerSelfProxyEnabled:
-          routerSelfProxyEnabled ?? this.routerSelfProxyEnabled,
-      streamUnlockSupported:
-          streamUnlockSupported ?? this.streamUnlockSupported,
-      rawRunMode: rawRunMode ?? this.rawRunMode,
-    );
-  }
-}
-
-class OpenClashQuickSettingApplyResult {
-  final bool success;
-  final OpenClashQuickSettings settings;
-  final String? errorCode;
-  final String? errorDetail;
-  final String? failureStage;
-  final bool rollbackAttempted;
-  final bool rollbackSucceeded;
-  final bool changesPersisted;
-  final bool canRetry;
-  final bool stateUncertain;
-
-  const OpenClashQuickSettingApplyResult._({
-    required this.success,
-    required this.settings,
-    required this.errorCode,
-    required this.errorDetail,
-    required this.failureStage,
-    required this.rollbackAttempted,
-    required this.rollbackSucceeded,
-    required this.changesPersisted,
-    required this.canRetry,
-    this.stateUncertain = false,
-  });
-
-  const OpenClashQuickSettingApplyResult.success(
-    OpenClashQuickSettings settings,
-  ) : this._(
-        success: true,
-        settings: settings,
-        errorCode: null,
-        errorDetail: null,
-        failureStage: null,
-        rollbackAttempted: false,
-        rollbackSucceeded: false,
-        changesPersisted: true,
-        canRetry: false,
-      );
-
-  const OpenClashQuickSettingApplyResult.failure({
-    required OpenClashQuickSettings settings,
-    required String errorCode,
-    String? errorDetail,
-    String? failureStage,
-    required bool rollbackAttempted,
-    required bool rollbackSucceeded,
-    bool changesPersisted = false,
-    bool canRetry = false,
-    bool stateUncertain = false,
-  }) : this._(
-         success: false,
-         settings: settings,
-         errorCode: errorCode,
-         errorDetail: errorDetail,
-         failureStage: failureStage,
-         rollbackAttempted: rollbackAttempted,
-         rollbackSucceeded: rollbackSucceeded,
-         changesPersisted: changesPersisted,
-         canRetry: canRetry,
-         stateUncertain: stateUncertain,
-       );
-}
+import 'connection_settings_store.dart';
+import 'router_tool.dart';
+import 'router_quick_settings.dart';
+import 'nikki_quick_settings_adapter.dart';
+export 'router_quick_settings.dart';
 
 typedef OpenClashCommandRunner = Future<String> Function(String command);
 typedef OpenClashTransactionIdFactory = String Function();
@@ -171,6 +41,7 @@ class _OpenClashCapabilities {
 
 class OpenClashQuickSettingsService {
   final ClashService _clashService;
+  final RouterTool? _routerTool;
   final OpenClashRestartCoordinator _restartCoordinator;
   final OpenClashCommandRunner? _commandRunner;
   final OpenClashTransactionIdFactory _transactionIdFactory;
@@ -178,22 +49,67 @@ class OpenClashQuickSettingsService {
 
   OpenClashQuickSettingsService({
     ClashService? clashService,
+    RouterTool? routerTool,
     OpenClashRestartCoordinator? restartCoordinator,
     OpenClashCommandRunner? commandRunner,
     OpenClashTransactionIdFactory? transactionIdFactory,
     OpenClashDelay? delay,
-  }) : _clashService = clashService ?? ClashService.instance,
-       _restartCoordinator =
-           restartCoordinator ?? OpenClashRestartCoordinator.instance,
-       _commandRunner = commandRunner,
-       _delay = delay ?? Future<void>.delayed,
-       _transactionIdFactory =
-           transactionIdFactory ?? OpenClashScriptSafety.transactionId;
+  })  : _routerTool = routerTool,
+        _clashService = clashService ?? ClashService.instance,
+        _restartCoordinator =
+            restartCoordinator ?? OpenClashRestartCoordinator.instance,
+        _commandRunner = commandRunner,
+        _delay = delay ?? Future<void>.delayed,
+        _transactionIdFactory =
+            transactionIdFactory ?? OpenClashScriptSafety.transactionId;
+
+  Future<RouterTool> _selectedTool() async =>
+      _routerTool ??
+      (_commandRunner != null
+          ? RouterTool.openClash
+          : await ConnectionSettingsStore.instance.loadRouterTool());
+
+  NikkiQuickSettingsAdapter get _nikki => NikkiQuickSettingsAdapter(
+        run: (command) async {
+          if (await _selectedTool() != RouterTool.nikki) {
+            throw StateError('Router tool changed; refresh before retrying');
+          }
+          return _run(command);
+        },
+        restartCoordinator: _restartCoordinator,
+      );
+
+  Future<OpenClashQuickSettings> _loadGeneric() async {
+    final mode = await _clashService.getProxyMode();
+    return OpenClashQuickSettings(
+        routerTool: RouterTool.generic,
+        baseMode: OpenClashBaseMode.unknown,
+        runVariant: null,
+        proxyMode: OpenClashProxyMode.values.firstWhere((v) => v.name == mode,
+            orElse: () => OpenClashProxyMode.rule),
+        areaBypass: OpenClashAreaBypass.disabled,
+        snifferEnabled: false,
+        dnsProxyEnabled: false,
+        streamUnlockEnabled: false,
+        routerSelfProxyEnabled: false,
+        streamUnlockSupported: false,
+        rawRunMode: '',
+        unsupported: {
+          for (final key in OpenClashQuickSettingKey.values)
+            if (key != OpenClashQuickSettingKey.proxyMode) key
+        });
+  }
 
   Future<OpenClashQuickSettings> load({
     bool preferLiveProxyMode = true,
     OpenClashCommandRunner? readRunner,
   }) async {
+    if (await _selectedTool() == RouterTool.generic) {
+      return _loadGeneric();
+    }
+    if (await _selectedTool() == RouterTool.nikki) {
+      return _nikki.load(readRunner: readRunner);
+    }
     final values = _parseKeyValues(await (readRunner ?? _run)(_readCommand));
     final rawRunMode = values['en_mode'] ?? '';
     var parsedRunMode = _parseRunMode(rawRunMode);
@@ -243,12 +159,41 @@ class OpenClashQuickSettingsService {
     required OpenClashQuickSettingKey key,
   }) async {
     _validateSingleChange(original: original, desired: desired, key: key);
+    final tool = await _selectedTool();
+    if (original.routerTool != tool || desired.routerTool != tool) {
+      throw StateError('Router tool changed; refresh before applying settings');
+    }
+    if (!original.supports(key)) {
+      return OpenClashQuickSettingApplyResult.failure(
+          settings: original,
+          errorCode: 'unsupported_feature',
+          rollbackAttempted: false,
+          rollbackSucceeded: false);
+    }
+    if (tool == RouterTool.generic) {
+      await _clashService.setProxyMode(desired.proxyMode.name);
+      final current = await _loadGeneric();
+      if (current.proxyMode != desired.proxyMode) {
+        return OpenClashQuickSettingApplyResult.failure(
+            settings: current,
+            errorCode: 'verification_failed',
+            rollbackAttempted: false,
+            rollbackSucceeded: false,
+            stateUncertain: true);
+      }
+      return OpenClashQuickSettingApplyResult.success(current);
+    }
+    if (tool == RouterTool.nikki) {
+      return _nikki.applyChange(original: original, desired: desired, key: key);
+    }
     if (_matches(key, original, desired)) {
       return OpenClashQuickSettingApplyResult.success(original);
     }
     if (_requiresRestart(key)) {
       return _applyRunModeWithRestart(
-        original: original, desired: desired, key: key,
+        original: original,
+        desired: desired,
+        key: key,
       );
     }
 
@@ -503,19 +448,18 @@ class OpenClashQuickSettingsService {
       return OpenClashQuickSettingApplyResult.success(latest);
     }
 
-    final error =
-        restartResult.error ??
+    final error = restartResult.error ??
         const _QuickApplyException('restart_failed', 'unknown restart error');
     final stage = !restartResult.changesPersisted
         ? '写入 OpenClash 设置'
         : error is _QuickApplyException && error.code == 'verification_failed'
-        ? '验证重启后的运行模式'
-        : '重启或等待 OpenClash 上线';
+            ? '验证重启后的运行模式'
+            : '重启或等待 OpenClash 上线';
     final errorCode = !restartResult.changesPersisted
         ? _errorCode(error)
         : error is _QuickApplyException && error.code == 'verification_failed'
-        ? error.code
-        : 'restart_failed';
+            ? error.code
+            : 'restart_failed';
     final detail = _stageDetail(stage, _errorDetail(error));
     _trace(operationId, key, 'failure', detail);
 
@@ -608,8 +552,7 @@ class OpenClashQuickSettingsService {
     if (!capabilities.coreRunning) {
       throw const _QuickApplyException('core_offline');
     }
-    if (_requiresRestart(key) &&
-        !capabilities.hasOpenClashInit) {
+    if (_requiresRestart(key) && !capabilities.hasOpenClashInit) {
       throw const _QuickApplyException('restart_unavailable');
     }
     if (!_usesRuntime(key)) return;
@@ -723,16 +666,17 @@ class OpenClashQuickSettingsService {
     final usesFirewall = _usesFirewall(key);
     final body = switch (key) {
       OpenClashQuickSettingKey.baseMode ||
-      OpenClashQuickSettingKey.runVariant => throw StateError(
-        'Run mode uses the restart flow',
-      ),
+      OpenClashQuickSettingKey.runVariant =>
+        throw StateError(
+          'Run mode uses the restart flow',
+        ),
       OpenClashQuickSettingKey.proxyMode => _proxyModeBody(desired),
       OpenClashQuickSettingKey.areaBypass => _areaBypassBody(desired),
       OpenClashQuickSettingKey.sniffer => _snifferBody(desired),
       OpenClashQuickSettingKey.dnsProxy => _dnsProxyBody(desired),
       OpenClashQuickSettingKey.streamUnlock => _streamUnlockBody(
-        desired.streamUnlockEnabled,
-      ),
+          desired.streamUnlockEnabled,
+        ),
     };
     return _applyTemplate
         .replaceAll('__RUNTIME_HELPERS__', _runtimeResolverShell)
@@ -771,8 +715,7 @@ class OpenClashQuickSettingsService {
       "'$transaction.pid' '$transaction.http' '$transaction.owner' '$transaction.ready'; "
       "rmdir '${transaction.substring(0, transaction.lastIndexOf('/'))}' 2>/dev/null || true";
 
-  static String _proxyModeBody(OpenClashQuickSettings desired) =>
-      '''
+  static String _proxyModeBody(OpenClashQuickSettings desired) => '''
 uci set openclash.config.proxy_mode='${desired.proxyMode.name}' || fail persist_failed
 set_overwrite proxy_mode '${desired.proxyMode.name}' || fail persist_failed
 uci commit openclash || fail persist_failed
@@ -865,15 +808,13 @@ openclash_ruby -E UTF-8 -e '$script' || fail runtime_modify_failed
     required OpenClashQuickSettingKey key,
   }) {
     final body = switch (key) {
-      OpenClashQuickSettingKey.sniffer =>
-        '''
+      OpenClashQuickSettingKey.sniffer => '''
 uci set openclash.config.enable_meta_sniffer='${desired.snifferEnabled ? '1' : '0'}' || fail persist_failed
 uci set openclash.config.enable_meta_sniffer_pure_ip='${desired.snifferEnabled ? '1' : '0'}' || fail persist_failed
 set_overwrite enable_meta_sniffer '${desired.snifferEnabled ? '1' : '0'}' || fail persist_failed
 set_overwrite enable_meta_sniffer_pure_ip '${desired.snifferEnabled ? '1' : '0'}' || fail persist_failed
 ''',
-      OpenClashQuickSettingKey.dnsProxy =>
-        '''
+      OpenClashQuickSettingKey.dnsProxy => '''
 uci set openclash.config.enable_respect_rules='${desired.dnsProxyEnabled ? '1' : '0'}' || fail persist_failed
 set_overwrite enable_respect_rules '${desired.dnsProxyEnabled ? '1' : '0'}' || fail persist_failed
 ''',
@@ -1002,9 +943,8 @@ uci commit openclash || fail persist_failed
     if (baseMode == OpenClashBaseMode.unknown || variant == null) {
       throw const _QuickApplyException('unsupported_run_mode');
     }
-    final base = baseMode == OpenClashBaseMode.fakeIp
-        ? 'fake-ip'
-        : 'redir-host';
+    final base =
+        baseMode == OpenClashBaseMode.fakeIp ? 'fake-ip' : 'redir-host';
     final suffix = switch (variant) {
       OpenClashRunVariant.compatibility => '',
       OpenClashRunVariant.tun => '-tun',
@@ -1014,10 +954,10 @@ uci commit openclash || fail persist_failed
   }
 
   static String _areaBypassValue(OpenClashAreaBypass area) => switch (area) {
-    OpenClashAreaBypass.disabled => '0',
-    OpenClashAreaBypass.mainland => '1',
-    OpenClashAreaBypass.overseas => '2',
-  };
+        OpenClashAreaBypass.disabled => '0',
+        OpenClashAreaBypass.mainland => '1',
+        OpenClashAreaBypass.overseas => '2',
+      };
 
   static Map<String, String> _parseKeyValues(String output) {
     final result = <String, String>{};
@@ -1025,9 +965,8 @@ uci commit openclash || fail persist_failed
       final line = rawLine.trim();
       final separator = line.indexOf('=');
       if (separator <= 0) continue;
-      result[line.substring(0, separator)] = line
-          .substring(separator + 1)
-          .trim();
+      result[line.substring(0, separator)] =
+          line.substring(separator + 1).trim();
     }
     return result;
   }
@@ -1136,20 +1075,20 @@ uci commit openclash || fail persist_failed
   }
 
   static ({OpenClashBaseMode baseMode, OpenClashRunVariant? variant})
-  _parseRunMode(String value) {
+      _parseRunMode(String value) {
     final baseMode = value.startsWith('fake-ip')
         ? OpenClashBaseMode.fakeIp
         : value.startsWith('redir-host')
-        ? OpenClashBaseMode.redirHost
-        : OpenClashBaseMode.unknown;
+            ? OpenClashBaseMode.redirHost
+            : OpenClashBaseMode.unknown;
     if (baseMode == OpenClashBaseMode.unknown) {
       return (baseMode: baseMode, variant: null);
     }
     final variant = value.endsWith('-tun')
         ? OpenClashRunVariant.tun
         : value.endsWith('-mix')
-        ? OpenClashRunVariant.mix
-        : OpenClashRunVariant.compatibility;
+            ? OpenClashRunVariant.mix
+            : OpenClashRunVariant.compatibility;
     return (baseMode: baseMode, variant: variant);
   }
 
@@ -1196,8 +1135,7 @@ openclash_ruby() {
 }
 ''';
 
-  static const _runtimeRubyPrelude =
-      OpenClashScriptSafety.rubyYamlGuard +
+  static const _runtimeRubyPrelude = OpenClashScriptSafety.rubyYamlGuard +
       r'''
 def load_config(config_path)
   value = YAML.load_file(config_path)
@@ -1293,8 +1231,7 @@ resolve_runtime_path() {
 }
 ''';
 
-  static const _capabilityCommand =
-      _runtimeResolverShell +
+  static const _capabilityCommand = _runtimeResolverShell +
       r'''
 has_uci=0
 core_running=0
@@ -1328,8 +1265,7 @@ printf 'cap_runtime=%s\n' "$runtime_available"
 printf 'openclash_version=%s\n' "$openclash_version"
 ''';
 
-  static const _readCommand =
-      _runtimeResolverShell +
+  static const _readCommand = _runtimeResolverShell +
       _openClashRubyShellFunction +
       r'''
 for option in en_mode proxy_mode china_ip_route enable_meta_sniffer enable_respect_rules stream_auto_select router_self_proxy; do

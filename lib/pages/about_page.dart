@@ -24,7 +24,7 @@ class AboutPage extends StatefulWidget {
 
 class _AboutPageState extends State<AboutPage> {
   static const _appName = 'Proxly';
-  static const _description = 'Proxly 是一款专为 OpenClash / Mihomo 设计的监控面板，'
+  static const _description = 'Proxly 是一款用于管理软路由代理工具的监控面板，'
       '让你在手机上实时掌握代理状态、流量用量与连接详情，无需打开浏览器。';
   static const _githubRepo = 'CanMoqiu/proxly';
   static const _mitLicenseEnglish = '''Copyright (c) 2026 CanMoqiu

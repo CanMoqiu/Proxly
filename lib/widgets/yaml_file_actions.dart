@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 
 import '../l10n/app_locale.dart';
 import '../services/clash_config_file_service.dart';
+import '../services/connection_settings_store.dart';
 import 'yaml_file_dialogs.dart';
 
 class YamlFileActions {
@@ -63,7 +64,8 @@ class YamlFileActions {
         context: context,
         builder: (_) => YamlUploadFileNameDialog(initialValue: picked.name));
     if (!context.mounted || name == null) return null;
-    final path = ClashConfigFileService.uploadPathForFileName(name);
+    final path = ClashConfigFileService.uploadPathForFileName(name,
+        tool: await ConnectionSettingsStore.instance.loadRouterTool());
     final files = await ClashConfigFileService.listFiles();
     if (!context.mounted) return null;
     if (files.any((file) => file.path == path)) {

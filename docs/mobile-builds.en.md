@@ -60,7 +60,7 @@ Local panel resources use `Cache-Control: no-store` to avoid duplicate HTTP cach
 
 ## iOS self-signing
 
-iOS 18+ iPhones use an unsigned Release IPA. No Apple certificate needs to be stored in the repository. See the [iPhone guide](ios-selfsign.en.md) for builds, installation, and in-place updates.
+iOS 18+ iPhones and iPads use an unsigned Release IPA. No Apple certificate needs to be stored in the repository. See the [iPhone guide](ios-selfsign.en.md) for builds, installation, and in-place updates.
 
 ## Publishing
 

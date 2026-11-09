@@ -1,13 +1,15 @@
+import 'dart:async';
 import '../l10n/app_locale.dart';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:convert';
 import '../services/clash_data_hub.dart';
 import '../services/connection_settings_store.dart';
 import '../services/clash_host_validator.dart';
 import '../services/clash_service.dart';
 import '../services/connection_feedback.dart';
+import '../services/router_tool.dart';
+import '../services/router_detection_service.dart';
+import '../services/router_detection_session.dart';
 import '../services/web_panel_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/adaptive_ui.dart';
@@ -17,7 +19,8 @@ import 'developer_options_page.dart';
 import '../main.dart';
 
 class SettingsPage extends StatefulWidget {
-  const SettingsPage({super.key});
+  const SettingsPage({super.key, this.detectionService});
+  final RouterDetectionService? detectionService;
   @override
   State<SettingsPage> createState() => _SettingsPageState();
 }
@@ -27,9 +30,20 @@ class _SettingsPageState extends State<SettingsPage>
   final _hostController = TextEditingController();
   final _tokenController = TextEditingController();
   final _sshPasswordController = TextEditingController();
+  final _sshPortController = TextEditingController(text: '22');
   bool _obscureToken = true;
   bool _obscureSshPassword = true;
   bool _testing = false;
+  RouterTool _routerTool = RouterTool.generic;
+  ProxyCore _core = ProxyCore.unknown;
+  String? _detectedInput;
+
+  String get _detectionInput => [
+        _hostController.text,
+        _tokenController.text,
+        _sshPortController.text,
+        _sshPasswordController.text
+      ].join("\u0000");
   bool _saving = false;
   bool _updatingControllerValues = false;
   bool _settingsLoadFailed = false;
@@ -39,14 +53,45 @@ class _SettingsPageState extends State<SettingsPage>
   @override
   void initState() {
     super.initState();
-    ConnectionSettingsStore.instance.addListener(_loadSettings);
+    ConnectionSettingsStore.instance.addListener(_handleSettingsChanged);
     _hostController.addListener(_clearTestResultOnInput);
     _tokenController.addListener(_clearTestResultOnInput);
+    _sshPortController.addListener(_clearTestResultOnInput);
+    _sshPasswordController.addListener(_clearTestResultOnInput);
     _loadSettings();
+  }
+
+  void _handleSettingsChanged() {
+    if (ConnectionSettingsStore.instance.lastChange ==
+        ConnectionSettingsChange.routerIdentity) {
+      unawaited(_syncRouterIdentity());
+    } else {
+      unawaited(_loadSettings());
+    }
+  }
+
+  Future<void> _syncRouterIdentity() async {
+    try {
+      final settings = await ConnectionSettingsStore.instance.load();
+      if (!mounted || _detectedInput != _detectionInput) return;
+      setState(() {
+        _routerTool = settings.routerTool;
+        _core = settings.core;
+      });
+    } catch (_) {
+      // Keep the current form if credentials are temporarily unavailable.
+    }
   }
 
   void _clearTestResultOnInput() {
     if (_updatingControllerValues) return;
+    if (_detectedInput != null && _detectedInput != _detectionInput) {
+      setState(() {
+        _detectedInput = null;
+        _routerTool = RouterTool.generic;
+        _core = ProxyCore.unknown;
+      });
+    }
     if (_testResult == null) return;
     cancelFeedbackClear('connection_test');
     setState(() => _testResult = null);
@@ -72,11 +117,15 @@ class _SettingsPageState extends State<SettingsPage>
         cancelFeedbackClear('connection_test');
         setState(() {
           _settingsLoadFailed = false;
+          _routerTool = settings.routerTool;
+          _core = settings.core;
           _updatingControllerValues = true;
           _hostController.text = settings.host;
           _tokenController.text = settings.token;
           _sshPasswordController.text = settings.sshPassword;
+          _sshPortController.text = settings.sshPort.toString();
           _updatingControllerValues = false;
+          _detectedInput = _detectionInput;
           _testResult = null;
         });
       }
@@ -99,6 +148,7 @@ class _SettingsPageState extends State<SettingsPage>
   }
 
   Future<void> _saveSettings() async {
+    if (_testing || _saving) return;
     if (_settingsLoadFailed) {
       await _loadSettings();
       return;
@@ -108,7 +158,7 @@ class _SettingsPageState extends State<SettingsPage>
     if (host.isEmpty) {
       AppFeedback.showSnackBar(
         context,
-        tr('请先填写 OpenClash 地址'),
+        tr('请先填写控制器地址'),
         tone: AppFeedbackTone.error,
       );
       return;
@@ -122,14 +172,28 @@ class _SettingsPageState extends State<SettingsPage>
       );
       return;
     }
+    final sshPort = ConnectionSettings.parseSshPort(_sshPortController.text);
+    if (sshPort == null) {
+      AppFeedback.showSnackBar(
+        context,
+        tr('SSH 端口必须为 1–65535 之间的整数'),
+        tone: AppFeedbackTone.error,
+      );
+      return;
+    }
     setState(() => _saving = true);
     try {
       await ConnectionSettingsStore.instance.saveController(
         host: host,
         token: _tokenController.text.trim(),
         sshPassword: _sshPasswordController.text,
+        sshPort: sshPort,
+        routerTool: _routerTool,
+        core: _core,
+        routerSelectionPending: _routerTool == RouterTool.generic,
       );
       await ClashService.instance.loadConfig();
+      unawaited(RouterDetectionSession.instance.refresh());
       ClashDataHub.instance.resetBaseline(clearSnapshot: true);
       await Future.wait([
         WebPanelSync.instance.reload(),
@@ -156,6 +220,11 @@ class _SettingsPageState extends State<SettingsPage>
   }
 
   Future<void> _testConnection() async {
+    if (_testing) return;
+    if (ConnectionSettings.parseSshPort(_sshPortController.text) == null) {
+      _setTestResult('SSH 端口必须为 1–65535 之间的整数', success: false);
+      return;
+    }
     final host = ClashHostValidator.normalizeAddress(_hostController.text);
     if (host.isEmpty) {
       _setTestResult('请先填写 Clash 控制器地址', success: false);
@@ -171,29 +240,16 @@ class _SettingsPageState extends State<SettingsPage>
       _testing = true;
       _testResult = null;
     });
+    final input = _detectionInput;
     try {
-      final token = _tokenController.text.trim();
-      final headers = <String, String>{
-        'Content-Type': 'application/json',
-        if (token.isNotEmpty) 'Authorization': 'Bearer $token',
-      };
-      final response = await http
-          .get(Uri.parse('http://$host/version'), headers: headers)
-          .timeout(const Duration(seconds: 5));
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        _setTestResult(
-          '连接成功 · Clash ${data['version'] ?? '未知版本'}',
-          success: true,
-        );
-      } else if (response.statusCode == 401) {
-        _setTestResult('密钥错误，请检查后重试', success: false);
-      } else {
-        _setTestResult(
-          '连接失败 · 状态码 ${response.statusCode}',
-          success: false,
-        );
-      }
+      await (widget.detectionService ?? RouterDetectionService()).detect(
+          host: host,
+          token: _tokenController.text.trim(),
+          sshPassword: '',
+          sshPort:
+              ConnectionSettings.parseSshPort(_sshPortController.text) ?? 22);
+      if (!mounted || input != _detectionInput) return;
+      _setTestResult('连接正常', success: true);
     } catch (e) {
       _setTestResult(ConnectionFeedback.unavailable, success: false);
     } finally {
@@ -203,13 +259,16 @@ class _SettingsPageState extends State<SettingsPage>
 
   @override
   void dispose() {
-    ConnectionSettingsStore.instance.removeListener(_loadSettings);
+    ConnectionSettingsStore.instance.removeListener(_handleSettingsChanged);
     _hostController.removeListener(_clearTestResultOnInput);
     _tokenController.removeListener(_clearTestResultOnInput);
+    _sshPortController.removeListener(_clearTestResultOnInput);
+    _sshPasswordController.removeListener(_clearTestResultOnInput);
     disposeTransientFeedback();
     _hostController.dispose();
     _tokenController.dispose();
     _sshPasswordController.dispose();
+    _sshPortController.dispose();
     super.dispose();
   }
 
@@ -282,8 +341,8 @@ class _SettingsPageState extends State<SettingsPage>
                           onPressed: _loadSettings, child: Text(tr('重试'))),
                     ],
                     LabeledInputField(
-                      title: tr('OpenClash 地址'),
-                      description: tr('填写 OpenClash 外部控制地址，格式为 IP:端口'),
+                      title: tr('控制器地址'),
+                      description: tr('填写 Clash API 地址，格式为 IP:端口'),
                       titleColor: textColor,
                       descriptionColor: labelColor,
                       child: TextField(
@@ -349,8 +408,37 @@ class _SettingsPageState extends State<SettingsPage>
                     ),
                     const SizedBox(height: 16),
                     LabeledInputField(
+                      title: tr('SSH 端口'),
+                      description: tr('留空使用默认端口 22'),
+                      titleColor: textColor,
+                      descriptionColor: labelColor,
+                      child: TextField(
+                        key: const ValueKey('ssh_port_field'),
+                        controller: _sshPortController,
+                        style: TextStyle(fontSize: 14, color: textColor),
+                        keyboardType: TextInputType.number,
+                        textInputAction: TextInputAction.next,
+                        autocorrect: false,
+                        enableSuggestions: false,
+                        decoration: InputDecoration(
+                          hintText: '22',
+                          hintStyle: TextStyle(color: hintColor),
+                          filled: true,
+                          fillColor: inputBg,
+                          border: inputBorder,
+                          enabledBorder: inputBorder,
+                          focusedBorder: focusedBorder,
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 12,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    LabeledInputField(
                       title: tr('SSH 密码（可选）'),
-                      description: tr('用于管理 YAML 配置和重启 OpenClash，未使用 SSH 可留空'),
+                      description: tr('用于识别代理软件、管理 YAML 和重启服务，未使用 SSH 可留空'),
                       titleColor: textColor,
                       descriptionColor: labelColor,
                       child: TextField(

@@ -1,7 +1,7 @@
 <div align="center">
   <img src="proxly-icon.png" width="96" alt="Proxly 图标" />
   <h1>Proxly</h1>
-  <p><strong>面向用户自有 OpenClash / Mihomo 环境的 Android / iOS 监控与管理客户端</strong></p>
+  <p><strong>面向用户自有软路由代理环境的 Android / iOS 监控与管理客户端</strong></p>
   <p>通过 Clash API、内置 Zashboard 和 SSH/SFTP 提供运行状态、代理连接及配置管理功能。</p>
 
   [![最新正式版](https://img.shields.io/github/v/release/CanMoqiu/proxly?label=正式版)](https://github.com/CanMoqiu/proxly/releases/latest)
@@ -20,7 +20,7 @@
 
 ## 项目概述
 
-Android 与 iOS 在 `main` 主分支同步开发，共用 Flutter 3.47.5 和版本号。正式安装包从发布页下载；自行构建时，可在有权限的仓库副本中手动运行 GitHub Actions，生成已签名 Android APK 与供 iOS 18+ iPhone 自签的 Release 未签名 IPA。详见 [双端构建说明](docs/mobile-builds.zh-CN.md) 和 [iPhone 自签使用说明](docs/ios-selfsign.zh-CN.md)。
+Android 与 iOS 在 `main` 主分支同步开发，共用 Flutter 3.47.5 和版本号。正式安装包从发布页下载；自行构建时，可在有权限的仓库副本中手动运行 GitHub Actions，生成已签名 Android APK 与供 iOS 18+ iPhone / iPad 自签的 Release 未签名 IPA。详见 [双端构建说明](docs/mobile-builds.zh-CN.md) 和 [iPhone 自签使用说明](docs/ios-selfsign.zh-CN.md)。
 
 Proxly 是使用 Flutter 开发的 Android / iOS 客户端，用于连接用户自行部署并有权访问的 OpenClash / Mihomo 控制器。应用整合 Clash REST API、内置 Zashboard Web 面板以及基于 SSH/SFTP 的 OpenClash 配置管理能力。
 
@@ -72,10 +72,10 @@ flowchart LR
 
 | 项目 | 当前实现 |
 | --- | --- |
-| 平台 | Android 7.0+（ARM64、x86_64）与 iOS 18+ iPhone；应用包名 / Bundle ID 为 `top.canmoqiu.proxly` |
+| 平台 | Android 7.0+（ARM64、x86_64）与 iOS 18+ iPhone / iPad；应用包名 / Bundle ID 为 `top.canmoqiu.proxly` |
 | Clash 地址 | 接受本机地址、私有或链路本地 IP、`.local` / `.lan` 域名以及局域网主机名；默认控制器端口为 `9090` |
 | Clash API | 控制器需要启用 `external-controller`；配置了 `secret` 时使用对应控制器密钥 |
-| SSH | OpenClash 设置、YAML 管理和重启使用 `root` 账号及固定端口 `22` |
+| SSH | OpenClash 设置、YAML 管理和重启使用 `root` 账号；SSH 端口可在引导或设置页修改，默认 `22` |
 | YAML 目录 | `/etc/openclash/config`、`/openclash/config`、`/etc/clash/config`、`/root/.config/clash/config` |
 | YAML 文件 | 仅处理配置目录下的 `.yaml` 和 `.yml` 文件；单个文件最大 `5 MB` |
 | Zashboard JSON | 文件最大 `5 MB`，顶层键最多 `2000` 个，单个值序列化后最大 `1 MB` |
@@ -104,7 +104,7 @@ lib/widgets/      共用界面组件
 assets/web_panel/ 内置 Zashboard 静态资源
 assets/icons/     应用界面图标资源
 android/          Android 工程配置
-ios/              iPhone 工程配置
+ios/              iPhone / iPad 工程配置
 test/             Widget 与服务测试
 ```
 

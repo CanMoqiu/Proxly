@@ -20,6 +20,9 @@ import '../services/web_panel_service.dart';
 import '../services/web_panel_scroll.dart';
 import '../services/web_panel_flag_font.dart';
 import '../services/app_platform.dart';
+import '../services/tablet_layout.dart';
+import '../services/connection_panel_preferences.dart';
+import '../services/web_panel_device_layout.dart';
 import '../services/panel_load_monitor.dart';
 import '../services/web_panel_resume_state.dart';
 import '../services/web_panel_page_probe.dart';
@@ -44,6 +47,7 @@ class ProxyPage extends StatefulWidget {
 
 class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
   final _panelLoad = PanelLoadMonitor();
+  bool _tablet = false;
   final _resumeState = WebPanelResumeState();
   Future<void>? _restarting;
   bool _needsRecovery = false;
@@ -109,6 +113,7 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
   // Restore storage before Vue initializes.
   UserScript? _restoreUserScript;
   UserScript? _connectionUserScript;
+  UserScript? _connectionViewScript;
   UserScript? _themeUserScript;
 
   @override
@@ -136,6 +141,7 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    _tablet = TabletLayout.isTablet(View.of(context));
     final currentIsDark = ProxlyApp.resolvedThemeIsDark(context);
     final themeChanged = _isDark != currentIsDark;
     final currentLanguage = AppLocaleController.instance.zashboardLanguage;
@@ -179,6 +185,7 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
           'config/auto-upgrade-core',
           'config/check-upgrade-core',
           'config/is-sidebar-collapsed',
+          'config/number-of-charts-in-sidebar',
           'config/swipe-in-pages',
           'config/swipe-in-tabs',
           'config/two-columns',
@@ -294,6 +301,13 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
       await _webViewController!.addUserScript(userScript: _restoreUserScript!);
     }
     await _webViewController!.addUserScript(userScript: _nativeScrollScript);
+    if (_tablet) {
+      await _webViewController!.addUserScript(userScript: _tabletLayoutScript);
+    }
+    if (_connectionViewScript != null) {
+      await _webViewController!
+          .addUserScript(userScript: _connectionViewScript!);
+    }
     if (_connectionUserScript != null) {
       await _webViewController!.addUserScript(
         userScript: _connectionUserScript!,
@@ -319,13 +333,20 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
       _authStateCleanupScript,
       if (_restoreUserScript != null) _restoreUserScript!,
       _nativeScrollScript,
+      if (_tablet) _tabletLayoutScript,
       if (_connectionUserScript != null) _connectionUserScript!,
+      if (_connectionViewScript != null) _connectionViewScript!,
       if (_themeUserScript != null) _themeUserScript!,
       if (Platform.isIOS) _flagFontScript,
       if (widget.asTab) _docklessLayoutScript,
     ];
     return UnmodifiableListView(scripts);
   }
+
+  UserScript get _tabletLayoutScript => UserScript(
+        source: WebPanelDeviceLayout.tablet(embedded: widget.asTab),
+        injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+      );
 
   UserScript get _nativeScrollScript => UserScript(
         source:
@@ -338,6 +359,13 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
   /// Base64 keeps JSON characters from changing the injected JavaScript.
   Future<void> _buildRestoreScript() async {
     final prefs = await SharedPreferences.getInstance();
+    final content =
+        await ConnectionPanelPreferences.instance.load(tablet: _tablet);
+    _connectionViewScript = UserScript(
+      source: ConnectionPanelPreferences.script(content, tablet: _tablet),
+      injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+      forMainFrameOnly: true,
+    );
     var raw = prefs.getString(_prefLocalStorage);
     if (raw == null || raw.isEmpty) {
       _restoreUserScript = null;
@@ -775,6 +803,11 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
       }catch(e){}})();
       """,
       );
+      final content =
+          await ConnectionPanelPreferences.instance.load(tablet: _tablet);
+      await _webViewController!.evaluateJavascript(
+        source: ConnectionPanelPreferences.script(content, tablet: _tablet),
+      );
       // Keep the next document load consistent with the live preferences.
       await _restoreConnectionStateInPage();
       await _buildRestoreScript();
@@ -1181,7 +1214,9 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
                   transparentBackground: false,
                   javaScriptEnabled: true,
                   domStorageEnabled: true,
-                  disableHorizontalScroll: true,
+                  userAgent:
+                      _tablet ? WebPanelDeviceLayout.desktopUserAgent : null,
+                  disableHorizontalScroll: !_tablet,
                   allowsBackForwardNavigationGestures: AppPlatform.isIOS,
                   overScrollMode: OverScrollMode.NEVER,
                   disallowOverScroll: true,
@@ -1202,6 +1237,12 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
                 },
                 onWebViewCreated: (c) async {
                   _webViewController = c;
+                  ConnectionPanelPreferences.instance.bind(
+                    c,
+                    tablet: _tablet,
+                    port: _serverPort,
+                    isCurrent: () => mounted && _isCurrentController(c),
+                  );
                   c.addJavaScriptHandler(
                     handlerName: 'nativeUpdatePanel',
                     callback: (_) => _performNativeUpdate(),

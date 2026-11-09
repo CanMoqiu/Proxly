@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:proxly/services/router_detection_service.dart';
+import 'package:proxly/services/router_tool.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:proxly/l10n/app_locale.dart';
 import 'package:proxly/pages/setup_wizard_page.dart';
@@ -8,6 +10,34 @@ import 'package:proxly/widgets/keyboard_focus_reveal.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
+  testWidgets(
+      'setup has no software selector and continue does not identify software',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({'app_language': 'en'});
+    await AppLocaleController.instance.load();
+    var calls = 0;
+    final service = _Detection(() async {
+      calls++;
+      return const RouterDetectionResult(
+          tool: RouterTool.nikki, core: ProxyCore.mihomo, version: 'v1');
+    });
+    await tester.pumpWidget(AppLocaleScope(
+        controller: AppLocaleController.instance,
+        child: MaterialApp(
+            theme: AppTheme.light(),
+            home: SetupWizardPage(detectionService: service))));
+    await tester.tap(find.text('Get started'));
+    await tester.pumpAndSettle();
+    expect(find.byType(DropdownButtonFormField<RouterTool>), findsNothing);
+    expect(find.text('Identify proxy software and core'), findsNothing);
+    await tester.enterText(find.byType(TextField).first, 'router.local:9090');
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
+    expect(find.text('Preferences'), findsOneWidget);
+    expect(calls, 0);
+    await tester.pumpWidget(const SizedBox());
+  });
+
   testWidgets('keyboard reveals setup inputs without lifting navigation',
       (tester) async {
     SharedPreferences.setMockInitialValues({'app_language': 'en'});
@@ -44,6 +74,34 @@ void main() {
     expect(tester.getRect(find.text('Continue')), nextBefore);
     expect(tester.getBottomLeft(field).dy, lessThanOrEqualTo(480));
     expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('setup rejects invalid SSH ports before preferences',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({'app_language': 'en'});
+    await AppLocaleController.instance.load();
+    await tester.pumpWidget(AppLocaleScope(
+      controller: AppLocaleController.instance,
+      child:
+          MaterialApp(theme: AppTheme.light(), home: const SetupWizardPage()),
+    ));
+    await tester.tap(find.text('Get started'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).first, 'router.local:9090');
+    final port = find.byKey(const ValueKey('ssh_port_field'));
+    await tester.ensureVisible(port);
+    await tester.enterText(port, '65536');
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
+    expect(find.text('SSH port must be an integer between 1 and 65535'),
+        findsOneWidget);
+    expect((await SharedPreferences.getInstance()).containsKey('clash_host'),
+        isFalse);
+    await tester.enterText(port, '2222');
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
+    expect(find.text('Preferences'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
   });
 
@@ -172,4 +230,16 @@ void main() {
     );
     expect(tester.takeException(), isNull);
   });
+}
+
+class _Detection extends RouterDetectionService {
+  _Detection(this.result);
+  final Future<RouterDetectionResult> Function() result;
+  @override
+  Future<RouterDetectionResult> detect(
+          {required String host,
+          required String token,
+          required String sshPassword,
+          required int sshPort}) =>
+      result();
 }

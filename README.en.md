@@ -1,7 +1,7 @@
 <div align="center">
   <img src="proxly-icon.png" width="96" alt="Proxly icon" />
   <h1>Proxly</h1>
-  <p><strong>An Android and iOS monitoring and management client for user-operated OpenClash / Mihomo environments</strong></p>
+  <p><strong>An Android and iOS monitoring and management client for user-operated router proxy environments</strong></p>
   <p>Provides runtime status, proxy connections, and configuration management through the Clash API, bundled Zashboard, and SSH/SFTP.</p>
 
   [![Latest Release](https://img.shields.io/github/v/release/CanMoqiu/proxly?label=release)](https://github.com/CanMoqiu/proxly/releases/latest)
@@ -20,7 +20,7 @@ Repository documentation and entry points default to Simplified Chinese, with co
 
 ## Overview
 
-Android and iOS share the `main` branch, Flutter 3.47.5 and a common version number. Download official packages from Releases. To build your own copy, manually run GitHub Actions in a repository where you have permission to produce a signed Android APK and an unsigned Release IPA for self-signing on iOS 18+ iPhones. See the [shared build guide](docs/mobile-builds.en.md) and [iPhone installation guide](docs/ios-selfsign.en.md).
+Android and iOS share the `main` branch, Flutter 3.47.5 and a common version number. Download official packages from Releases. To build your own copy, manually run GitHub Actions in a repository where you have permission to produce a signed Android APK and an unsigned Release IPA for self-signing on iOS 18+ iPhones and iPads. See the [shared build guide](docs/mobile-builds.en.md) and [iPhone installation guide](docs/ios-selfsign.en.md).
 
 Proxly is a Flutter-based Android and iOS client that connects to an OpenClash / Mihomo controller deployed and administered by the user. It combines the Clash REST API, a bundled Zashboard web panel, and SSH/SFTP-based OpenClash configuration management.
 
@@ -72,10 +72,10 @@ flowchart LR
 
 | Item | Current implementation |
 | --- | --- |
-| Platform | Android 7.0+ (ARM64, x86_64) and iOS 18+ iPhone; application ID / Bundle ID `top.canmoqiu.proxly` |
+| Platform | Android 7.0+ (ARM64, x86_64) and iOS 18+ iPhone / iPad; application ID / Bundle ID `top.canmoqiu.proxly` |
 | Clash address | Accepts localhost, private or link-local IP addresses, `.local` / `.lan` domains, and local hostnames; the default controller port is `9090` |
 | Clash API | The controller must expose `external-controller`; environments configured with a `secret` use the corresponding controller secret |
-| SSH | OpenClash settings, YAML management, and restart operations use the `root` account on fixed port `22` |
+| SSH | OpenClash settings, YAML management, and restart operations use the `root` account; the SSH port is configurable in setup or Settings and defaults to `22` |
 | YAML directories | `/etc/openclash/config`, `/openclash/config`, `/etc/clash/config`, and `/root/.config/clash/config` |
 | YAML files | Only `.yaml` and `.yml` files under a supported configuration directory are processed; each file is limited to `5 MB` |
 | Zashboard JSON | Maximum `5 MB`, `2,000` top-level keys, and `1 MB` per serialized value |
@@ -104,7 +104,7 @@ lib/widgets/      Shared interface components
 assets/web_panel/ Bundled Zashboard static assets
 assets/icons/     Application interface icons
 android/          Android project configuration
-ios/              iPhone project configuration
+ios/              iPhone / iPad project configuration
 test/             Widget and service tests
 ```
 

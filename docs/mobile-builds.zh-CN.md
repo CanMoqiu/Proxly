@@ -60,7 +60,7 @@ Android 冷启动时仅清理已安装版本及更旧版本的应用内更新 AP
 
 ## iOS 自签安装
 
-iOS 18+ iPhone 使用 Release 未签名 IPA，不需要在仓库提供 Apple 证书。构建、安装与覆盖升级见 [iOS 使用说明](ios-selfsign.zh-CN.md)。
+iOS 18+ iPhone / iPad 使用 Release 未签名 IPA，不需要在仓库提供 Apple 证书。构建、安装与覆盖升级见 [iOS 使用说明](ios-selfsign.zh-CN.md)。
 
 ## 发布
 

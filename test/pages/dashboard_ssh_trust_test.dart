@@ -17,6 +17,7 @@ void main() {
     SharedPreferences.setMockInitialValues({
       'app_language': 'zh_CN',
       'clash_host': 'router.local:9090',
+      'ssh_port': 2222,
     });
     await AppLocaleController.instance.load();
     const channel =
@@ -48,7 +49,7 @@ void main() {
               sessions++;
               final accepted = await trust.verify(
                   'router.local',
-                  22,
+                  2222,
                   'ssh-ed25519',
                   Uint8List.fromList(utf8.encode('SHA256:test')));
               if (!accepted) throw StateError('SSH refused');
@@ -70,6 +71,8 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('取消'));
     await tester.pumpAndSettle();
+    expect(trust.isRejected('router.local', 2222), isTrue);
+    expect(trust.isRejected('router.local', 22), isFalse);
     expect(find.text('card-currentYaml'), findsNothing);
     expect(find.text('card-operations'), findsNothing);
     expect(find.text('card-quickSettings'), findsNothing);

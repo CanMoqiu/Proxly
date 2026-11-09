@@ -2,7 +2,7 @@
 
 [简体中文](ios-selfsign.zh-CN.md) · **English** · [Documentation](README.en.md)
 
-This version supports iPhones running iOS 18.0 or later in portrait orientation. It manages your own Clash/Mihomo/OpenClash controller; the phone does not run a proxy core. The app shares startup update notices and the About-page update toggle with Android. For an app update, download the IPA from GitHub Releases and sign it again before installation. Zashboard can still update separately inside the app.
+This version supports iPhones and iPads running iOS 18.0 or later. iPhones stay in portrait; iPads support portrait and landscape, with native pages expanding to the available width. It manages your own Clash/Mihomo/OpenClash controller; the phone does not run a proxy core. The app shares startup update notices and the About-page update toggle with Android. For an app update, download the IPA from GitHub Releases and sign it again before installation. Zashboard can still update separately inside the app.
 
 ## Windows development
 

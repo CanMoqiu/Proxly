@@ -13,12 +13,14 @@ import 'native_connections_page.dart';
 import '../services/update_service.dart';
 import '../services/app_platform.dart';
 import '../services/controller_connection_state.dart';
+import '../services/router_detection_session.dart';
 import '../services/web_panel_service.dart';
 import '../widgets/app_bottom_navigation_bar.dart';
 import '../widgets/update_dialog.dart';
 
 class MainShell extends StatefulWidget {
-  const MainShell({super.key});
+  const MainShell({super.key, this.detectionSession});
+  final RouterDetectionSession? detectionSession;
 
   @override
   State<MainShell> createState() => _MainShellState();
@@ -35,6 +37,9 @@ class _MainShellState extends State<MainShell>
   Timer? _warmupTimer;
   int? _warmingTab;
   bool _foreground = true;
+  bool _wasInBackground = false;
+  RouterDetectionSession get _detection =>
+      widget.detectionSession ?? RouterDetectionSession.instance;
 
   bool get _canWarm =>
       mounted &&
@@ -71,6 +76,13 @@ class _MainShellState extends State<MainShell>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     _foreground = state == AppLifecycleState.resumed;
+    if (state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.paused) {
+      _wasInBackground = true;
+    } else if (state == AppLifecycleState.resumed && _wasInBackground) {
+      _wasInBackground = false;
+      unawaited(_detection.refresh());
+    }
     _scheduleWarmup();
   }
 
@@ -80,6 +92,9 @@ class _MainShellState extends State<MainShell>
     WidgetsBinding.instance.addObserver(this);
     ControllerConnectionState.instance.addListener(_scheduleWarmup);
     _loadPrefs();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_detection.refresh());
+    });
     if (AppPlatform.supportsUpdateChecks) {
       Future.delayed(const Duration(seconds: 3), _autoCheckUpdate);
     }
@@ -186,7 +201,9 @@ class _MainShellState extends State<MainShell>
   List<Widget> get _pages {
     return [
       HomePage(
-          showConsoleButton: _showConsoleButton, active: _currentIndex == 0),
+          showConsoleButton: _showConsoleButton,
+          active: _currentIndex == 0,
+          detectionSession: _detection),
       if (!_visitedTabs.contains(1))
         const SizedBox.shrink()
       else

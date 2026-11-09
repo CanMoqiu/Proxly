@@ -16,16 +16,24 @@ def run(*args: str) -> str:
     return subprocess.check_output(args, text=True).strip()
 
 
-def package(app: Path, output: Path) -> Path:
-    with (app / "Info.plist").open("rb") as stream:
-        info = plistlib.load(stream)
+def validate_device_support(info: dict) -> None:
     assert info["CFBundleIdentifier"] == "top.canmoqiu.proxly", "Unexpected bundle ID"
     assert info["CFBundleSupportedPlatforms"] == ["iPhoneOS"], "Not a device build"
     assert info["MinimumOSVersion"] == "18.0", "Unexpected deployment target"
-    assert info["UIDeviceFamily"] == [1], "Expected an iPhone target"
+    assert info["UIDeviceFamily"] == [1, 2], "Expected an iPhone and iPad target"
     assert info["UISupportedInterfaceOrientations"] == ["UIInterfaceOrientationPortrait"]
+    assert set(info["UISupportedInterfaceOrientations~ipad"]) == {
+        "UIInterfaceOrientationPortrait", "UIInterfaceOrientationPortraitUpsideDown",
+        "UIInterfaceOrientationLandscapeLeft", "UIInterfaceOrientationLandscapeRight",
+    }, "Expected iPad portrait and landscape support"
     assert info.get("NSLocalNetworkUsageDescription"), "Missing local network purpose"
     assert info["NSAppTransportSecurity"]["NSAllowsLocalNetworking"] is True
+
+
+def package(app: Path, output: Path) -> Path:
+    with (app / "Info.plist").open("rb") as stream:
+        info = plistlib.load(stream)
+    validate_device_support(info)
 
     required = [
         app / info["CFBundleExecutable"],

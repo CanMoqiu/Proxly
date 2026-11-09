@@ -4,10 +4,12 @@ import '../../l10n/app_locale.dart';
 import '../../theme/app_theme.dart';
 import '../adaptive_ui.dart';
 import '../../services/openclash_quick_settings_service.dart';
+import '../../services/router_tool.dart';
 import 'dashboard_button_style.dart';
 
 class OpenClashQuickSettingsCard extends StatelessWidget {
   final OpenClashQuickSettings? settings;
+  final RouterTool routerTool;
   final bool readFailed;
   final bool busy;
   final Color cardBg;
@@ -25,6 +27,7 @@ class OpenClashQuickSettingsCard extends StatelessWidget {
   const OpenClashQuickSettingsCard({
     super.key,
     required this.settings,
+    this.routerTool = RouterTool.openClash,
     this.readFailed = false,
     required this.busy,
     required this.cardBg,
@@ -44,14 +47,27 @@ class OpenClashQuickSettingsCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final current = settings;
     final enabled = current != null && !busy && !readFailed;
-    final compatibilityLabel =
-        current?.baseMode == OpenClashBaseMode.fakeIp ? tr('增强') : tr('兼容');
+    bool supports(OpenClashQuickSettingKey key) =>
+        current?.supports(key) ??
+        switch (routerTool) {
+          RouterTool.openClash => true,
+          RouterTool.nikki => key != OpenClashQuickSettingKey.areaBypass &&
+              key != OpenClashQuickSettingKey.streamUnlock,
+          RouterTool.generic => key == OpenClashQuickSettingKey.proxyMode,
+        };
+    final compatibilityLabel = current?.routerTool == RouterTool.nikki
+        ? 'Redirect + TPROXY'
+        : current?.baseMode == OpenClashBaseMode.fakeIp
+            ? tr('增强')
+            : tr('兼容');
     final runModeSupported = current?.baseMode != OpenClashBaseMode.unknown &&
         current?.runVariant != null;
 
     var streamDescription = tr('自动为常见流媒体服务选择可解锁节点');
     if (current != null && !current.streamUnlockSupported) {
-      streamDescription = tr('当前 OpenClash 未提供流媒体解锁组件');
+      streamDescription = tr(current.routerTool == RouterTool.openClash
+          ? '当前 OpenClash 未提供流媒体解锁组件'
+          : '当前代理软件尚不支持此功能');
     } else if (current != null && !current.routerSelfProxyEnabled) {
       streamDescription = tr('需要先在 OpenClash 中启用路由器本机代理');
     } else if (current != null &&
@@ -87,99 +103,119 @@ class OpenClashQuickSettingsCard extends StatelessWidget {
             ),
             const SizedBox(height: 12),
           ],
-          _QuickChoiceGroup<OpenClashBaseMode>(
-            labels: const ['Fake-IP', 'Redir-Host'],
-            values: const [
-              OpenClashBaseMode.fakeIp,
-              OpenClashBaseMode.redirHost
-            ],
-            selected: current?.baseMode,
-            enabled: enabled && runModeSupported,
-            valueKeyPrefix: 'quick_setting_base',
-            onSelected: onBaseModeChanged,
-          ),
-          const SizedBox(height: 16),
-          _QuickSettingsSection(
-            title: tr('运行模式'),
-            description: tr('选择当前基础模式对应的运行方式'),
-            textColor: textColor,
-            hintColor: hintColor,
-            child: _QuickChoiceGroup<OpenClashRunVariant>(
-              labels: [compatibilityLabel, 'TUN', tr('混合')],
-              values: OpenClashRunVariant.values,
-              selected: current?.runVariant,
-              enabled: enabled && runModeSupported,
-              valueKeyPrefix: 'quick_setting_run',
-              onSelected: onRunVariantChanged,
-            ),
-          ),
-          Divider(height: 24, color: cardBorder),
-          _QuickSettingsSection(
-            title: tr('代理模式'),
-            description: tr('切换 Mihomo 处理连接时使用的规则范围'),
-            textColor: textColor,
-            hintColor: hintColor,
-            child: _QuickChoiceGroup<OpenClashProxyMode>(
-              labels: [tr('规则'), tr('全局'), tr('直连')],
-              values: OpenClashProxyMode.values,
-              selected: current?.proxyMode,
-              enabled: enabled,
-              valueKeyPrefix: 'quick_setting_proxy',
-              onSelected: onProxyModeChanged,
-            ),
-          ),
-          Divider(height: 24, color: cardBorder),
-          _QuickSettingsSection(
-            title: tr('区域绕过'),
-            description: tr('指定区域流量不经过内核'),
-            textColor: textColor,
-            hintColor: hintColor,
-            child: _QuickChoiceGroup<OpenClashAreaBypass>(
-              labels: [tr('大陆'), tr('海外'), tr('停用')],
+          if (supports(OpenClashQuickSettingKey.baseMode)) ...[
+            _QuickChoiceGroup<OpenClashBaseMode>(
+              labels: const ['Fake-IP', 'Redir-Host'],
               values: const [
-                OpenClashAreaBypass.mainland,
-                OpenClashAreaBypass.overseas,
-                OpenClashAreaBypass.disabled,
+                OpenClashBaseMode.fakeIp,
+                OpenClashBaseMode.redirHost
               ],
-              selected: current?.areaBypass,
-              enabled: enabled,
-              valueKeyPrefix: 'quick_setting_area',
-              onSelected: onAreaBypassChanged,
+              selected: current?.baseMode,
+              enabled: enabled &&
+                  runModeSupported &&
+                  supports(OpenClashQuickSettingKey.baseMode),
+              valueKeyPrefix: 'quick_setting_base',
+              onSelected: onBaseModeChanged,
             ),
-          ),
-          Divider(height: 24, color: cardBorder),
-          _QuickSwitchRow(
-            key: const ValueKey('quick_setting_sniffer'),
-            title: tr('域名嗅探'),
-            description: tr('识别连接中的域名，降低按域名分流失效的概率'),
-            value: current?.snifferEnabled ?? false,
-            enabled: enabled,
-            textColor: textColor,
-            hintColor: hintColor,
-            onChanged: onSnifferChanged,
-          ),
-          Divider(height: 16, color: cardBorder),
-          _QuickSwitchRow(
-            key: const ValueKey('quick_setting_dns_proxy'),
-            title: tr('DNS 代理'),
-            description: tr('让 DNS 查询遵循代理规则，减少解析与访问不一致'),
-            value: current?.dnsProxyEnabled ?? false,
-            enabled: enabled,
-            textColor: textColor,
-            hintColor: hintColor,
-            onChanged: onDnsProxyChanged,
-          ),
-          Divider(height: 16, color: cardBorder),
-          _QuickSwitchRow(
-            key: const ValueKey('quick_setting_stream_unlock'),
-            title: tr('流媒体解锁'),
-            description: streamDescription,
-            value: current?.streamUnlockEnabled ?? false,
-            enabled: enabled,
-            textColor: textColor,
-            hintColor: hintColor,
-            onChanged: onStreamUnlockChanged,
-          ),
+            const SizedBox(height: 16),
+            if (supports(OpenClashQuickSettingKey.runVariant)) ...[],
+            _QuickSettingsSection(
+              title: tr('运行模式'),
+              description: tr('选择当前基础模式对应的运行方式'),
+              textColor: textColor,
+              hintColor: hintColor,
+              child: _QuickChoiceGroup<OpenClashRunVariant>(
+                labels: [compatibilityLabel, 'TUN', tr('混合')],
+                values: OpenClashRunVariant.values,
+                selected: current?.runVariant,
+                enabled: enabled &&
+                    runModeSupported &&
+                    supports(OpenClashQuickSettingKey.runVariant),
+                valueKeyPrefix: 'quick_setting_run',
+                onSelected: onRunVariantChanged,
+              ),
+            ),
+            Divider(height: 24, color: cardBorder),
+          ],
+          if (supports(OpenClashQuickSettingKey.proxyMode)) ...[
+            _QuickSettingsSection(
+              title: tr('代理模式'),
+              description: tr('切换 Mihomo 处理连接时使用的规则范围'),
+              textColor: textColor,
+              hintColor: hintColor,
+              child: _QuickChoiceGroup<OpenClashProxyMode>(
+                labels: [tr('规则'), tr('全局'), tr('直连')],
+                values: OpenClashProxyMode.values,
+                selected: current?.proxyMode,
+                enabled:
+                    enabled && supports(OpenClashQuickSettingKey.proxyMode),
+                valueKeyPrefix: 'quick_setting_proxy',
+                onSelected: onProxyModeChanged,
+              ),
+            ),
+            Divider(height: 24, color: cardBorder),
+          ],
+          if (supports(OpenClashQuickSettingKey.areaBypass)) ...[
+            _QuickSettingsSection(
+              title: tr('区域绕过'),
+              description: tr('指定区域流量不经过内核'),
+              textColor: textColor,
+              hintColor: hintColor,
+              child: _QuickChoiceGroup<OpenClashAreaBypass>(
+                labels: [tr('大陆'), tr('海外'), tr('停用')],
+                values: const [
+                  OpenClashAreaBypass.mainland,
+                  OpenClashAreaBypass.overseas,
+                  OpenClashAreaBypass.disabled,
+                ],
+                selected: current?.areaBypass,
+                enabled:
+                    enabled && supports(OpenClashQuickSettingKey.areaBypass),
+                valueKeyPrefix: 'quick_setting_area',
+                onSelected: onAreaBypassChanged,
+              ),
+            ),
+            Divider(height: 24, color: cardBorder),
+          ],
+          if (supports(OpenClashQuickSettingKey.sniffer)) ...[
+            _QuickSwitchRow(
+              key: const ValueKey('quick_setting_sniffer'),
+              title: tr('域名嗅探'),
+              description: tr('识别连接中的域名，降低按域名分流失效的概率'),
+              value: current?.snifferEnabled ?? false,
+              enabled: enabled && supports(OpenClashQuickSettingKey.sniffer),
+              textColor: textColor,
+              hintColor: hintColor,
+              onChanged: onSnifferChanged,
+            ),
+            Divider(height: 16, color: cardBorder),
+          ],
+          if (supports(OpenClashQuickSettingKey.dnsProxy)) ...[
+            _QuickSwitchRow(
+              key: const ValueKey('quick_setting_dns_proxy'),
+              title: tr('DNS 代理'),
+              description: tr('让 DNS 查询遵循代理规则，减少解析与访问不一致'),
+              value: current?.dnsProxyEnabled ?? false,
+              enabled: enabled && supports(OpenClashQuickSettingKey.dnsProxy),
+              textColor: textColor,
+              hintColor: hintColor,
+              onChanged: onDnsProxyChanged,
+            ),
+            Divider(height: 16, color: cardBorder),
+          ],
+          if (supports(OpenClashQuickSettingKey.streamUnlock)) ...[
+            _QuickSwitchRow(
+              key: const ValueKey('quick_setting_stream_unlock'),
+              title: tr('流媒体解锁'),
+              description: streamDescription,
+              value: current?.streamUnlockEnabled ?? false,
+              enabled:
+                  enabled && supports(OpenClashQuickSettingKey.streamUnlock),
+              textColor: textColor,
+              hintColor: hintColor,
+              onChanged: onStreamUnlockChanged,
+            ),
+          ],
         ],
       ),
     );

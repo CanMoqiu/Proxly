@@ -789,8 +789,8 @@ tail: true''');
 
     await tester.tap(find.text('Show reminder'));
     await tester.pumpAndSettle();
-    expect(find.text('确认重启 OpenClash'), findsOneWidget);
-    expect(find.text('配置已保存，是否立即重启 OpenClash 使修改生效？'), findsOneWidget);
+    expect(find.text('确认重启代理服务'), findsOneWidget);
+    expect(find.text('配置已保存，是否立即重启代理服务使修改生效？'), findsOneWidget);
     expect(find.text('稍后'), findsOneWidget);
     expect(find.text('立即重启'), findsOneWidget);
 

@@ -152,6 +152,12 @@ class _DashboardStatusState extends State<DashboardStatus>
             ConnectionSettingsChange.sshPassword) {
       return;
     }
+    if (ConnectionSettingsStore.instance.lastChange ==
+        ConnectionSettingsChange.routerIdentity) {
+      _versionLookup.reset();
+      unawaited(_loadVersionInfo());
+      return;
+    }
     _connectionReloadPending = true;
     _versionLookup.reset();
     setState(() {
