@@ -353,14 +353,14 @@ class _ClashConfigEditorPageState extends State<ClashConfigEditorPage>
             builder: (_) => const YamlRestartAfterSaveDialog());
         if (!mounted || restart == null) return;
         if (restart) {
-          setState(() => _message = '正在重启 OpenClash...');
+          setState(() => _message = '正在重启代理服务...');
           final result = await _restartCoordinator.restart(
               reason: OpenClashRestartReason.yamlEditor);
           if (!mounted) return;
           if (!result.success) {
             setState(() {
               _message = null;
-              _error = _formatError('重启 OpenClash', result.error ?? '未知错误');
+              _error = _formatError('重启代理服务', result.error ?? '未知错误');
             });
             return;
           }
@@ -387,8 +387,7 @@ class _ClashConfigEditorPageState extends State<ClashConfigEditorPage>
           ClashConfigFileService.normalizeConfigFilePath(path) == activePath);
     } catch (_) {
       if (mounted) {
-        AppFeedback.showSnackBar(
-            context, tr('无法确认当前配置；若修改了运行配置，请稍后手动重启 OpenClash'),
+        AppFeedback.showSnackBar(context, tr('无法确认当前配置；若修改了运行配置，请稍后手动重启代理服务'),
             tone: AppFeedbackTone.error, dismissOnRouteChange: false);
       }
       return false;

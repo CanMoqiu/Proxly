@@ -1,10 +1,86 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:proxly/l10n/app_locale.dart';
 import 'package:proxly/pages/settings_page.dart';
+import 'package:proxly/services/connection_settings_store.dart';
+import 'package:proxly/services/router_tool.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
+  testWidgets(
+      'background identity recognition preserves unsaved settings and has no software selector',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({
+      'app_language': 'en',
+      'clash_host': 'router.local:9090',
+      'router_tool': 'generic'
+    });
+    const channel =
+        MethodChannel('plugins.it_nomads.com/flutter_secure_storage');
+    tester.binding.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async => null);
+    addTearDown(() => tester.binding.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, null));
+    await AppLocaleController.instance.load();
+    await tester.pumpWidget(AppLocaleScope(
+        controller: AppLocaleController.instance,
+        child: const MaterialApp(home: SettingsPage())));
+    await tester.pumpAndSettle();
+    expect(find.byType(DropdownButtonFormField<RouterTool>), findsNothing);
+    expect(find.text('Identify proxy software and core'), findsNothing);
+    final host = find.byType(TextField).first;
+    await tester.enterText(host, 'unsaved-router.local:9095');
+    final store = ConnectionSettingsStore.instance;
+    await store.applyRouterDetection(
+        expectedHost: 'router.local:9090',
+        expectedRevision: store.revision,
+        tool: RouterTool.nikki,
+        core: ProxyCore.mihomo);
+    await tester.pumpAndSettle();
+    expect(tester.widget<TextField>(host).controller!.text,
+        'unsaved-router.local:9095');
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('settings load custom SSH port and reject an invalid save',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({
+      'app_language': 'en',
+      'clash_host': 'router.local:9090',
+      'ssh_port': 2222,
+    });
+    const channel =
+        MethodChannel('plugins.it_nomads.com/flutter_secure_storage');
+    var writes = 0;
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel,
+        (call) async {
+      if (call.method == 'write') writes++;
+      return null;
+    });
+    addTearDown(() => tester.binding.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, null));
+    await AppLocaleController.instance.load();
+    await tester.pumpWidget(AppLocaleScope(
+      controller: AppLocaleController.instance,
+      child: const MaterialApp(home: SettingsPage()),
+    ));
+    await tester.pumpAndSettle();
+    final port = find.byKey(const ValueKey('ssh_port_field'));
+    expect(tester.widget<TextField>(port).controller!.text, '2222');
+    await tester.ensureVisible(port);
+    await tester.enterText(port, '0');
+    tester.testTextInput.hide();
+    await tester.ensureVisible(find.text('Save'));
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    expect(find.text('SSH port must be an integer between 1 and 65535'),
+        findsOneWidget);
+    expect(writes, 0);
+    expect((await SharedPreferences.getInstance()).getInt('ssh_port'), 2222);
+    await tester.pumpWidget(const SizedBox());
+  });
+
   testWidgets('connection settings appear before appearance settings',
       (tester) async {
     SharedPreferences.setMockInitialValues({'app_language': 'en'});

@@ -57,6 +57,13 @@
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
 	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Proxly connects to your Clash controller and OpenClash device on the local network for monitoring and management.</string>
 	<key>NSAppTransportSecurity</key>

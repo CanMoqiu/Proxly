@@ -11,14 +11,15 @@ import 'theme/app_theme.dart';
 import 'widgets/app_startup.dart';
 import 'widgets/keyboard_focus_reveal.dart';
 import 'services/web_panel_service.dart';
+import 'services/tablet_layout.dart';
 import 'pages/main_shell.dart' show MainShell;
 import 'pages/setup_wizard_page.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await SystemChrome.setPreferredOrientations(const [
-    DeviceOrientation.portraitUp,
-  ]);
+  await TabletLayout.updateOrientations(
+    WidgetsBinding.instance.platformDispatcher.views.first,
+  );
   runApp(const AppStartup());
 }
 
@@ -78,6 +79,11 @@ class _ProxlyAppState extends State<ProxlyApp> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     AppLocaleController.instance.removeListener(_handleLanguageChanged);
     super.dispose();
+  }
+
+  @override
+  void didChangeMetrics() {
+    unawaited(TabletLayout.updateOrientations(View.of(context)));
   }
 
   @override

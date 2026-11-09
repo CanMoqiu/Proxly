@@ -14,6 +14,18 @@ Cards use padding and corner radii of 16, spacing of 12, and a common left title
 
 Fake-IP / Redir-Host options appear directly under Quick settings, without the former base-mode label. Switching preserves the current compatibility/enhanced, TUN, or mixed variant and uses UCI persistence, a coordinated OpenClash restart, health checks, and mode readback. Selection is disabled before loading, for unknown modes, after read failures, or while busy. A failed save does not start a restart; after a successful save but failed restart, the restart button can resume recovery.
 
+## Proxy software detection and adapters
+
+The app silently identifies proxy software and core after each cold launch reaches the main screen and when returning from the background. Recognition is not part of periodic home polling. Only returning after `hidden/paused` triggers another pass; a temporary `inactive` interruption does not. Setup and Settings have no software selector or recognition button. “Check connection” only validates the controller API, without an SSH probe. Saving changed connection settings also requests recognition.
+
+SSH uses the entered port and password with the existing host fingerprint confirmation. OpenClash and Nikki require a running service and matching controller port; the core version alone does not identify the manager. If recognition remains uncertain, Home presents the app’s standard bottom options sheet with OpenClash, Nikki, and Clash API. The sheet waits until Home is visible, the app is in the foreground, and recognition is complete. Choices are saved for the current connection and retained when later probes fail. Results and choices from a changed connection are rejected and the new connection is processed again.
+
+Home and Customize home only list cards supported by the selected software. Unsupported cards and individual controls are omitted. Changing adapters preserves saved order and visibility. Clash API mode keeps status, traffic, proxy mode, and connection operations, without dedicated YAML management or SSH restart. The bundled Zashboard shares the Clash/Mihomo API bridge and does not depend on OpenClash web directories.
+
+Initial Nikki support includes local YAML management, active profile and subscription identification, restart, DNS mode, Redirect/TPROXY/TUN combinations, proxy mode, sniffing, and DNS respect-rules. Area bypass and automatic streaming unlock have no adapter yet and are omitted. Quick settings are omitted in core-only mode or when a mixin file can override UCI settings. Local profiles use `/etc/nikki/profiles`; `/etc/nikki/subscriptions` is read-only cached content. Upload and activate a local profile to edit subscription content. The generated `/etc/nikki/run/config.yaml` is never edited as a user profile.
+
+Nikki quick changes validate the original configuration digest and pending changes, prepare a private candidate, replace the configuration, then restart and verify. Unconfirmed writes are not replayed automatically. Restart retries after a confirmed save skip persistence. Connection changes require refreshing before retrying. This initial adapter does not cover all Nikki LuCI options and still requires verification on a real router.
+
 ## YAML configuration
 
 - Current configuration shows the active OpenClash filename and path; subscriptions and states without a local file use the existing detection logic.

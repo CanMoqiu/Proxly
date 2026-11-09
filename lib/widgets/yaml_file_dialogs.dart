@@ -9,8 +9,8 @@ class YamlRestartAfterSaveDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return AppDialog(
-      title: Text(tr('确认重启 OpenClash')),
-      content: Text(tr('配置已保存，是否立即重启 OpenClash 使修改生效？')),
+      title: Text(tr('确认重启代理服务')),
+      content: Text(tr('配置已保存，是否立即重启代理服务使修改生效？')),
       actions: [
         TextButton(
           onPressed: () => AppPopup.close(context, false),

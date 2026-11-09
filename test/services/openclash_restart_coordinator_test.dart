@@ -2,8 +2,25 @@ import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:proxly/services/openclash_restart_coordinator.dart';
+import 'package:proxly/services/connection_settings_store.dart';
 
 void main() {
+  test('retry cannot restart a different connection or adapter', () async {
+    var restarts = 0;
+    final coordinator = OpenClashRestartCoordinator(
+        restartCommand: (password) async {
+          restarts++;
+          throw StateError('offline');
+        },
+        terminalStateDuration: Duration.zero);
+    addTearDown(coordinator.dispose);
+    await coordinator.restart();
+    expect(restarts, 1);
+    ConnectionSettingsStore.instance.revision++;
+    expect((await coordinator.retryLast()).success, isFalse);
+    expect(restarts, 1);
+  });
+
   test('runs save, restart, health checks and verification in order', () async {
     final events = <String>[];
     final phases = <OpenClashRestartPhase>[];

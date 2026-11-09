@@ -7,11 +7,13 @@ import 'dashboard_button_style.dart';
 
 class ClashOperationsCard extends StatelessWidget {
   final String restartLabel;
+  final bool canRestart;
   final bool busy, flushingDns, closingConnections;
   final VoidCallback onRestart, onFlushDns, onCloseConnections;
   const ClashOperationsCard(
       {super.key,
       required this.restartLabel,
+      this.canRestart = true,
       required this.busy,
       required this.flushingDns,
       required this.closingConnections,
@@ -42,18 +44,19 @@ class ClashOperationsCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            child: DashboardOperationButton(
-              key: const ValueKey('maintenance_restart'),
-              label: tr(restartLabel),
-              icon: Icons.restart_alt_rounded,
-              warning: true,
-              enabled: !busy,
-              onTap: onRestart,
+          if (canRestart)
+            SizedBox(
+              width: double.infinity,
+              child: DashboardOperationButton(
+                key: const ValueKey('maintenance_restart'),
+                label: tr(restartLabel),
+                icon: Icons.restart_alt_rounded,
+                warning: true,
+                enabled: !busy && canRestart,
+                onTap: onRestart,
+              ),
             ),
-          ),
-          const SizedBox(height: DashboardButtonStyle.spacing),
+          if (canRestart) const SizedBox(height: DashboardButtonStyle.spacing),
           Row(
             children: [
               Expanded(

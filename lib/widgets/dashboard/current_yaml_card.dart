@@ -106,7 +106,7 @@ class CurrentYamlCard extends StatelessWidget {
           Padding(
             padding: const EdgeInsetsDirectional.only(start: 28),
             child: Text(
-              tr(activeConfig?.detailText ?? '读取 OpenClash 当前使用的配置来源'),
+              tr(activeConfig?.detailText ?? '读取代理服务当前使用的配置来源'),
               style: TextStyle(fontSize: 11, color: hintColor),
             ),
           ),

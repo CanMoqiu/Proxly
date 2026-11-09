@@ -94,6 +94,58 @@ jobs:
           flutter pub get --enforce-lockfile 2>&1 | tee build-logs/dependencies.txt
           flutter analyze 2>&1 | tee build-logs/analyze.txt
           flutter test 2>&1 | tee build-logs/tests.txt
+      - name: 预取并校验 Gradle / Prefetch and verify Gradle
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import os
+          from pathlib import Path
+          import re
+          import subprocess
+          from urllib.parse import urlsplit
+
+          props = dict(line.strip().split('=', 1) for line in
+                       Path('android/gradle/wrapper/gradle-wrapper.properties').read_text().splitlines()
+                       if line.strip() and not line.lstrip().startswith('#'))
+          assert props['distributionBase'] == props['zipStoreBase'] == 'GRADLE_USER_HOME'
+          assert props['distributionPath'] == props['zipStorePath'] == 'wrapper/dists'
+          url = props['distributionUrl'].replace('\\:', ':')
+          assert urlsplit(url).scheme == 'https'
+          assert urlsplit(url).hostname in {'services.gradle.org', 'downloads.gradle.org'}
+          checksum = props['distributionSha256Sum']
+          assert re.fullmatch(r'[0-9a-f]{64}', checksum)
+          name = Path(urlsplit(url).path).name
+          assert name.startswith('gradle-') and name.endswith('-all.zip')
+          # Wrapper cache keys use MD5/base36 for location, not integrity.
+          number = int.from_bytes(hashlib.md5(url.encode()).digest(), 'big')
+          bucket = ''
+          while number:
+              number, digit = divmod(number, 36)
+              bucket = '0123456789abcdefghijklmnopqrstuvwxyz'[digit] + bucket
+          root = Path(os.environ.get('GRADLE_USER_HOME', str(Path.home() / '.gradle')))
+          archive = root / 'wrapper/dists' / name[:-4] / (bucket or '0') / name
+          installed = archive.parent / name.removesuffix('-all.zip') / 'bin/gradle'
+          if archive.with_suffix('.zip.ok').is_file() and installed.is_file():
+              print('Using installed Gradle wrapper cache')
+              raise SystemExit(0)
+          archive.parent.mkdir(parents=True, exist_ok=True)
+          temporary = archive.with_suffix('.zip.download')
+          try:
+              subprocess.run(['curl', '--fail', '--location', '--silent', '--show-error',
+                              '--retry', '4', '--retry-all-errors', '--retry-delay', '3',
+                              '--retry-max-time', '300', '--connect-timeout', '15',
+                              '--max-time', '120', '--output', str(temporary), url], check=True)
+              digest = hashlib.sha256()
+              with temporary.open('rb') as stream:
+                  for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+                      digest.update(chunk)
+              if digest.hexdigest() != checksum:
+                  raise RuntimeError('Gradle distribution SHA-256 mismatch')
+              temporary.replace(archive)
+              print('Gradle distribution SHA-256 verified')
+          finally:
+              temporary.unlink(missing_ok=True)
+          PY
       - name: 准备正式签名 / Restore release signing key
         if: inputs.android_build_type == 'release'
         env:

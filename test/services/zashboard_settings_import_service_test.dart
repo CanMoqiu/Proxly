@@ -59,6 +59,10 @@ void main() {
       'config/language': 'zh-CN',
       'config/connection-display-style': 'table',
       'config/disable-pull-to-refresh': 'true',
+      'config/number-of-charts-in-sidebar': '1',
+      'config/is-sidebar-collapsed': 'true',
+      'config/show-full-proxy-chain': 'true',
+      'config/proxy-chain-direction': 'reverse',
       'config/swipe-in-pages': 'true',
       'config/swipe-in-tabs': 'true',
       'cache/auto-sync-settings-hash': 'hash',
@@ -68,7 +72,7 @@ void main() {
 
     expect(result, isNotNull);
     expect(result!.acceptedCount, 2);
-    expect(result.skippedCount, 9);
+    expect(result.skippedCount, 13);
     final prefs = await SharedPreferences.getInstance();
     final saved = jsonDecode(
       prefs.getString(ZashboardSettingsImportService.preferenceKey)!,

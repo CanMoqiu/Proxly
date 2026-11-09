@@ -2,7 +2,7 @@
 
 **简体中文** · [English](ios-selfsign.en.md) · [文档目录](README.md)
 
-本版本支持 iOS 18.0 及更新系统的 iPhone，使用竖屏界面。继续管理用户自己的 Clash/Mihomo/OpenClash 控制器；手机不运行代理内核。应用与 Android 共用启动更新提醒及关于页检测开关，点击更新后在 GitHub 发布页下载 IPA 并重新签名安装，Zashboard 面板仍可在应用内单独更新。
+本版本支持 iOS 18.0 及更新系统的 iPhone 和 iPad。iPhone 保持竖屏；iPad 支持横竖屏，原生页面随可用宽度展开。继续管理用户自己的 Clash/Mihomo/OpenClash 控制器；手机不运行代理内核。应用与 Android 共用启动更新提醒及关于页检测开关，点击更新后在 GitHub 发布页下载 IPA 并重新签名安装，Zashboard 面板仍可在应用内单独更新。
 
 ## Windows 开发
 

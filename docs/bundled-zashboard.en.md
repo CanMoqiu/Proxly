@@ -13,6 +13,10 @@ Proxly adapts theme, authentication, navigation dock, and fonts through separate
 
 Native WebView settings and CSS control edge overscroll. Proxly owns `config/disable-pull-to-refresh` and sets it to `false`, disabling v3.30.0's global `touchmove` interception based on the initial touch direction. This prevents reverse scrolling from remaining blocked after reaching an edge. The adaptation applies to Proxy, Connections, and the console after panel updates, settings imports, and reloads. Browser-native scrolling, inertia, and nested-list handling remain intact; upstream minified assets are unchanged.
 
+Android tablets and iPads use the desktop layout, identified by a display shortest side of at least 600 logical pixels rather than the keyboard-resized or split-screen window. Proxy, Rules, and Connections hide web navigation and the overview sidebar so content fills the available width; the standalone console keeps navigation.
+
+Phone and tablet connections use the same phone-style cards and content defaults. Tablets no longer force desktop tables or separate card defaults. Changes to card fields, desktop columns, and chain display are saved automatically in separate phone and tablet profiles. Only content layout is saved; display mode and sorting remain app-managed, and shared panel imports cannot overwrite device profiles.
+
 Proxly also fixes `config/swipe-in-pages` and `config/swipe-in-tabs` to off, preventing horizontal swipes from changing panel content. In-page buttons and the app's bottom navigation continue to work.
 
 The iOS Proxy tab retains native WebView history gestures and disables the panel's top-level route slide and fade animations, preventing a second web transition after returning from Rules to Proxy. Dialog and list animations remain available.

@@ -8,6 +8,7 @@ import 'package:dartssh2/dartssh2.dart';
 import 'connection_settings_store.dart';
 import 'ssh_service.dart';
 import 'sftp_support_service.dart';
+import 'router_tool.dart';
 
 class SshPasswordRequiredException implements Exception {
   const SshPasswordRequiredException();
@@ -27,14 +28,14 @@ class ClashConfigRenameRollbackException implements Exception {
   const ClashConfigRenameRollbackException();
 
   @override
-  String toString() => tr('重命名失败且无法完整回滚，请检查当前配置文件和 OpenClash 配置引用');
+  String toString() => tr('重命名失败且无法完整回滚，请检查当前配置文件和 代理服务配置引用');
 }
 
 class ClashConfigActiveReferenceException implements Exception {
   const ClashConfigActiveReferenceException();
 
   @override
-  String toString() => tr('无法更新 OpenClash 配置引用，文件名已恢复');
+  String toString() => tr('无法更新 代理服务配置引用，文件名已恢复');
 }
 
 class ClashConfigFile {
@@ -111,7 +112,7 @@ class ClashActiveConfig {
     if (file != null) return file!.displayPath;
     return subscriptionMode
         ? tr('当前更像是订阅链接或远程配置模式')
-        : tr('没有从 OpenClash 配置中找到本地 YAML 文件');
+        : tr('没有从代理服务配置中找到本地 YAML 文件');
   }
 }
 
@@ -121,12 +122,14 @@ class ClashConfigSshSettings {
   final int port;
   final String username;
   final String password;
+  final RouterTool routerTool;
 
   const ClashConfigSshSettings({
     required this.host,
     required this.port,
     required this.username,
     required this.password,
+    this.routerTool = RouterTool.openClash,
   });
 }
 
@@ -139,11 +142,21 @@ class ClashConfigFileService {
     '/openclash/config',
     '/etc/clash/config',
     '/root/.config/clash/config',
+    '/etc/nikki/profiles',
+    '/etc/nikki/subscriptions',
   ];
 
   static Future<String> routerHost() async {
+    return (await routerTarget()).host;
+  }
+
+  static Future<SftpTarget> routerTarget() async {
     final settings = await ConnectionSettingsStore.instance.load();
-    return _routerHostFromClashHost(settings.host);
+    return SftpTarget(
+      _routerHostFromClashHost(settings.host),
+      settings.sshPort,
+      'root',
+    );
   }
 
   static Future<String> savedPassword() async {
@@ -159,8 +172,11 @@ class ClashConfigFileService {
   }) async {
     final stored = await ConnectionSettingsStore.instance.load();
     final host = _routerHostFromClashHost(stored.host);
+    if (!stored.routerTool.supportsSshManagement) {
+      throw UnsupportedError(tr('当前代理软件尚不支持 SSH 配置管理'));
+    }
     if (host.isEmpty) {
-      throw Exception(tr('请先在设置页填写 OpenClash 地址'));
+      throw Exception(tr('请先在设置页填写控制器地址'));
     }
 
     final password = passwordOverride ?? stored.sshPassword;
@@ -170,9 +186,10 @@ class ClashConfigFileService {
 
     return ClashConfigSshSettings(
       host: host,
-      port: 22,
+      port: stored.sshPort,
       username: 'root',
       password: password,
+      routerTool: stored.routerTool,
     );
   }
 
@@ -219,7 +236,7 @@ class ClashConfigFileService {
     final output = await SshService.runText(
       settings.host,
       settings.password,
-      _listCommand(),
+      _listCommand(settings.routerTool),
       username: settings.username,
       port: settings.port,
       operationTimeout: const Duration(seconds: 30),
@@ -229,7 +246,8 @@ class ClashConfigFileService {
         .map((line) => line.trim())
         .where((line) => line.isNotEmpty)
         .where(isYamlPath)
-        .where(isConfigFolderFile)
+        .where((path) =>
+            isConfigFolderFile(path) && _belongsTo(path, settings.routerTool))
         .map(normalizeRemotePath)
         .toSet()
         .toList()
@@ -241,14 +259,17 @@ class ClashConfigFileService {
     String? password,
     Future<String> Function(String)? readRunner,
   }) async {
+    final tool = await ConnectionSettingsStore.instance.loadRouterTool();
+    if (!tool.supportsSshManagement) return const ClashActiveConfig(file: null);
     if (readRunner != null) {
-      return parseActiveConfigOutput(await readRunner(_activeConfigCommand()));
+      return parseActiveConfigOutput(
+          await readRunner(_activeConfigCommand(tool)));
     }
     final settings = await loadSettings(passwordOverride: password);
     final output = await SshService.runText(
       settings.host,
       settings.password,
-      _activeConfigCommand(),
+      _activeConfigCommand(settings.routerTool),
       username: settings.username,
       port: settings.port,
       operationTimeout: const Duration(seconds: 20),
@@ -264,6 +285,36 @@ class ClashConfigFileService {
       if (parsed != null && parsed.value.isNotEmpty) {
         values[parsed.key] = parsed.value;
       }
+    }
+
+    if (values.containsKey('nikki.config.profile')) {
+      final profile = values['nikki.config.profile']!;
+      if (profile.startsWith('file:')) {
+        final name = profile.substring(5);
+        if (name.isNotEmpty &&
+            !name.contains('/') &&
+            !name.contains('\\') &&
+            !name.contains(':') &&
+            !RegExp(r'[\x00-\x1F\x7F]').hasMatch(name) &&
+            isYamlPath(name)) {
+          return ClashActiveConfig(
+              file: ClashConfigFile(
+                  path: normalizeConfigFilePath('/etc/nikki/profiles/$name')));
+        }
+      } else if (profile.startsWith('subscription:')) {
+        final section = profile.substring(13);
+        if (RegExp(r'^[A-Za-z0-9_]+$').hasMatch(section)) {
+          return ClashActiveConfig(
+              file: null,
+              source: ClashActiveConfigSource.subscription,
+              subscription: ClashSubscriptionInfo(
+                  section: section,
+                  address: values['nikki.subscription.url'] ?? '',
+                  name: values['nikki.subscription.name'] ?? '',
+                  generatedPath: '/etc/nikki/subscriptions/$section.yaml'));
+        }
+      }
+      return const ClashActiveConfig(file: null);
     }
 
     ClashConfigFile? yamlFile;
@@ -357,8 +408,25 @@ class ClashConfigFileService {
     await SshService.execute(
       settings.host,
       settings.password,
-      _setActiveConfigCommand(safePath),
+      _setActiveConfigCommand(safePath, settings.routerTool),
+      port: settings.port,
     );
+  }
+
+  static bool _belongsTo(String path, RouterTool tool) =>
+      tool.configDirectories.any((root) => path.startsWith('$root/'));
+
+  static void _requireToolPath(String path, RouterTool tool,
+      {bool writing = false}) {
+    if (!_belongsTo(path, tool)) {
+      throw ArgumentError('Path belongs to another router adapter');
+    }
+    if (writing &&
+        tool == RouterTool.nikki &&
+        path.startsWith('/etc/nikki/subscriptions/')) {
+      throw UnsupportedError(
+          'Nikki subscription cache is read-only; upload a local profile to edit');
+    }
   }
 
   static bool isConfigFolderFile(String path) {
@@ -396,9 +464,10 @@ class ClashConfigFileService {
     return value;
   }
 
-  static String uploadPathForFileName(String fileName) {
+  static String uploadPathForFileName(String fileName,
+      {RouterTool tool = RouterTool.openClash}) {
     final safeName = normalizeUploadFileName(fileName);
-    return normalizeConfigFilePath('$defaultUploadDirectory/$safeName');
+    return normalizeConfigFilePath('${tool.uploadDirectory}/$safeName');
   }
 
   static String renamePathForFileName(String sourcePath, String fileName) {
@@ -433,7 +502,7 @@ class ClashConfigFileService {
     }
     if (!isConfigFolderFile(normalized)) {
       throw ArgumentError(
-        'Only YAML files under Clash/OpenClash config directories are allowed',
+        'Only YAML files under supported router config directories are allowed',
       );
     }
     return normalized;
@@ -475,9 +544,9 @@ class ClashConfigFileService {
   static Future<Uint8List> readFileBytes(
     String path, {
     String? password,
-  }) {
+  }) async {
     final safePath = normalizeConfigFilePath(path);
-    return _withSftp(password, (sftp) async {
+    return _withSftp(password, safePath, (sftp) async {
       final stat = await _withTimeout(sftp.stat(safePath), 'SFTP stat');
       final size = stat.size;
       if (size != null && size > maxConfigBytes) {
@@ -537,6 +606,7 @@ class ClashConfigFileService {
     }
 
     final settings = await loadSettings(passwordOverride: password);
+    _requireToolPath(safePath, settings.routerTool, writing: true);
     await SshService.withClient(
       settings.host,
       settings.password,
@@ -598,6 +668,7 @@ class ClashConfigFileService {
     if (safeSource == safeTarget) return ClashConfigFile(path: safeSource);
 
     final settings = await loadSettings(passwordOverride: password);
+    _requireToolPath(safeSource, settings.routerTool, writing: true);
     try {
       return await SshService.withClient(
         settings.host,
@@ -618,7 +689,7 @@ class ClashConfigFileService {
               loadActiveConfig: () async {
                 final result = await _withTimeout(
                     SshService.runCommandOnClient(
-                        client, _activeConfigCommand()),
+                        client, _activeConfigCommand(settings.routerTool)),
                     'Read active configuration');
                 return parseActiveConfigOutput(result.stdout);
               },
@@ -627,7 +698,8 @@ class ClashConfigFileService {
                     SshService.runCommandOnClient(
                         client,
                         _renameConfigCommand(source, target,
-                            updateActiveReference: updateActiveReference)),
+                            updateActiveReference: updateActiveReference,
+                            tool: settings.routerTool)),
                     'Rename configuration');
               },
             );
@@ -686,6 +758,7 @@ class ClashConfigFileService {
   static Future<void> deleteFile(String path, {String? password}) async {
     final safePath = normalizeConfigFilePath(path);
     final settings = await loadSettings(passwordOverride: password);
+    _requireToolPath(safePath, settings.routerTool, writing: true);
     await SshService.withClient(settings.host, settings.password,
         (client) async {
       final sftp = await SftpSupportService.open(client, settings.target);
@@ -699,7 +772,8 @@ class ClashConfigFileService {
           path: safePath,
           loadActiveConfig: () async {
             final result = await _withTimeout(
-                SshService.runCommandOnClient(client, _activeConfigCommand()),
+                SshService.runCommandOnClient(
+                    client, _activeConfigCommand(settings.routerTool)),
                 'Read active configuration');
             return parseActiveConfigOutput(result.stdout);
           },
@@ -753,9 +827,11 @@ class ClashConfigFileService {
 
   static Future<T> _withSftp<T>(
     String? password,
+    String path,
     Future<T> Function(SftpClient sftp) action,
   ) async {
     final settings = await loadSettings(passwordOverride: password);
+    _requireToolPath(path, settings.routerTool);
     return SshService.withClient(
       settings.host,
       settings.password,
@@ -777,16 +853,30 @@ class ClashConfigFileService {
     await SshService.execute(
       settings.host,
       settings.password,
-      '/etc/init.d/openclash restart',
+      settings.routerTool.restartCommand,
+      port: settings.port,
     );
   }
 
-  static String _listCommand() {
-    final roots = _searchRoots.map(_shellQuote).join(' ');
+  static String _listCommand(RouterTool tool) {
+    final roots = tool.configDirectories.map(_shellQuote).join(' ');
     return "for d in $roots; do [ -d \"\$d\" ] && find \"\$d\" -type f \\( -iname '*.yaml' -o -iname '*.yml' \\) -print; done 2>/dev/null | sort -u";
   }
 
-  static String _activeConfigCommand() {
+  static String _activeConfigCommand(RouterTool tool) {
+    if (tool == RouterTool.nikki) {
+      return r'''
+profile="$(uci -q get nikki.config.profile)"
+printf 'nikki.config.profile=%s\n' "$profile"
+case "$profile" in
+  subscription:*)
+    section="${profile#subscription:}"
+    case "$section" in ''|*[!A-Za-z0-9_]*) exit 1;; esac
+    printf 'nikki.subscription.url=%s\n' "$(uci -q get nikki.$section.url)"
+    printf 'nikki.subscription.name=%s\n' "$(uci -q get nikki.$section.name)";;
+esac
+''';
+    }
     return r'''
 if command -v uci >/dev/null 2>&1; then
   for opt in config_path config_update_path config_file config_name config config_url config_subscribe_url subscribe_url subscription_url; do
@@ -801,7 +891,20 @@ fi
 ''';
   }
 
-  static String _setActiveConfigCommand(String safePath) {
+  static String _setActiveConfigCommand(String safePath, RouterTool tool) {
+    _requireToolPath(safePath, tool);
+    if (tool == RouterTool.nikki) {
+      if (!safePath.startsWith('/etc/nikki/profiles/') ||
+          safePath.substring('/etc/nikki/profiles/'.length).contains('/') ||
+          safePath.contains(':')) {
+        throw ArgumentError('Nikki activation requires a local profile file');
+      }
+      final profile =
+          _shellQuote('file:${ClashConfigFile(path: safePath).name}');
+      return 'set -e\n[ -f ${_shellQuote(safePath)} ]\n'
+          '[ -z "\$(uci -q changes nikki)" ]\n'
+          'uci set nikki.config.profile=$profile\nuci commit nikki\n';
+    }
     final quotedPath = _shellQuote(safePath);
     return '''
 set -e
@@ -829,13 +932,33 @@ uci commit openclash
     String sourcePath,
     String targetPath, {
     required bool updateActiveReference,
+    RouterTool tool = RouterTool.openClash,
   }) {
     final source = _shellQuote(sourcePath);
     final target = _shellQuote(targetPath);
     final sourceName = _shellQuote(ClashConfigFile(path: sourcePath).name);
     final targetName = _shellQuote(ClashConfigFile(path: targetPath).name);
-    final activeUpdate = updateActiveReference
+    if (tool == RouterTool.nikki &&
+        updateActiveReference &&
+        (targetPath.contains(':') ||
+            targetPath
+                .substring('/etc/nikki/profiles/'.length)
+                .contains('/'))) {
+      throw ArgumentError('Invalid Nikki profile name');
+    }
+    final activeUpdate = tool == RouterTool.nikki && updateActiveReference
         ? '''
+
+if ! uci set "nikki.config.profile=file:\$target_name" || ! uci commit nikki; then
+  if mv -- "\$target_path" "\$source_path" &&
+    uci set "nikki.config.profile=file:\$source_name" && uci commit nikki; then
+    printf '%s\\n' PROXLY_ACTIVE_UPDATE_FAILED >&2; exit 43
+  fi
+  printf '%s\\n' PROXLY_ROLLBACK_FAILED >&2; exit 44
+fi
+'''
+        : updateActiveReference
+            ? '''
 update_reference() {
   uci set openclash.config.config_path=\$target_path || return 1
   for opt in config_update_path config_file config_name config; do
@@ -871,7 +994,7 @@ if ! update_reference; then
   exit 44
 fi
 '''
-        : '';
+            : '';
 
     return '''
 set -e
@@ -881,6 +1004,7 @@ source_name=$sourceName
 target_name=$targetName
 [ -f "\$source_path" ] || { printf '%s\n' 'PROXLY_SOURCE_MISSING' >&2; exit 41; }
 [ ! -e "\$target_path" ] || { printf '%s\n' 'PROXLY_TARGET_EXISTS' >&2; exit 42; }
+${tool == RouterTool.nikki && updateActiveReference ? '[ -z "\$(uci -q changes nikki)" ]' : ''}
 mv -- "\$source_path" "\$target_path"
 $activeUpdate
 ''';

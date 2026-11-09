@@ -4,6 +4,8 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:proxly/l10n/app_locale.dart';
 import 'package:proxly/pages/proxy_page.dart';
+import 'package:proxly/pages/connections_page.dart';
+import 'package:proxly/services/web_panel_device_layout.dart';
 import 'package:proxly/services/connection_settings_store.dart';
 import 'package:proxly/services/web_panel_service.dart';
 import 'package:proxly/widgets/panel_error_view.dart';
@@ -57,6 +59,60 @@ class _Controller implements InAppWebViewController {
 }
 
 void main() {
+  testWidgets('tablet panels retain desktop signals but connections share phone cards',
+      (tester) async {
+    final oldPlatform = InAppWebViewPlatform.instance;
+    InAppWebViewPlatform.instance = _Platform();
+    addTearDown(() {
+      if (oldPlatform != null) InAppWebViewPlatform.instance = oldPlatform;
+    });
+    addTearDown(tester.view.display.resetSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    SharedPreferences.setMockInitialValues(
+        {'app_language': 'en', 'clash_host': '127.0.0.1:9090'});
+    await AppLocaleController.instance.load();
+    const storage = MethodChannel('plugins.it_nomads.com/flutter_secure_storage');
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(storage, (_) async => null);
+    addTearDown(() => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(storage, null));
+    for (final tablet in [false, true]) {
+      tester.view.devicePixelRatio = 2;
+      tester.view.display.size = tablet ? const Size(2048, 1536) : const Size(780, 1688);
+      // A narrow tablet window still uses the tablet mode of its display.
+      tester.view.physicalSize = const Size(780, 1200);
+      for (final connections in [false, true]) {
+        await tester.pumpWidget(AppLocaleScope(
+          controller: AppLocaleController.instance,
+          child: MaterialApp(theme: AppTheme.light(), home: connections
+              ? const ConnectionsPage() : const ProxyPage(asTab: true)),
+        ));
+        for (var i = 0; i < 40 && find.byType(InAppWebView).evaluate().isEmpty; i++) {
+          await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 10)));
+          await tester.pump();
+        }
+        expect(find.byType(InAppWebView), findsOneWidget,
+            reason: find.byType(PanelErrorView).evaluate()
+                .map((element) => (element.widget as PanelErrorView).message).join('; '));
+        final params = tester.widget<InAppWebView>(find.byType(InAppWebView)).platform.params;
+        final scripts = params.initialUserScripts!.map((script) => script.source).join('\n');
+        expect(scripts.contains('__proxlyTabletLayout'), tablet);
+        if (tablet) {
+          expect(params.initialSettings!.userAgent, WebPanelDeviceLayout.desktopUserAgent);
+          expect(params.initialSettings!.disableHorizontalScroll, isFalse);
+          expect(scripts, contains('div:has(> .sidebar) { display: none'));
+          expect(scripts, isNot(contains("return 'Linux armv8l'")));
+          if (connections) expect(scripts, contains('"config/connection-display-style":"card"'));
+        } else if (connections) {
+          expect(params.initialSettings!.userAgent, contains('Mobile'));
+          expect(scripts, contains("return 'Linux armv8l'"));
+          expect(scripts, contains('"config/connection-display-style":"card"'));
+        }
+        await tester.pumpWidget(const SizedBox());
+        await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+      }
+    }
+  }, variant: TargetPlatformVariant.mobile());
+
   testWidgets('native history return synchronizes the proxy header only',
       (tester) async {
     final oldPlatform = InAppWebViewPlatform.instance;

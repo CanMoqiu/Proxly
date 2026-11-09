@@ -1,13 +1,13 @@
 import '../l10n/app_locale.dart';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:convert';
 import '../main.dart';
 import '../services/connection_settings_store.dart';
 import '../services/clash_host_validator.dart';
 import '../services/clash_service.dart';
 import '../services/connection_feedback.dart';
+import '../services/router_detection_service.dart';
+import '../services/router_tool.dart';
 import '../theme/app_theme.dart';
 import '../widgets/adaptive_ui.dart';
 import '../widgets/app_feedback.dart';
@@ -16,7 +16,8 @@ import 'main_shell.dart';
 /// Guides initial Clash connection setup.
 /// Shown by AppStartup when no controller address is configured.
 class SetupWizardPage extends StatefulWidget {
-  const SetupWizardPage({super.key});
+  const SetupWizardPage({super.key, this.detectionService});
+  final RouterDetectionService? detectionService;
 
   @override
   State<SetupWizardPage> createState() => _SetupWizardPageState();
@@ -32,10 +33,18 @@ class _SetupWizardPageState extends State<SetupWizardPage>
   final _hostController = TextEditingController();
   final _tokenController = TextEditingController();
   final _sshPasswordController = TextEditingController();
+  final _sshPortController = TextEditingController(text: '22');
   final _hostFocusNode = FocusNode();
   bool _obscureToken = true;
   bool _obscureSshPassword = true;
   bool _testing = false;
+
+  String get _detectionInput => [
+        _hostController.text,
+        _tokenController.text,
+        _sshPortController.text,
+        _sshPasswordController.text
+      ].join("\u0000");
   bool _saving = false;
   String? _testResult;
   bool _testSuccess = false;
@@ -48,18 +57,23 @@ class _SetupWizardPageState extends State<SetupWizardPage>
     super.initState();
     _hostController.addListener(_clearHostErrorOnInput);
     _tokenController.addListener(_clearTestResultOnInput);
+    _sshPortController.addListener(_clearTestResultOnInput);
+    _sshPasswordController.addListener(_clearTestResultOnInput);
   }
 
   @override
   void dispose() {
     _hostController.removeListener(_clearHostErrorOnInput);
     _tokenController.removeListener(_clearTestResultOnInput);
+    _sshPortController.removeListener(_clearTestResultOnInput);
+    _sshPasswordController.removeListener(_clearTestResultOnInput);
     disposeTransientFeedback();
     _hostFocusNode.dispose();
     _pageController.dispose();
     _hostController.dispose();
     _tokenController.dispose();
     _sshPasswordController.dispose();
+    _sshPortController.dispose();
     super.dispose();
   }
 
@@ -80,6 +94,7 @@ class _SetupWizardPageState extends State<SetupWizardPage>
   void _previousStep() => _goToStep(_currentStep - 1);
 
   void _clearHostErrorOnInput() {
+    _clearTestResultOnInput();
     final clearRequired =
         _hostRequiredError && _hostController.text.trim().isNotEmpty;
     if (clearRequired || _testResult != null) {
@@ -110,16 +125,31 @@ class _SetupWizardPageState extends State<SetupWizardPage>
     );
   }
 
-  void _handleConfigNext() {
+  Future<void> _handleConfigNext() async {
+    if (_testing) return;
     if (_hostController.text.trim().isEmpty) {
       setState(() => _hostRequiredError = true);
       _hostFocusNode.requestFocus();
+      return;
+    }
+    if (ConnectionSettings.parseSshPort(_sshPortController.text) == null) {
+      _setTestResult('SSH 端口必须为 1–65535 之间的整数', success: false);
+      return;
+    }
+    final hostError = ClashHostValidator.validationError(_hostController.text);
+    if (hostError != null) {
+      _setTestResult(hostError, success: false);
       return;
     }
     _nextStep();
   }
 
   Future<void> _testConnection() async {
+    if (_testing) return;
+    if (ConnectionSettings.parseSshPort(_sshPortController.text) == null) {
+      _setTestResult('SSH 端口必须为 1–65535 之间的整数', success: false);
+      return;
+    }
     final host = ClashHostValidator.normalizeAddress(_hostController.text);
     if (host.isEmpty) {
       _setTestResult('请先填写控制器地址', success: false);
@@ -135,31 +165,23 @@ class _SetupWizardPageState extends State<SetupWizardPage>
       _testing = true;
       _testResult = null;
     });
+    final input = _detectionInput;
     try {
-      final token = _tokenController.text.trim();
-      final headers = <String, String>{
-        'Content-Type': 'application/json',
-        if (token.isNotEmpty) 'Authorization': 'Bearer $token',
-      };
-      final response = await http
-          .get(Uri.parse('http://$host/version'), headers: headers)
-          .timeout(const Duration(seconds: 5));
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        _setTestResult(
-          '连接正常 · Clash ${data['version'] ?? '未知版本'}',
-          success: true,
-        );
-      } else if (response.statusCode == 401) {
-        _setTestResult('密钥验证失败，请检查后重试', success: false);
-      } else {
-        _setTestResult(
-          '连接失败 · HTTP ${response.statusCode}',
-          success: false,
-        );
-      }
-    } catch (_) {
-      _setTestResult(ConnectionFeedback.unavailable, success: false);
+      await (widget.detectionService ?? RouterDetectionService()).detect(
+          host: host,
+          token: _tokenController.text.trim(),
+          sshPassword: '',
+          sshPort:
+              ConnectionSettings.parseSshPort(_sshPortController.text) ?? 22);
+      if (!mounted || input != _detectionInput) return;
+      _setTestResult('连接正常', success: true);
+    } catch (error) {
+      if (!mounted || input != _detectionInput) return;
+      _setTestResult(
+          error is StateError && error.message == 'unauthorized'
+              ? '密钥验证失败，请检查后重试'
+              : ConnectionFeedback.unavailable,
+          success: false);
     } finally {
       if (mounted) setState(() => _testing = false);
     }
@@ -185,6 +207,12 @@ class _SetupWizardPageState extends State<SetupWizardPage>
       });
       return;
     }
+    final sshPort = ConnectionSettings.parseSshPort(_sshPortController.text);
+    if (sshPort == null) {
+      _setTestResult('SSH 端口必须为 1–65535 之间的整数', success: false);
+      _goToStep(1);
+      return;
+    }
     setState(() => _saving = true);
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -193,7 +221,10 @@ class _SetupWizardPageState extends State<SetupWizardPage>
       await ConnectionSettingsStore.instance.saveController(
         host: host,
         token: _tokenController.text.trim(),
-        sshPassword: _sshPasswordController.text.trim(),
+        sshPassword: _sshPasswordController.text,
+        sshPort: sshPort,
+        routerTool: RouterTool.generic,
+        routerSelectionPending: true,
       );
       await ClashService.instance.loadConfig();
       if (!mounted) return;
@@ -248,6 +279,7 @@ class _SetupWizardPageState extends State<SetupWizardPage>
               hostFocusNode: _hostFocusNode,
               tokenController: _tokenController,
               sshPasswordController: _sshPasswordController,
+              sshPortController: _sshPortController,
               showHostRequiredError: _hostRequiredError,
               obscureToken: _obscureToken,
               onToggleObscure: () =>
@@ -260,7 +292,7 @@ class _SetupWizardPageState extends State<SetupWizardPage>
               testSuccess: _testSuccess,
               onTest: _testConnection,
               onBack: _previousStep,
-              onNext: _handleConfigNext,
+              onNext: _testing ? null : _handleConfigNext,
             ),
             _PreferencesPage(
               saving: _saving,
@@ -361,7 +393,7 @@ class _WelcomePage extends StatelessWidget {
                         const SizedBox(height: 10),
                         Text(
                           tr(
-                            'Proxly 帮你在手机上管理 OpenClash / Mihomo，查看运行状态、流量、连接和 YAML 配置。',
+                            'Proxly 帮你管理软路由代理工具，查看运行状态、流量、连接和 YAML 配置。',
                           ),
                           textAlign: TextAlign.center,
                           style: TextStyle(
@@ -464,7 +496,7 @@ class _WelcomePage extends StatelessWidget {
     _Highlight(
       icon: Icons.description_outlined,
       title: '配置文件',
-      desc: '读取、编辑并上传 OpenClash YAML',
+      desc: '读取、编辑并上传代理 YAML',
     ),
   ];
 }
@@ -485,6 +517,7 @@ class _ConfigPage extends StatelessWidget {
   final FocusNode hostFocusNode;
   final TextEditingController tokenController;
   final TextEditingController sshPasswordController;
+  final TextEditingController sshPortController;
   final bool showHostRequiredError;
   final bool obscureToken;
   final VoidCallback onToggleObscure;
@@ -494,14 +527,15 @@ class _ConfigPage extends StatelessWidget {
   final String? testResult;
   final bool testSuccess;
   final VoidCallback onTest;
-  final VoidCallback onBack;
-  final VoidCallback onNext;
+  final VoidCallback? onBack;
+  final VoidCallback? onNext;
 
   const _ConfigPage({
     required this.hostController,
     required this.hostFocusNode,
     required this.tokenController,
     required this.sshPasswordController,
+    required this.sshPortController,
     required this.showHostRequiredError,
     required this.obscureToken,
     required this.onToggleObscure,
@@ -605,7 +639,7 @@ class _ConfigPage extends StatelessWidget {
                                 LabeledInputField(
                                   title: tr('控制器地址'),
                                   description: tr(
-                                    '填写 OpenClash 外部控制地址，格式为 IP:端口',
+                                    '填写 Clash API 地址，格式为 IP:端口',
                                   ),
                                   titleColor: textColor,
                                   descriptionColor: labelColor,
@@ -680,9 +714,42 @@ class _ConfigPage extends StatelessWidget {
                                 ),
                                 const SizedBox(height: 16),
                                 LabeledInputField(
+                                  title: tr('SSH 端口'),
+                                  description: tr('留空使用默认端口 22'),
+                                  titleColor: textColor,
+                                  descriptionColor: labelColor,
+                                  child: TextField(
+                                    key: const ValueKey('ssh_port_field'),
+                                    controller: sshPortController,
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      color: textColor,
+                                    ),
+                                    keyboardType: TextInputType.number,
+                                    textInputAction: TextInputAction.next,
+                                    autocorrect: false,
+                                    enableSuggestions: false,
+                                    decoration: InputDecoration(
+                                      hintText: '22',
+                                      hintStyle: TextStyle(color: hintColor),
+                                      filled: true,
+                                      fillColor: inputBg,
+                                      border: inputBorder,
+                                      enabledBorder: inputBorder,
+                                      focusedBorder: focusedBorder,
+                                      contentPadding:
+                                          const EdgeInsets.symmetric(
+                                        horizontal: 14,
+                                        vertical: 12,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 16),
+                                LabeledInputField(
                                   title: tr('SSH 密码（可选）'),
                                   description: tr(
-                                    '用于管理 YAML 配置和重启 OpenClash，未使用 SSH 可留空',
+                                    '用于识别代理软件、管理 YAML 和重启服务，未使用 SSH 可留空',
                                   ),
                                   titleColor: textColor,
                                   descriptionColor: labelColor,

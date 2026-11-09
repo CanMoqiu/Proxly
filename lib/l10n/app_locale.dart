@@ -175,6 +175,53 @@ String _languageLabel(AppLanguage language) => switch (language) {
     };
 
 const _english = <String, String>{
+  '选择代理软件': 'Select proxy software',
+  '未能自动识别代理软件，请选择当前使用的软件。':
+      'Could not identify the proxy software automatically. Select the software you use.',
+  '仅使用通用控制器功能': 'Use common controller features only',
+  '保存代理软件失败，请重试': 'Could not save the proxy software. Please retry',
+  '选择后会写入代理服务当前配置，并在确认后重启。':
+      'Select a profile to activate, then confirm the service restart.',
+  "代理软件": "Proxy software",
+  "未识别内核": "Unidentified core",
+  "正在识别...": "Detecting...",
+  "识别代理软件和内核": "Identify proxy software and core",
+  "填写地址后识别；未识别的软件可使用 Clash API 模式，或手动选择。":
+      "Identify after entering an address. Use Clash API mode or select manually if the software is not recognized.",
+  " · 检测到多个服务，请手动选择": " · Multiple services detected; select manually",
+  "填写 Clash API 地址，格式为 IP:端口": "Enter the Clash API address as IP:port",
+  "用于识别代理软件、管理 YAML 和重启服务，未使用 SSH 可留空":
+      "Used to identify proxy software, manage YAML, and restart services. Leave blank if SSH is unused.",
+  "连接正常": "Connection successful",
+  "Proxly 帮你管理软路由代理工具，查看运行状态、流量、连接和 YAML 配置。":
+      "Manage router proxy tools and view status, traffic, connections, and YAML configurations.",
+  "读取、编辑并上传代理 YAML": "Read, edit, and upload proxy YAML files",
+  "当前代理软件尚不支持此功能":
+      "This feature is not available for the selected proxy software",
+  "当前代理软件尚不支持 SSH 配置管理":
+      "SSH configuration management is not available for this proxy software",
+  "配置可能已改变，请刷新状态后重试":
+      "Configuration may have changed. Refresh before retrying.",
+  "重启代理服务": "Restart proxy service",
+  "正在重启代理服务...": "Restarting proxy service...",
+  "确认重启代理服务": "Confirm proxy service restart",
+  "配置已保存，是否立即重启代理服务使修改生效？":
+      "Configuration saved. Restart the proxy service now to apply it?",
+  "代理服务重启成功": "Proxy service restarted successfully",
+  "没有从代理服务配置中找到本地 YAML 文件":
+      "No local YAML file found in the proxy service configuration",
+  "读取代理服务当前使用的配置来源": "Read the active configuration source",
+  "应用结果未确认，请检查代理服务状态后重试":
+      "The result could not be confirmed. Check the proxy service state before retrying.",
+  "代理服务重启或上线验证失败": "Proxy service restart or online verification failed",
+  "Proxly 是一款用于管理软路由代理工具的监控面板，让你在手机上实时掌握代理状态、流量用量与连接详情，无需打开浏览器。":
+      "Proxly manages router proxy tools and shows proxy status, traffic usage, and connection details without opening a browser.",
+  "无法确认当前配置；若修改了运行配置，请稍后手动重启代理服务":
+      "Could not identify the active configuration. Restart the proxy service manually if you changed it.",
+  "重命名失败且无法完整回滚，请检查当前配置文件和代理服务配置引用":
+      "Rename and rollback failed. Check the configuration file and active service reference.",
+  "无法更新代理服务配置引用，文件名已恢复":
+      "Could not update the proxy service reference. The original filename was restored.",
   '打开外部链接': 'Open external link',
   '将在浏览器中打开以下链接：': 'Open this link in your browser:',
   'SSH 设备尚未信任': 'SSH device not trusted',
@@ -350,6 +397,9 @@ const _english = <String, String>{
       'Proxly is not officially affiliated with Clash, OpenClash, or Mihomo',
   'SSH 登录': 'SSH login',
   'SSH 密码': 'SSH password',
+  'SSH 端口': 'SSH port',
+  '留空使用默认端口 22': 'Leave blank to use the default port 22',
+  'SSH 端口必须为 1–65535 之间的整数': 'SSH port must be an integer between 1 and 65535',
   'SSH 密码（可选）': 'SSH password (optional)',
   'Token 错误': 'Invalid token',
   'Zashboard 面板': 'Zashboard panel',
@@ -812,6 +862,18 @@ const _english = <String, String>{
 };
 
 String? _dynamicEnglish(String source) {
+  final savedFailure = RegExp(r'^设置已保存，但代理服务未恢复正常：(.+)$').firstMatch(source);
+  if (savedFailure != null) {
+    final detail =
+        savedFailure[1]!.replaceAll('。可使用重启按钮重试', '. Use Restart to retry');
+    return 'Settings saved, but the proxy service did not recover: $detail';
+  }
+
+  if (source.contains('代理服务')) {
+    final legacy = _dynamicEnglish(source.replaceAll('代理服务', 'OpenClash'));
+    if (legacy != null) return legacy.replaceAll('OpenClash', 'proxy service');
+  }
+
   Match? match;
   if ((match = RegExp(r'^插入 (.+)$').firstMatch(source)) != null) {
     return 'Insert ${match![1]}';

@@ -17,18 +17,18 @@ class YamlConfigPickerSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) => AppOptionsSheet<ClashConfigFile>(
         title: tr('选择 YAML 配置'),
-        description: tr(activate
-            ? '选择后会写入 OpenClash 当前配置，并在确认后重启。'
-            : '选择要编辑的文件，不改变当前运行配置。'),
+        description:
+            tr(activate ? '选择后会写入代理服务当前配置，并在确认后重启。' : '选择要编辑的文件，不改变当前运行配置。'),
         selectedValue:
             files.where((file) => file.path == activePath).firstOrNull,
         options: [
           for (final file in files)
-            AppSheetOption(
-                value: file,
-                label: file.name,
-                subtitle: file.displayPath,
-                icon: Icons.description_outlined),
+            if (!activate || !file.path.startsWith('/etc/nikki/subscriptions/'))
+              AppSheetOption(
+                  value: file,
+                  label: file.name,
+                  subtitle: file.displayPath,
+                  icon: Icons.description_outlined),
         ],
       );
 }

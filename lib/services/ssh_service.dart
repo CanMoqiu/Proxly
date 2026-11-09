@@ -98,14 +98,16 @@ class SshService {
   static Future<void> execute(
     String host,
     String password,
-    String command,
-  ) {
+    String command, {
+    int port = 22,
+  }) {
     return withClient<void>(
       host,
       password,
       (client) async {
         await runCommandOnClient(client, command);
       },
+      port: port,
       operationTimeout: const Duration(seconds: 30),
     );
   }

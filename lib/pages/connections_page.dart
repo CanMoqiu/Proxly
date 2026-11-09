@@ -16,6 +16,9 @@ import '../services/web_panel_scroll.dart';
 import '../services/web_panel_flag_font.dart';
 import '../services/panel_load_monitor.dart';
 import '../services/app_platform.dart';
+import '../services/tablet_layout.dart';
+import '../services/connection_panel_preferences.dart';
+import '../services/web_panel_device_layout.dart';
 import '../services/web_panel_resume_state.dart';
 import '../services/web_panel_page_probe.dart';
 import '../widgets/panel_error_view.dart';
@@ -35,6 +38,7 @@ class ConnectionsPage extends StatefulWidget {
 class _ConnectionsPageState extends State<ConnectionsPage>
     with WidgetsBindingObserver {
   final _panelLoad = PanelLoadMonitor();
+  bool _tablet = false;
   final _resumeState = WebPanelResumeState();
   Future<void>? _restarting;
   bool _needsRecovery = false;
@@ -136,6 +140,7 @@ class _ConnectionsPageState extends State<ConnectionsPage>
           'config/auto-upgrade-core',
           'config/check-upgrade-core',
           'config/is-sidebar-collapsed',
+          'config/number-of-charts-in-sidebar',
           'config/swipe-in-pages',
           'config/swipe-in-tabs',
           'config/two-columns',
@@ -214,21 +219,7 @@ class _ConnectionsPageState extends State<ConnectionsPage>
     injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
   );
 
-  static final UserScript _connectionViewScript = UserScript(
-    source: r"""
-(function(){
-  try {
-    localStorage.setItem('config/connection-display-style','card');
-    localStorage.setItem('config/use-connecticon-card','true');
-    localStorage.setItem('config/connection-card-lines','[["host","close"],["sourceIP","connectTime"],["chains","dlSpeed","ulSpeed"],["rule","dl","ul"]]');
-    localStorage.setItem('config/connection-sort-type','connectTime');
-    localStorage.setItem('config/connection-sort-direction','desc');
-    localStorage.setItem('config/table-sorting','[{"id":"connectTime","desc":true}]');
-  } catch(e) {}
-})();
-""",
-    injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
-  );
+  UserScript? _connectionViewScript;
 
   static final UserScript _docklessLayoutScript = UserScript(
     source: WebPanelLayoutScript.buildDockless(connectionsTab: true),
@@ -298,6 +289,7 @@ class _ConnectionsPageState extends State<ConnectionsPage>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    _tablet = TabletLayout.isTablet(View.of(context));
     final currentIsDark = ProxlyApp.resolvedThemeIsDark(context);
     final currentLanguage = AppLocaleController.instance.zashboardLanguage;
     _themeUserScript = _buildThemeUserScript(currentIsDark);
@@ -591,6 +583,13 @@ class _ConnectionsPageState extends State<ConnectionsPage>
 
   Future<void> _buildRestoreScript() async {
     final prefs = await SharedPreferences.getInstance();
+    final content =
+        await ConnectionPanelPreferences.instance.load(tablet: _tablet);
+    _connectionViewScript = UserScript(
+      source: ConnectionPanelPreferences.script(content, tablet: _tablet),
+      injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+      forMainFrameOnly: true,
+    );
     var raw = prefs.getString(_prefLocalStorage);
     if (raw == null || raw.isEmpty) {
       _restoreUserScript = null;
@@ -654,13 +653,21 @@ class _ConnectionsPageState extends State<ConnectionsPage>
       await _webViewController!.addUserScript(userScript: _restoreUserScript!);
     }
     await _webViewController!.addUserScript(userScript: _nativeScrollScript);
+    if (_tablet) {
+      await _webViewController!.addUserScript(userScript: _tabletLayoutScript);
+    }
     if (_connectionUserScript != null) {
       await _webViewController!.addUserScript(
         userScript: _connectionUserScript!,
       );
     }
-    await _webViewController!.addUserScript(userScript: _mobileModeScript);
-    await _webViewController!.addUserScript(userScript: _connectionViewScript);
+    if (_connectionViewScript != null) {
+      await _webViewController!
+          .addUserScript(userScript: _connectionViewScript!);
+    }
+    if (!_tablet) {
+      await _webViewController!.addUserScript(userScript: _mobileModeScript);
+    }
     if (_themeUserScript != null) {
       await _webViewController!.addUserScript(userScript: _themeUserScript!);
     }
@@ -680,15 +687,21 @@ class _ConnectionsPageState extends State<ConnectionsPage>
       _authStateCleanupScript,
       if (_restoreUserScript != null) _restoreUserScript!,
       _nativeScrollScript,
+      if (_tablet) _tabletLayoutScript,
       if (_connectionUserScript != null) _connectionUserScript!,
-      _mobileModeScript,
-      _connectionViewScript,
+      if (!_tablet) _mobileModeScript,
+      if (_connectionViewScript != null) _connectionViewScript!,
       if (_themeUserScript != null) _themeUserScript!,
       if (Platform.isIOS) _flagFontScript,
       _docklessLayoutScript,
     ];
     return UnmodifiableListView(scripts);
   }
+
+  static final UserScript _tabletLayoutScript = UserScript(
+    source: WebPanelDeviceLayout.tablet(),
+    injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+  );
 
   static final UserScript _nativeScrollScript = UserScript(
     source:
@@ -815,27 +828,15 @@ class _ConnectionsPageState extends State<ConnectionsPage>
   }
 
   Future<void> _applyConnectionViewPrefs({bool reveal = true}) async {
+    final content =
+        await ConnectionPanelPreferences.instance.load(tablet: _tablet);
+    await _webViewController?.evaluateJavascript(
+      source: ConnectionPanelPreferences.script(content, tablet: _tablet),
+    );
     final revealLiteral = reveal ? 'true' : 'false';
     await _webViewController?.evaluateJavascript(
       source: """
       (async function() {
-        const sorted = {
-          'config/connection-display-style': 'card',
-          'config/use-connecticon-card': 'true',
-          'config/connection-card-lines': '[["host","close"],["sourceIP","connectTime"],["chains","dlSpeed","ulSpeed"],["rule","dl","ul"]]',
-          'config/connection-sort-type': 'connectTime',
-          'config/connection-sort-direction': 'desc',
-          'config/table-sorting': '[{"id":"connectTime","desc":true}]'
-        };
-        Object.entries(sorted).forEach(function([k, v]) {
-          if (localStorage.getItem(k) === v) return;
-          localStorage.setItem(k, v);
-          window.dispatchEvent(new StorageEvent('storage', {
-            key: k,
-            newValue: v,
-            storageArea: window.localStorage
-          }));
-        });
         if ($revealLiteral) {
           await new Promise(function(resolve) {
             requestAnimationFrame(function() {
@@ -889,8 +890,10 @@ class _ConnectionsPageState extends State<ConnectionsPage>
                 transparentBackground: false,
                 javaScriptEnabled: true,
                 domStorageEnabled: true,
-                userAgent: _mobileUserAgent,
-                disableHorizontalScroll: true,
+                userAgent: _tablet
+                    ? WebPanelDeviceLayout.desktopUserAgent
+                    : _mobileUserAgent,
+                disableHorizontalScroll: !_tablet,
                 overScrollMode: OverScrollMode.NEVER,
                 disallowOverScroll: true,
                 useWideViewPort: false,
@@ -910,6 +913,12 @@ class _ConnectionsPageState extends State<ConnectionsPage>
               },
               onWebViewCreated: (c) async {
                 _webViewController = c;
+                ConnectionPanelPreferences.instance.bind(
+                  c,
+                  tablet: _tablet,
+                  port: _serverPort,
+                  isCurrent: () => mounted && _isCurrentController(c),
+                );
               },
               onJsAlert: (_, __) async =>
                   JsAlertResponse(handledByClient: true),

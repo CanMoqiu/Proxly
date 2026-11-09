@@ -11,6 +11,7 @@ import '../../services/clash_service.dart';
 import '../../services/connection_settings_store.dart';
 import '../../services/openclash_quick_settings_service.dart';
 import '../../services/openclash_restart_coordinator.dart';
+import '../../services/router_tool.dart';
 import '../../services/ssh_service.dart';
 import '../../services/ssh_host_trust_service.dart';
 import 'ssh_trust_card.dart';
@@ -99,17 +100,22 @@ class _DashboardControlsState extends State<DashboardControls>
   bool _routeVisible = false;
   bool _appForeground = true;
   bool _sshRejected = false;
+  RouterTool _routerTool = RouterTool.openClash;
   bool _reviewingTrust = false;
   int _trustRevision = 0;
 
   Future<void> _syncTrustState() async {
     final revision = ++_trustRevision;
     try {
+      final tool = await ConnectionSettingsStore.instance.loadRouterTool();
+      if (!mounted || revision != _trustRevision) return;
+      setState(() => _routerTool = tool);
       final trust = SshHostTrustService.instance;
       await trust.loadRejections();
-      final host = await ClashConfigFileService.routerHost();
+      final target = await ClashConfigFileService.routerTarget();
       if (!mounted || revision != _trustRevision) return;
-      final rejected = trust.isRejected(host);
+      final rejected = tool.supportsSshManagement &&
+          trust.isRejected(target.host, target.port);
       if (_sshRejected == rejected) return;
       setState(() => _sshRejected = rejected);
       _syncAutoSyncTimer();
@@ -348,6 +354,12 @@ class _DashboardControlsState extends State<DashboardControls>
   }
 
   Future<void> _readPage({required bool silent}) async {
+    final tool = await ConnectionSettingsStore.instance.loadRouterTool();
+    if (!mounted) return;
+    if (tool == RouterTool.generic) {
+      if (widget.refreshQuickSettings) await _loadQuickSettings(silent: silent);
+      return;
+    }
     if (widget.refreshConfig &&
         widget.refreshQuickSettings &&
         (widget.readSession != null ||
@@ -582,7 +594,7 @@ class _DashboardControlsState extends State<DashboardControls>
         context: context,
         builder: (dialogContext) => AppDialog(
           title: Text(tr('切换当前配置？')),
-          content: Text(tr('将切换到 ${selected.name} 并重启 OpenClash。重启期间代理会短暂断开。')),
+          content: Text(tr('将切换到 ${selected.name} 并重启代理服务。重启期间代理会短暂断开。')),
           actions: [
             TextButton(
               onPressed: () => AppPopup.close(dialogContext, false),
@@ -598,7 +610,7 @@ class _DashboardControlsState extends State<DashboardControls>
       if (confirmed != true || !mounted) return;
 
       setState(() {
-        _configMessage = '正在切换配置并重启 OpenClash...';
+        _configMessage = '正在切换配置并重启代理服务...';
         _configMessageIsError = false;
       });
       final result = await _restartCoordinator.restart(
@@ -623,9 +635,9 @@ class _DashboardControlsState extends State<DashboardControls>
         _configMessage = switchConfirmed
             ? '已切换到 ${selected.name}'
             : result.changesPersisted
-                ? '配置已切换，但 OpenClash 重启失败：${_exceptionMessage(result.error ?? '')}'
+                ? '配置已切换，但 代理服务重启失败：${_exceptionMessage(result.error ?? '')}'
                 : active.subscriptionMode
-                    ? '已发送切换命令，但当前仍显示为订阅模式，请检查 OpenClash 配置'
+                    ? '已发送切换命令，但当前仍显示为订阅模式，请检查 代理服务配置'
                     : '已发送切换命令，但未能确认当前配置已变更';
         _configMessageIsError = !switchConfirmed;
       });
@@ -684,7 +696,7 @@ class _DashboardControlsState extends State<DashboardControls>
   Future<String?> _requestRestartPassword() async {
     final routerIp = await ClashConfigFileService.routerHost();
     if (routerIp.isEmpty) {
-      _showSnack('请先在设置页填写 OpenClash 地址', success: false);
+      _showSnack('请先在设置页填写控制器地址', success: false);
       return null;
     }
     final savedPassword = await ClashConfigFileService.savedPassword();
@@ -699,7 +711,7 @@ class _DashboardControlsState extends State<DashboardControls>
 
   void _showRestartResult(OpenClashRestartResult result) {
     if (result.success) {
-      _showSnack('OpenClash 重启成功', success: true);
+      _showSnack('代理服务重启成功', success: true);
       return;
     }
     final detail = _exceptionMessage(result.error ?? '未知错误');
@@ -930,16 +942,18 @@ class _DashboardControlsState extends State<DashboardControls>
     OpenClashQuickSettingApplyResult result,
   ) {
     if (result.stateUncertain) {
-      return '应用结果未确认，请检查 OpenClash 状态后重试';
+      return '应用结果未确认，请检查代理服务状态后重试';
     }
     final reason = switch (result.errorCode) {
+      'unsupported_feature' => '当前代理软件尚不支持此功能',
+      'settings_changed' => '配置可能已改变，请刷新状态后重试',
       'ssh_password_required' => '请先在设置页填写并保存 SSH 密码',
       'uci_missing' => '当前环境缺少 UCI 工具',
       'curl_missing' => '当前环境缺少 Curl 工具',
       'ruby_missing' => '当前环境缺少 Ruby，无法安全修改运行时配置',
       'core_offline' => 'Mihomo 当前未运行',
       'runtime_config_missing' => '未找到 OpenClash 生成的运行时配置',
-      'restart_unavailable' => '当前环境无法重启 OpenClash',
+      'restart_unavailable' => '当前环境无法重启代理服务',
       'firewall_reload_missing' => '当前环境不支持 OpenClash 防火墙重载',
       'unsupported_run_mode' => '当前运行模式不支持快捷切换',
       'stream_requires_rule' => '流媒体解锁仅支持规则代理模式',
@@ -959,7 +973,7 @@ class _DashboardControlsState extends State<DashboardControls>
       'persist_failed' => 'OpenClash 设置保存失败',
       'verification_failed' => '重新读取后设置未生效',
       'core_health_failed' => 'Mihomo 未能连续通过健康检查',
-      'restart_failed' => 'OpenClash 重启或上线验证失败',
+      'restart_failed' => '代理服务重启或上线验证失败',
       'pid_changed' => '检测到 Mihomo 进程发生变化',
       'backup_missing' => '设置事务备份已丢失',
       'incomplete_response' => '路由器没有返回完整操作结果',
@@ -971,8 +985,8 @@ class _DashboardControlsState extends State<DashboardControls>
         detail == null || detail.isEmpty ? reason : '$reason（$detail）';
     if (result.changesPersisted) {
       return result.canRetry
-          ? '设置已保存，但 OpenClash 未恢复正常：$reasonWithDetail。可使用重启按钮重试'
-          : '设置已保存，但 OpenClash 未恢复正常：$reasonWithDetail';
+          ? '设置已保存，但代理服务未恢复正常：$reasonWithDetail。可使用重启按钮重试'
+          : '设置已保存，但代理服务未恢复正常：$reasonWithDetail';
     }
     if (result.rollbackAttempted && result.rollbackSucceeded) {
       return '应用失败，已恢复原设置：$reasonWithDetail';
@@ -985,12 +999,12 @@ class _DashboardControlsState extends State<DashboardControls>
 
   String get _restartStatusLabel => switch (_restartCoordinator.phase) {
         OpenClashRestartPhase.saving => '正在保存设置...',
-        OpenClashRestartPhase.restarting => '正在重启 OpenClash...',
+        OpenClashRestartPhase.restarting => '正在重启代理服务...',
         OpenClashRestartPhase.waitingForOnline => '等待 Clash 重新上线...',
         OpenClashRestartPhase.verifying => '正在验证设置...',
         OpenClashRestartPhase.failed when _restartCoordinator.canRetry =>
           '重试重启',
-        _ => '重启 OpenClash',
+        _ => '重启代理服务',
       };
 
   bool get _showAppBarActivity =>
@@ -1049,6 +1063,9 @@ class _DashboardControlsState extends State<DashboardControls>
               : null,
           activityLabel: _showAppBarActivity ? tr(_appBarActivityLabel) : null,
           refresh: _refreshPage,
+          supportsYaml: _routerTool.supportsSshManagement,
+          supportsQuickSettings: _quickSettings == null ||
+              OpenClashQuickSettingKey.values.any(_quickSettings!.supports),
           currentYaml: _yamlCard.resolve(
               (
                 language,
@@ -1079,12 +1096,14 @@ class _DashboardControlsState extends State<DashboardControls>
               (
                 language,
                 _restartStatusLabel,
+                _routerTool,
                 _operationBusy,
                 _flushingDns,
                 _closingConnections
               ),
               () => ClashOperationsCard(
                     restartLabel: _restartStatusLabel,
+                    canRestart: _routerTool.supportsSshManagement,
                     busy: _operationBusy,
                     flushingDns: _flushingDns,
                     closingConnections: _closingConnections,
@@ -1098,10 +1117,12 @@ class _DashboardControlsState extends State<DashboardControls>
                 palette,
                 _quickSettings,
                 _quickSettingsReadFailed,
+                _routerTool,
                 _operationBusy
               ),
               () => OpenClashQuickSettingsCard(
                     settings: _quickSettings,
+                    routerTool: _routerTool,
                     readFailed: _quickSettingsReadFailed,
                     busy: _operationBusy,
                     cardBg: palette.surface,
@@ -1123,10 +1144,14 @@ class _DashboardControlsState extends State<DashboardControls>
 class DashboardControlCards {
   final Widget? trustNotice;
   final Widget currentYaml, operations, quickSettings;
+  final bool supportsYaml;
+  final bool supportsQuickSettings;
   final String? activityLabel;
   final Future<void> Function() refresh;
   const DashboardControlCards(
       {this.trustNotice,
+      this.supportsYaml = true,
+      this.supportsQuickSettings = true,
       required this.currentYaml,
       required this.operations,
       required this.quickSettings,
@@ -1197,7 +1222,7 @@ class _SshPasswordDialogState extends State<_SshPasswordDialog> {
     return PopScope(
         canPop: !_saving,
         child: AppDialog(
-          title: Text(tr('确认重启 OpenClash')),
+          title: Text(tr('确认重启代理服务')),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,

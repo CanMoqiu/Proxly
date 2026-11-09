@@ -83,7 +83,11 @@ class ControllerConnectionState extends ChangeNotifier {
   }
 
   void _settingsChanged() {
-    if (_settings!.lastChange != ConnectionSettingsChange.sshPassword) reset();
+    final change = _settings!.lastChange;
+    if (change != ConnectionSettingsChange.sshPassword &&
+        change != ConnectionSettingsChange.routerIdentity) {
+      reset();
+    }
   }
 
   void _restartChanged() {
