@@ -1,18 +1,9 @@
-<!-- English template. Chinese default: https://github.com/CanMoqiu/Proxly/blob/main/.github/pull_request_template.md -->
+<!-- Chinese template: https://github.com/CanMoqiu/Proxly/blob/main/.github/pull_request_template.md -->
 
-## Changes
+## Updates
 
-<!-- Describe the problem, purpose, and user-visible behavior. -->
-
-## Validation
-
-- [ ] Ran `flutter analyze`
-- [ ] Ran `flutter test`
-- [ ] Completed applicable platform checks and stated untested device behavior
-- [ ] Updated both Chinese and English public documentation, or no documentation change is needed
-
-<!-- Report actual results. Explain checks you could not run instead of checking them off. -->
+<!-- Describe the problem and resulting behavior. Include relevant checks and any untested platform behavior. For documentation-only changes, check links and both languages. -->
 
 ## Important notes
 
-<!-- Describe migration, security, signing, or release implications; remove this section if none apply. -->
+<!-- Include migration, compatibility, or security implications only when applicable; otherwise remove this section. -->

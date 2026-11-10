@@ -28,11 +28,16 @@ class NikkiQuickSettingsAdapter {
       'redirect/tun' => OpenClashRunVariant.mix,
       _ => null,
     };
+    final bypassIp = _flag(values['bypass_china_mainland_ip']);
+    final bypassIp6 = _flag(values['bypass_china_mainland_ip6']);
     final unsupported = <OpenClashQuickSettingKey>{
-      OpenClashQuickSettingKey.areaBypass,
       OpenClashQuickSettingKey.streamUnlock,
-      if (values['core_only'] == '1' || values['mixin_file_content'] == '1')
-        ...OpenClashQuickSettingKey.values,
+      if (bypassIp == null || bypassIp6 == null)
+        OpenClashQuickSettingKey.areaBypass,
+      if (values['core_only'] == '1') ...OpenClashQuickSettingKey.values,
+      if (values['mixin_file_content'] == '1')
+        ...OpenClashQuickSettingKey.values
+            .where((key) => key != OpenClashQuickSettingKey.areaBypass),
       if (!RegExp(r'^[0-9a-f]{64}$').hasMatch(values['revision'] ?? ''))
         ...OpenClashQuickSettingKey.values,
       if (value('mode') == null ||
@@ -58,7 +63,11 @@ class NikkiQuickSettingsAdapter {
         'direct' => OpenClashProxyMode.direct,
         _ => OpenClashProxyMode.rule,
       },
-      areaBypass: OpenClashAreaBypass.disabled,
+      areaBypass: bypassIp == null || bypassIp6 == null || bypassIp != bypassIp6
+          ? null
+          : bypassIp
+              ? OpenClashAreaBypass.mainland
+              : OpenClashAreaBypass.disabled,
       snifferEnabled: ['1', 'true'].contains(value('sniffer')),
       dnsProxyEnabled: ['1', 'true'].contains(value('dns_respect_rules')),
       streamUnlockEnabled: false,
@@ -67,6 +76,12 @@ class NikkiQuickSettingsAdapter {
       rawRunMode: '${values['tcp_mode']}/${values['udp_mode']}',
     );
   }
+
+  static bool? _flag(String? value) => switch (value) {
+        '1' => true,
+        '' || '0' => false,
+        _ => null,
+      };
 
   Future<OpenClashQuickSettingApplyResult> applyChange({
     required OpenClashQuickSettings original,
@@ -84,6 +99,11 @@ class NikkiQuickSettingsAdapter {
             canRetry: persisted,
             stateUncertain: uncertain);
     if (!original.supports(key)) return failure('unsupported_feature');
+    if (key == OpenClashQuickSettingKey.areaBypass &&
+        (desired.areaBypass == null ||
+            desired.areaBypass == OpenClashAreaBypass.overseas)) {
+      return failure('unsupported_feature');
+    }
     if (key == OpenClashQuickSettingKey.baseMode &&
             desired.baseMode == OpenClashBaseMode.unknown ||
         key == OpenClashQuickSettingKey.runVariant &&
@@ -129,6 +149,7 @@ class NikkiQuickSettingsAdapter {
         OpenClashQuickSettingKey.baseMode => a.baseMode == b.baseMode,
         OpenClashQuickSettingKey.runVariant => a.runVariant == b.runVariant,
         OpenClashQuickSettingKey.proxyMode => a.proxyMode == b.proxyMode,
+        OpenClashQuickSettingKey.areaBypass => a.areaBypass == b.areaBypass,
         OpenClashQuickSettingKey.sniffer =>
           a.snifferEnabled == b.snifferEnabled,
         OpenClashQuickSettingKey.dnsProxy =>
@@ -140,6 +161,11 @@ class NikkiQuickSettingsAdapter {
       OpenClashQuickSettings desired, OpenClashQuickSettingKey key) {
     if (!RegExp(r'^[0-9a-f]{64}$').hasMatch(original.backendRevision)) {
       throw StateError('Refresh Nikki configuration first');
+    }
+    if (key == OpenClashQuickSettingKey.areaBypass &&
+        (desired.areaBypass == null ||
+            desired.areaBypass == OpenClashAreaBypass.overseas)) {
+      throw UnsupportedError('No equivalent Nikki bypass option');
     }
     final options = switch (key) {
       OpenClashQuickSettingKey.baseMode => {
@@ -160,6 +186,12 @@ class NikkiQuickSettingsAdapter {
         },
       OpenClashQuickSettingKey.proxyMode => {
           'mixin.mode': desired.proxyMode.name
+        },
+      OpenClashQuickSettingKey.areaBypass => {
+          'proxy.bypass_china_mainland_ip':
+              desired.areaBypass == OpenClashAreaBypass.mainland ? '1' : '0',
+          'proxy.bypass_china_mainland_ip6':
+              desired.areaBypass == OpenClashAreaBypass.mainland ? '1' : '0',
         },
       OpenClashQuickSettingKey.sniffer => {
           'mixin.sniffer': desired.snifferEnabled ? '1' : '0'
@@ -203,7 +235,7 @@ printf '%s\\n' PROXLY_NIKKI_PERSISTED=1
 [ -x /etc/init.d/nikki ] && command -v uci >/dev/null 2>&1 || exit 1
 printf 'available=1\n'
 printf 'revision=%s\n' "$(sha256sum /etc/config/nikki | cut -d ' ' -f1)"
-for pair in config.core_only mixin.mixin_file_content mixin.dns_mode mixin.mode mixin.sniffer mixin.dns_respect_rules proxy.tcp_mode proxy.udp_mode proxy.router_proxy; do
+for pair in config.core_only mixin.mixin_file_content mixin.dns_mode mixin.mode mixin.sniffer mixin.dns_respect_rules proxy.tcp_mode proxy.udp_mode proxy.router_proxy proxy.bypass_china_mainland_ip proxy.bypass_china_mainland_ip6; do
   printf '%s=%s\n' "${pair#*.}" "$(uci -q get nikki.$pair || true)"
 done
 if [ -f /etc/nikki/run/config.yaml ]; then

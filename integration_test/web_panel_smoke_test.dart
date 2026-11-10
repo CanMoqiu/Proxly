@@ -13,6 +13,7 @@ import 'package:proxly/pages/connections_page.dart';
 import 'package:proxly/pages/proxy_page.dart';
 import 'package:proxly/services/connection_settings_store.dart';
 import 'package:proxly/services/router_tool.dart';
+import 'package:proxly/services/router_detection_session.dart';
 import 'package:proxly/services/web_panel_service.dart';
 import 'package:proxly/services/web_panel_scroll.dart';
 import 'package:proxly/services/web_panel_flag_font.dart';
@@ -180,22 +181,27 @@ void main() {
     expect(find.text('v1.19.0'), findsNothing);
     expect(requests, contains('/version'));
 
-    // This API-only controller cannot identify a router package. Resolve the
-    // home selection sheet before checking the polling resumed beneath it.
     final softwareSheet = find.byType(AppOptionsSheet<RouterTool>);
+    expect(softwareSheet, findsNothing);
+    controllerOnline = true;
+    unawaited(RouterDetectionSession.instance.refresh());
+    // Only a reachable API with an unidentified manager requests a choice.
     for (var i = 0; i < 60 && softwareSheet.evaluate().isEmpty; i++) {
       await tester.pump(const Duration(milliseconds: 250));
     }
     expect(softwareSheet, findsOneWidget);
     final softwareOption = find
-        .descendant(of: softwareSheet, matching: find.text('Clash API'))
+        .descendant(
+            of: softwareSheet,
+            matching: find.text('Mihomo generic configuration'))
         .hitTestable();
     // Native test frames can observe the sheet before its entrance finishes.
     for (var i = 0; i < 40 && softwareOption.evaluate().isEmpty; i++) {
       await tester.pump(const Duration(milliseconds: 250));
     }
     expect(softwareOption, findsOneWidget,
-        reason: 'The software option must accept pointer events before tapping');
+        reason:
+            'The software option must accept pointer events before tapping');
     await tester.tap(softwareOption);
     for (var i = 0; i < 40; i++) {
       await tester.pump(const Duration(milliseconds: 250));
@@ -210,7 +216,6 @@ void main() {
         RouterTool.generic);
     expect(await ConnectionSettingsStore.instance.pendingRouterToolSelection(),
         isNull);
-    controllerOnline = true;
     for (var i = 0; i < 60; i++) {
       await tester.pump(const Duration(milliseconds: 250));
       if (find.text('v1.19.0').evaluate().isNotEmpty) break;

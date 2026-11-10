@@ -1,71 +1,85 @@
-# Android and iOS development, builds, and releases
+# Android and iOS build guide
 
 [简体中文](mobile-builds.zh-CN.md) · **English** · [Documentation](README.en.md)
 
-Both platforms share `main`, Flutter 3.47.5, dependency lockfiles, and the version in `pubspec.yaml`. Platform capabilities handle differences. Run `flutter analyze` and `flutter test` for shared-code changes, and validate both Android Release and iOS Release before publishing.
+Both platforms use Flutter 3.47.5 and the version in `pubspec.yaml`. `pubspec.lock` and `ios/Podfile.lock` pin dependencies. Android supports ARM64 and x86_64; iOS supports iPhones and iPads on iOS 18+. See [Contributing](../CONTRIBUTING.en.md) for development checks.
 
-## Manual builds
+## GitHub Actions
 
-Download official packages from [Releases](https://github.com/CanMoqiu/Proxly/releases). To build your own copy, use a repository where you have permission to run workflows and configure signing. Run the commands below from that checkout; GitHub CLI uses its repository context. These instructions do not require build access to the upstream public repository.
+In a repository where you can run workflows and configure signing, open **Actions → Proxly 双端打包 / Mobile builds → Run workflow**:
 
-In **Actions → Proxly 双端打包 / Mobile builds → Run workflow**, choose:
+| Input | Purpose |
+| --- | --- |
+| `ref` | Trusted branch, tag, or full commit SHA; use a full SHA for release builds |
+| `platform` | `both`, `android`, or `ios` |
+| `android_build_type` | `release` uses production signing; `debug` uses `top.canmoqiu.proxly.debug` with separate settings |
+| `draft_release_tag` | Optional private test-draft delivery, described below; leave blank by default |
 
-- `ref`: a trusted branch, tag, or full commit SHA. Use a full main-branch SHA for a formal release.
-- `platform`: `both` for both platforms, or `android` / `ios` for one.
-- `android_build_type`: `release` uses the fixed production signing key; `debug` creates a separate test app with the `.debug` application ID suffix.
+Alternatively, run these commands from that checkout, replacing `COMMIT_SHA` with the full source SHA:
 
-```powershell
-gh workflow run mobile-builds.yml --ref main -f ref=main -f platform=both -f android_build_type=release
+```sh
+gh workflow run mobile-builds.yml --ref main -f ref=COMMIT_SHA -f platform=both -f android_build_type=release
 gh run list --workflow mobile-builds.yml --limit 5
 ```
 
-This workflow is manual-only and uses artifacts by default. It declares repository contents write access to support private draft attachments, but does not create or publish Releases automatically. Artifacts last 14 days: `proxly-android-release-<number>` and `proxly-ios-unsigned-<number>`, each containing the package, SHA-256, and platform build information. Formal filenames include `Proxly-Android-26.8.apk` and `Proxly-iOS-26.8.ipa`; test versions retain their third version segment. Filenames omit internal build numbers. Failure logs are in `android-build-logs-*` / `ios-build-logs-*`.
+The workflow is manual-only and does not publish Releases automatically. It executes scripts from the selected `ref`, so use trusted code. `debug` changes the build type and application ID, not the version channel.
 
-Build type and version channel are separate: `debug` selects a debug signature and separate application ID; it does not automatically change the version to a test version. Both platforms take their version from `pubspec.yaml`.
+### Downloading artifacts
 
-## Private draft delivery (optional)
+After completion, download artifacts from the matching run:
 
-If Actions artifact storage is exhausted, first create a matching prerelease draft in a private repository targeting the full source commit SHA, then supply `draft_release_tag` (for example, `v26.8.1`). Leave it blank to keep using artifacts. Before building and uploading, the workflow checks repository privacy, the beta version, the draft tag, and the exact target SHA. It does not overwrite assets, publish drafts, or delete historical packages. Only the APK and IPA are uploaded as draft assets; this mode uses native Actions logs instead of log artifacts. Once one platform has uploaded successfully, retry only the failed platform to avoid duplicate asset names.
+| Artifact | Contents |
+| --- | --- |
+| `proxly-android-release-<number>` | Production-signed APK, SHA-256, `build-info-android.json` |
+| `proxly-android-debug-<number>` | Separate debug APK, digest, and build information |
+| `proxly-ios-unsigned-<number>` | IPA, SHA-256, `build-info-ios.json` |
+| `android-build-logs-*` / `ios-build-logs-*` | Analysis, test, and compiler logs |
 
-## Android production signing
+Artifacts last 14 days. In this CLI example, `RUN_ID` is the ID on the run page, not the run number used in artifact names:
 
-GitHub Actions uses these repository Secrets:
+```sh
+gh run download RUN_ID -p 'proxly-android-release-*' -p 'proxly-ios-unsigned-*' -D dist
+```
 
-- `ANDROID_KEYSTORE_BASE64`: Base64-encoded PKCS#12 keystore.
-- `ANDROID_KEYSTORE_PASSWORD`: keystore password.
-- `ANDROID_KEY_PASSWORD`: private-key password.
-- `ANDROID_KEY_ALIAS`: key alias.
+### Private test-draft delivery
 
-The repository variable `ANDROID_CERT_SHA256` pins the production certificate digest. Packaging checks it to prevent use of a debug or unrelated key. The keystore is restored only into the runner's temporary directory for the build, then removed; do not upload it in logs, caches, or release attachments.
+If artifact storage is unavailable, first create a matching prerelease draft in a private repository targeting the full source SHA, then supply `draft_release_tag`. This mode supports test versions only.
 
-For local builds, use an untracked `android/key.properties` with `storeFile` (absolute path), `storeType=PKCS12`, `storePassword`, `keyAlias`, and `keyPassword`. Do not commit private keys or passwords. Keep a secure backup and use the same signing key for later versions.
+Before building and uploading, the workflow checks repository visibility, version, draft state, and target SHA. It uploads only APK / IPA files without overwriting assets or publishing the draft; view logs in Actions. If one platform already uploaded successfully, retry only the other. The workflow declares `contents: write` for this mode.
 
-```powershell
+## Android signing and local builds
+
+Actions requires these Secrets and the repository variable `ANDROID_CERT_SHA256`:
+
+| Secret | Content |
+| --- | --- |
+| `ANDROID_KEYSTORE_BASE64` | Base64-encoded PKCS#12 keystore |
+| `ANDROID_KEYSTORE_PASSWORD` | Keystore password |
+| `ANDROID_KEY_PASSWORD` | Private-key password |
+| `ANDROID_KEY_ALIAS` | Key alias |
+
+Packaging verifies the certificate digest. The key is restored into the runner's temporary directory and removed afterward. Keep keys and passwords out of logs, caches, and attachments.
+
+For local builds, use an untracked `android/key.properties` containing `storeFile` (absolute path), `storeType=PKCS12`, `storePassword`, `keyAlias`, and `keyPassword`:
+
+```sh
+flutter pub get --enforce-lockfile
 flutter build apk --release --target-platform android-arm64,android-x64
 ```
 
-Since 26.6.0+35, the official certificate SHA-256 has been `938c46e51d9149a2cec9f3af7efc4da730894e9e1ec192b982c55a22fbb1c6d8`. Version 26.5 used a different debug certificate and cannot be overwritten directly. Before upgrading, securely record your connection details and required settings, then uninstall the old version and install the new one. Later versions with the same signature can be installed over it. This digest is public verification information, not a signing key; independently signed builds cannot overwrite official packages.
+Both architectures share one APK. Use 26.8 on a 32-bit Android system, including an ARM64 device running a 32-bit OS.
 
-## Android architectures
+The official certificate SHA-256 is `938c46e51d9149a2cec9f3af7efc4da730894e9e1ec192b982c55a22fbb1c6d8`. Version 26.5 used a different debug certificate: safely record settings, uninstall it, then install the new package. Later releases with the same signature support in-place updates. Independently signed packages cannot overwrite official ones.
 
-Android builds after 26.8 support only ARM64 (`arm64-v8a`) and x86_64. **Subsequent versions no longer support Android ARM32 devices**, and no 32-bit x86 package is provided. Devices running a 32-bit OS, including those with an ARM64 CPU, should stay on 26.8. Both supported architectures remain in one APK with the same application ID and signing identity. Packaging checks require complete native libraries for both architectures and reject ARM32 libraries.
+## iOS builds
 
-## Storage after use
+Native compilation requires macOS, Xcode, and CocoaPods. Actions installs the pinned Flutter toolchain, runs the simulator WebView integration test, and produces a device Release package. It checks that `ios/Podfile.lock` has not drifted. Simulator output cannot replace a device package. See the [iOS installation guide](ios-selfsign.en.md) for installation.
 
-Startup does not create proxy or connections WebViews until their tabs are first opened; visited pages retain their state. Hidden tabs pause Flutter animations. The native connections list polls only while its tab is visible, no other page covers it, and the app is in the foreground. Returning refreshes its data without continuous hidden-page requests or redraws.
+## Before publishing
 
-On Android cold startup, cleanup removes only in-app update APKs matching the installed version or an older version, plus download leftovers without a version marker. Newer APKs awaiting installation remain available for retry; launching the installer does not immediately delete them. Cleanup failures do not prevent startup.
+- Confirm both builds and applicable tests pass. Check connection, proxy switching, configuration operations, background recovery, and in-place updates on real devices.
+- Match the source SHA in build information to the selected commit, and embedded version and build number to `pubspec.yaml`.
+- Verify the Android certificate and both architectures, iOS device support, and package digests through the packaging checks.
+- Publish matching source, tags, and packages. Upload only installation packages and include digests in Chinese and English release notes.
 
-Local panel resources use `Cache-Control: no-store` to avoid duplicate HTTP caches under random local ports. Android and iOS clear old WebView HTTP caches on first launch, application version changes or seven days after the last successful cleanup without deleting cookies, web storage, panel preferences, connection credentials, the installed panel, or user YAML files. Bundled and downloaded panels continue loading from local resources without an Internet download. On iOS, only WKWebView memory and disk HTTP caches are removed; Fetch caches, offline data, and IndexedDB remain intact. The application sandbox is not wiped.
-
-## iOS self-signing
-
-iOS 18+ iPhones and iPads use an unsigned Release IPA. No Apple certificate needs to be stored in the repository. See the [iPhone guide](ios-selfsign.en.md) for builds, installation, and in-place updates.
-
-## Publishing
-
-Select a verified source commit and run both builds using its full SHA. Confirm both jobs succeed, and check the embedded versions, source SHA, Android signature, and file digests. Publish the matching formal source, tag, and verified packages. Keep build diagnostics for traceability; include necessary version information and package digests in the release notes without exposing internal repository details or credentials.
-
-Release notes default to Chinese and have a complete English counterpart. Distinguish the signed Android APK from the iOS IPA requiring self-signing, and retain signing information affecting in-place updates.
-
-The first release with this architecture change must state in Important notes that Android ARM32 is no longer supported and that ARM64 and x86_64 are supported, directing 32-bit users to 26.8. The supported-platforms item in Version information stays “Android 7.0+; iOS 18+” without parenthetical details.
+Formal filenames include `Proxly-Android-26.10.apk` and `Proxly-iOS-26.10.ipa`; test versions retain the third segment. Filenames and release notes omit internal build numbers. Describe compatibility, signing, or migration changes in the version that introduces them.

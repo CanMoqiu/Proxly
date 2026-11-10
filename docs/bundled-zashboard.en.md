@@ -1,24 +1,49 @@
-# Bundled Zashboard
+# Zashboard panel
 
 [简体中文](bundled-zashboard.md) · **English** · [Documentation](README.en.md)
 
-- Version: v3.30.0 (2026-10-29)
-- [Official release](https://github.com/Zephyruso/zashboard/releases/tag/v3.30.0)
-- Commit: `bf4f00bb8d905f8a78f627af7cf84457c4db53c4`
-- Asset: official `dist.zip`; SHA-256:
-  `1f91c014e61e768240a86ad0a9bd565b247ec5a0e26b125fb5d19076682905b7`
-- `assets/web_panel` preserves the distribution assets and includes the upstream MIT `LICENSE`.
+Proxly bundles Zashboard; no dashboard files need to be deployed on the router. Proxy, Rules, and web Connections use it, while the standalone console provides full web navigation. Theme, language, and controller connection follow app settings.
 
-Proxly adapts theme, authentication, navigation dock, and fonts through separate injected scripts, without changing minified upstream JavaScript. Proxy and Connections hide Zashboard's own dock; the standalone console retains it. The hidden dock keeps a zero-height positioning box at the viewport bottom so upstream virtual lists calculate bottom spacing correctly. The iOS flag font comes from an app-owned resource path and continues working after switching to a downloaded panel.
+## Layout and connection cards
 
-Native WebView settings and CSS control edge overscroll. Proxly owns `config/disable-pull-to-refresh` and sets it to `false`, disabling v3.30.0's global `touchmove` interception based on the initial touch direction. This prevents reverse scrolling from remaining blocked after reaching an edge. The adaptation applies to Proxy, Connections, and the console after panel updates, settings imports, and reloads. Browser-native scrolling, inertia, and nested-list handling remain intact; upstream minified assets are unchanged.
+Phones use the mobile layout; Android tablets and iPads use the desktop layout. Embedded tabs hide web navigation and the overview sidebar; the standalone console retains them. Connections use cards on phones and tablets, with the same customizable defaults.
 
-Android tablets and iPads use the desktop layout, identified by a display shortest side of at least 600 logical pixels rather than the keyboard-resized or split-screen window. Proxy, Rules, and Connections hide web navigation and the overview sidebar so content fills the available width; the standalone console keeps navigation.
+Card fields, table columns, and chain display save automatically in separate phone and tablet content profiles. The app manages display mode and sorting; shared imports do not overwrite device-specific connection content. Advanced options switches between native and web Connections.
 
-Phone and tablet connections use the same phone-style cards and content defaults. Tablets no longer force desktop tables or separate card defaults. Changes to card fields, desktop columns, and chain display are saved automatically in separate phone and tablet profiles. Only content layout is saved; display mode and sorting remain app-managed, and shared panel imports cannot overwrite device profiles.
+The iOS Proxy page supports native history-back gestures from Rules to Proxy. Horizontal page swipes inside the panel are disabled; use page buttons or app navigation.
 
-Proxly also fixes `config/swipe-in-pages` and `config/swipe-in-tabs` to off, preventing horizontal swipes from changing panel content. In-page buttons and the app's bottom navigation continue to work.
+## Importing settings
 
-The iOS Proxy tab retains native WebView history gestures and disables the panel's top-level route slide and fade animations, preventing a second web transition after returning from Rules to Proxy. Dialog and list animations remain available.
+The top-right import entry on Proxy offers two sources:
 
-The import entry at the top right of Proxy offers import from the core or a local JS file. Core import reads Zashboard's `/storage/zashboard` endpoint and requires core support and saved settings. Local import accepts Zashboard JSON data with a `.json` or `.js` extension; it does not execute JavaScript. Both sources share size and structure checks, credential filtering, and protection of app-managed settings. Successful imports synchronize and reload live panels.
+- **From core**: reads the controller's `/storage/zashboard` endpoint, requiring core support and saved settings.
+- **From local JS file**: accepts Zashboard JSON data with `.json` or `.js` extensions; it does not execute JavaScript programs.
+
+Files are limited to `5 MiB`, `2000` top-level keys, and `1 MiB` per serialized value. Imports filter credentials and app-managed settings. Rejected imports keep existing settings; successful ones refresh open panels.
+
+## Updates and storage
+
+Check, download, and install panel updates in Advanced options. SHA-256 and ZIP structure are verified before installation; failures retain the current panel. If download succeeded but activation failed, updating again retries activation only. An app update that changes the bundled panel version clears the downloaded older panel and uses the new bundled version.
+
+Periodic HTTP cache cleanup preserves connection credentials, panel preferences, and installed assets. On Android cold launch, update APKs for the installed version or older versions are removed; newer packages awaiting installation remain available for retry.
+
+## Asset maintenance
+
+| Item | Value |
+| --- | --- |
+| Bundled version | [v3.30.0](https://github.com/Zephyruso/zashboard/releases/tag/v3.30.0) |
+| Upstream commit | `bf4f00bb8d905f8a78f627af7cf84457c4db53c4` |
+| Distribution | Official `dist.zip` |
+| SHA-256 | `1f91c014e61e768240a86ad0a9bd565b247ec5a0e26b125fb5d19076682905b7` |
+
+Keep upstream distribution assets and the MIT license in `assets/web_panel/` unchanged. Adapt theme, authentication, navigation, fonts, and device layout through app-side scripts rather than editing minified JavaScript. See [bundled fonts](../assets/fonts/README.en.md) for flag-font provenance.
+
+Preserve these constraints:
+
+- Tablets use a display shortest side of at least `600` logical pixels, independent of keyboard or split-screen window size.
+- The hidden dock retains a zero-height positioning box at the viewport bottom for virtual-list spacing.
+- Keep `config/disable-pull-to-refresh` at `false` to avoid upstream global touch interception blocking reverse scrolling at an edge. Native WebView settings and CSS control overscroll.
+- Keep `config/swipe-in-pages` and `config/swipe-in-tabs` disabled. On iOS Proxy, disable only top-level web route transitions to avoid combining them with native history animation.
+- Update archives are limited to `50 MiB` downloaded, `2000` entries, `20 MiB` per file, `100 MiB` extracted, and a `100:1` compression ratio. Reject out-of-bounds paths, duplicate paths, and symbolic links.
+
+After upgrading assets, check offline startup, theme and language sync, imports, device layouts, edge scrolling, and iOS history-back behavior. Native integration tests do not replace physical-device touch verification.

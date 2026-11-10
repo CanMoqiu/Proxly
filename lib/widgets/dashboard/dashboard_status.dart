@@ -10,6 +10,7 @@ import '../../services/clash_data_hub.dart';
 import '../../services/core_version_lookup.dart';
 import '../../services/connection_settings_store.dart';
 import '../../services/connection_feedback.dart';
+import '../../services/router_tool.dart';
 import '../../services/controller_connection_state.dart';
 import '../../services/openclash_restart_coordinator.dart';
 
@@ -56,6 +57,8 @@ class _DashboardStatusState extends State<DashboardStatus>
   bool _recoveryPending = false;
   int _recoveryRevision = 0;
   String _coreVersion = '--';
+  RouterTool? _routerTool;
+  int _toolGeneration = 0;
   final _versionLookup = CoreVersionLookup(
     load: () async =>
         (await ClashService.instance.getVersionInfo())['coreVersion'],
@@ -79,7 +82,20 @@ class _DashboardStatusState extends State<DashboardStatus>
       _handleConnectionSettingsChanged,
     );
     _restartCoordinator.addListener(_handleRestartStateChanged);
+    unawaited(_loadRouterTool());
     _syncPolling();
+  }
+
+  Future<void> _loadRouterTool() async {
+    final generation = ++_toolGeneration;
+    try {
+      final tool = await ConnectionSettingsStore.instance.loadRouterTool();
+      if (mounted && generation == _toolGeneration && tool != _routerTool) {
+        setState(() => _routerTool = tool);
+      }
+    } catch (_) {
+      // Retain the last identity when local preferences are temporarily unreadable.
+    }
   }
 
   Future<void> _loadVersionInfo({bool force = true}) async {
@@ -154,10 +170,12 @@ class _DashboardStatusState extends State<DashboardStatus>
     }
     if (ConnectionSettingsStore.instance.lastChange ==
         ConnectionSettingsChange.routerIdentity) {
+      unawaited(_loadRouterTool());
       _versionLookup.reset();
       unawaited(_loadVersionInfo());
       return;
     }
+    unawaited(_loadRouterTool());
     _connectionReloadPending = true;
     _versionLookup.reset();
     setState(() {
@@ -333,6 +351,7 @@ class _DashboardStatusState extends State<DashboardStatus>
                 _error,
                 _clashOnline,
                 _coreVersion,
+                _routerTool,
                 _restartCoordinator.isBusy,
                 _restartCoordinator.phase
               ),
@@ -341,6 +360,7 @@ class _DashboardStatusState extends State<DashboardStatus>
                   error: _error,
                   online: _clashOnline,
                   coreVersion: _coreVersion,
+                  routerTool: _routerTool,
                   restartBusy: _restartCoordinator.isBusy,
                   restartFailed:
                       _restartCoordinator.phase == OpenClashRestartPhase.failed,

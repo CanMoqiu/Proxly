@@ -70,11 +70,43 @@ class ConnectionSettingsStore extends ChangeNotifier {
     required String expectedHost,
     required int expectedRevision,
   }) =>
+      _saveRouterTool(tool,
+          expectedHost: expectedHost,
+          expectedRevision: expectedRevision,
+          requirePending: true);
+
+  Future<bool> selectRouterTool(
+    RouterTool tool, {
+    required String expectedHost,
+    required int expectedRevision,
+  }) =>
+      _saveRouterTool(tool,
+          expectedHost: expectedHost,
+          expectedRevision: expectedRevision,
+          requirePending: false);
+
+  Future<({String host, int revision, RouterTool tool})> loadRouterIdentity() =>
+      _serializeControllerWrite(() async {
+        final prefs = await SharedPreferences.getInstance();
+        return (
+          host: prefs.getString('clash_host') ?? '',
+          revision: revision,
+          tool: RouterTool.parse(prefs.getString('router_tool'))
+        );
+      });
+
+  Future<bool> _saveRouterTool(
+    RouterTool tool, {
+    required String expectedHost,
+    required int expectedRevision,
+    required bool requirePending,
+  }) =>
       _serializeControllerWrite(() async {
         final prefs = await SharedPreferences.getInstance();
         if (revision != expectedRevision ||
-            prefs.getString('clash_host') != expectedHost ||
-            prefs.getBool('router_tool_selection_pending') != true) {
+            (prefs.getString('clash_host') ?? '') != expectedHost ||
+            (requirePending &&
+                prefs.getBool('router_tool_selection_pending') != true)) {
           return false;
         }
         if (!await prefs.setString('router_tool', tool.name) ||
@@ -165,6 +197,7 @@ class ConnectionSettingsStore extends ChangeNotifier {
     RouterTool routerTool = RouterTool.openClash,
     ProxyCore core = ProxyCore.unknown,
     bool routerSelectionPending = false,
+    bool routerToolConfirmed = false,
   }) =>
       _serializeControllerWrite(() async {
         if (sshPort < 1 || sshPort > 65535) {
@@ -172,9 +205,10 @@ class ConnectionSettingsStore extends ChangeNotifier {
         }
         final prefs = await SharedPreferences.getInstance();
         final keepConfirmation = !routerSelectionPending &&
-            prefs.getString('clash_host') == host &&
-            prefs.getString('router_tool') == routerTool.name &&
-            prefs.getBool('router_tool_confirmed') == true;
+            (routerToolConfirmed ||
+                (prefs.getString('clash_host') == host &&
+                    prefs.getString('router_tool') == routerTool.name &&
+                    prefs.getBool('router_tool_confirmed') == true));
         await AppSecureStorage.write('clash_token', token);
         await AppSecureStorage.write('ssh_password', sshPassword);
         if (!await prefs.setInt('ssh_port', sshPort)) {

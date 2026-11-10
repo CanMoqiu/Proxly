@@ -1,18 +1,9 @@
-<!-- 默认使用中文，也欢迎英文。英文模板：https://github.com/CanMoqiu/Proxly/compare?expand=1&template=pull_request.en.md -->
+<!-- English template: https://github.com/CanMoqiu/Proxly/compare?expand=1&template=pull_request.en.md -->
 
 ## 修改内容
 
-<!-- 说明解决的问题、修改目的和用户可见的行为。 -->
-
-## 验证结果
-
-- [ ] 已运行 `flutter analyze`
-- [ ] 已运行 `flutter test`
-- [ ] 已完成适用的平台检查，并说明未覆盖的真机行为
-- [ ] 公开文档的中文和英文版本已同步，或本次无需修改文档
-
-<!-- 填写实际结果；无法运行的检查请说明原因，不要直接勾选。 -->
+<!-- Describe the problem and resulting behavior. Include relevant checks and any untested platform behavior. For documentation-only changes, check links and both languages. -->
 
 ## 重要说明
 
-<!-- 如涉及迁移、安全、签名或发布，请在此说明；没有则删除本节。 -->
+<!-- Include migration, compatibility, or security implications only when applicable; otherwise remove this section. -->

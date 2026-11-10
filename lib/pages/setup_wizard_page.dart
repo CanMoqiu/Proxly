@@ -11,6 +11,7 @@ import '../services/router_tool.dart';
 import '../theme/app_theme.dart';
 import '../widgets/adaptive_ui.dart';
 import '../widgets/app_feedback.dart';
+import '../widgets/app_popup.dart';
 import 'main_shell.dart';
 
 /// Guides initial Clash connection setup.
@@ -38,6 +39,11 @@ class _SetupWizardPageState extends State<SetupWizardPage>
   bool _obscureToken = true;
   bool _obscureSshPassword = true;
   bool _testing = false;
+  bool _recognizing = false;
+  RouterTool _routerTool = RouterTool.generic;
+  ProxyCore _core = ProxyCore.unknown;
+  String? _routerToolInput;
+  bool _manualRouterTool = false;
 
   String get _detectionInput => [
         _hostController.text,
@@ -93,6 +99,30 @@ class _SetupWizardPageState extends State<SetupWizardPage>
 
   void _previousStep() => _goToStep(_currentStep - 1);
 
+  Future<void> _chooseRouterTool() async {
+    FocusScope.of(context).unfocus();
+    final selected = await AppPopup.sheet<RouterTool>(
+        context: context,
+        builder: (_) => AppOptionsSheet<RouterTool>(
+              title: tr('选择代理软件'),
+              selectedValue: _routerTool,
+              options: [
+                for (final tool in RouterTool.values)
+                  AppSheetOption(
+                      value: tool,
+                      label: tr(tool.label),
+                      icon: Icons.hub_outlined,
+                      subtitle:
+                          tool == RouterTool.generic ? tr('仅使用通用控制器功能') : null)
+              ],
+            ));
+    if (!mounted || selected == null) return;
+    setState(() {
+      _routerTool = selected;
+      _manualRouterTool = true;
+    });
+  }
+
   void _clearHostErrorOnInput() {
     _clearTestResultOnInput();
     final clearRequired =
@@ -126,7 +156,7 @@ class _SetupWizardPageState extends State<SetupWizardPage>
   }
 
   Future<void> _handleConfigNext() async {
-    if (_testing) return;
+    if (_testing || _recognizing) return;
     if (_hostController.text.trim().isEmpty) {
       setState(() => _hostRequiredError = true);
       _hostFocusNode.requestFocus();
@@ -141,11 +171,39 @@ class _SetupWizardPageState extends State<SetupWizardPage>
       _setTestResult(hostError, success: false);
       return;
     }
+    FocusScope.of(context).unfocus();
+    final input = _detectionInput;
+    final keepManualChoice = _manualRouterTool && input == _routerToolInput;
+    setState(() => _recognizing = true);
+    RouterDetectionResult? result;
+    try {
+      result = await (widget.detectionService ?? RouterDetectionService())
+          .detect(
+              host: ClashHostValidator.normalizeAddress(_hostController.text),
+              token: _tokenController.text.trim(),
+              sshPassword: _sshPasswordController.text,
+              sshPort:
+                  ConnectionSettings.parseSshPort(_sshPortController.text) ??
+                      22);
+    } catch (_) {
+      // Unidentified or unreachable controllers use the generic adapter.
+    } finally {
+      if (mounted) setState(() => _recognizing = false);
+    }
+    if (!mounted || input != _detectionInput || _currentStep != 1) return;
+    setState(() {
+      if (!keepManualChoice) {
+        _routerTool = result?.tool ?? RouterTool.generic;
+        _manualRouterTool = false;
+      }
+      _core = result?.core ?? ProxyCore.unknown;
+      _routerToolInput = input;
+    });
     _nextStep();
   }
 
   Future<void> _testConnection() async {
-    if (_testing) return;
+    if (_testing || _recognizing) return;
     if (ConnectionSettings.parseSshPort(_sshPortController.text) == null) {
       _setTestResult('SSH 端口必须为 1–65535 之间的整数', success: false);
       return;
@@ -223,8 +281,10 @@ class _SetupWizardPageState extends State<SetupWizardPage>
         token: _tokenController.text.trim(),
         sshPassword: _sshPasswordController.text,
         sshPort: sshPort,
-        routerTool: RouterTool.generic,
-        routerSelectionPending: true,
+        routerTool: _routerTool,
+        routerSelectionPending: false,
+        routerToolConfirmed: true,
+        core: _core,
       );
       await ClashService.instance.loadConfig();
       if (!mounted) return;
@@ -288,13 +348,16 @@ class _SetupWizardPageState extends State<SetupWizardPage>
               onToggleSshObscure: () =>
                   setState(() => _obscureSshPassword = !_obscureSshPassword),
               testing: _testing,
+              recognizing: _recognizing,
               testResult: _testResult,
               testSuccess: _testSuccess,
               onTest: _testConnection,
-              onBack: _previousStep,
-              onNext: _testing ? null : _handleConfigNext,
+              onBack: _recognizing ? null : _previousStep,
+              onNext: _testing || _recognizing ? null : _handleConfigNext,
             ),
             _PreferencesPage(
+              routerTool: _routerTool,
+              onChooseRouterTool: _chooseRouterTool,
               saving: _saving,
               themeMode: _themeMode,
               onThemeModeChanged: _setThemeMode,
@@ -524,6 +587,7 @@ class _ConfigPage extends StatelessWidget {
   final bool obscureSshPassword;
   final VoidCallback onToggleSshObscure;
   final bool testing;
+  final bool recognizing;
   final String? testResult;
   final bool testSuccess;
   final VoidCallback onTest;
@@ -542,6 +606,7 @@ class _ConfigPage extends StatelessWidget {
     required this.obscureSshPassword,
     required this.onToggleSshObscure,
     required this.testing,
+    required this.recognizing,
     required this.testResult,
     required this.testSuccess,
     required this.onTest,
@@ -794,7 +859,7 @@ class _ConfigPage extends StatelessWidget {
                           ),
                           const SizedBox(height: 12),
                           GestureDetector(
-                            onTap: testing ? null : onTest,
+                            onTap: testing || recognizing ? null : onTest,
                             child: Container(
                               width: double.infinity,
                               decoration: BoxDecoration(
@@ -881,7 +946,8 @@ class _ConfigPage extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 12),
-              _WizardNavButtons(onBack: onBack, onNext: onNext),
+              _WizardNavButtons(
+                  onBack: onBack, onNext: onNext, busy: recognizing),
             ],
           ),
         ),
@@ -973,6 +1039,8 @@ class _WizardNavButtons extends StatelessWidget {
 }
 
 class _PreferencesPage extends StatelessWidget {
+  final RouterTool routerTool;
+  final VoidCallback onChooseRouterTool;
   final bool saving;
   final ThemeMode themeMode;
   final ValueChanged<ThemeMode> onThemeModeChanged;
@@ -982,6 +1050,8 @@ class _PreferencesPage extends StatelessWidget {
   final VoidCallback onFinish;
 
   const _PreferencesPage({
+    required this.routerTool,
+    required this.onChooseRouterTool,
     required this.saving,
     required this.themeMode,
     required this.onThemeModeChanged,
@@ -1042,6 +1112,27 @@ class _PreferencesPage extends StatelessWidget {
                           darkLabel: tr('深色'),
                           followSystemLabel: tr('跟随系统'),
                           onChanged: onThemeModeChanged,
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      Container(
+                        decoration: BoxDecoration(
+                          color: palette.surface,
+                          borderRadius: BorderRadius.circular(18),
+                          border: Border.all(color: palette.border, width: 0.5),
+                        ),
+                        padding: const EdgeInsets.all(16),
+                        child: AppSettingPickerRow(
+                          title: tr('代理软件'),
+                          description: tr('已根据连接自动选择，也可手动修改'),
+                          picker: AppSelectionPicker(
+                            key: const ValueKey('setup_router_tool'),
+                            label: tr(routerTool.label),
+                            tooltip: tr('选择代理软件'),
+                            icon: Icons.hub_outlined,
+                            compact: true,
+                            onTap: saving ? null : onChooseRouterTool,
+                          ),
                         ),
                       ),
                       const SizedBox(height: 14),

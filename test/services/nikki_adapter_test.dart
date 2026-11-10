@@ -11,7 +11,8 @@ import 'package:proxly/services/router_tool.dart';
 const fixture =
     'available=1\nrevision=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n'
     'core_only=0\ndns_mode=fake-ip\nmode=rule\nsniffer=0\ndns_respect_rules=1\n'
-    'tcp_mode=redirect\nudp_mode=tun\nrouter_proxy=1\n';
+    'tcp_mode=redirect\nudp_mode=tun\nrouter_proxy=1\n'
+    'bypass_china_mainland_ip=0\nbypass_china_mainland_ip6=0\n';
 OpenClashRestartCoordinator coordinator(Future<void> Function() restart) =>
     OpenClashRestartCoordinator(
         restartCommand: (_) => restart(),
@@ -96,6 +97,34 @@ esac
       expect(config.listSync().map((entry) => entry.path.split('/').last),
           ['nikki']);
     }
+    for (final target in [
+      OpenClashAreaBypass.mainland,
+      OpenClashAreaBypass.disabled
+    ]) {
+      source.writeAsStringSync(baseline);
+      final bypassCommand = NikkiQuickSettingsAdapter.buildApplyCommand(
+              original,
+              original.copyWith(areaBypass: target),
+              OpenClashQuickSettingKey.areaBypass)
+          .replaceAll('/etc/config', config.path)
+          .replaceAll('/etc/init.d/nikki', init.path)
+          .replaceAll(original.backendRevision, digest);
+      final result = await Process.run('/bin/sh', [
+        '-c',
+        bypassCommand
+      ], environment: {
+        'PATH': '${bin.path}:/usr/bin:/bin',
+        'FAIL_SAVE': '0',
+        'PENDING': '0'
+      });
+      expect(result.exitCode, 0, reason: result.stderr.toString());
+      final value = target == OpenClashAreaBypass.mainland ? '1' : '0';
+      expect(source.readAsStringSync(),
+          contains('nikki.proxy.bypass_china_mainland_ip=$value'));
+      expect(source.readAsStringSync(),
+          contains('nikki.proxy.bypass_china_mainland_ip6=$value'));
+      expect(source.readAsStringSync(), isNot(contains('nikki.mixin.')));
+    }
   }, skip: !Platform.isMacOS);
 
   test(
@@ -148,13 +177,165 @@ esac
     expect(settings.snifferEnabled, isTrue);
     expect(settings.dnsProxyEnabled, isFalse);
     expect(settings.runVariant, OpenClashRunVariant.mix);
-    expect(settings.supports(OpenClashQuickSettingKey.areaBypass), isFalse);
+    expect(settings.supports(OpenClashQuickSettingKey.areaBypass), isTrue);
+    expect(settings.areaBypass, OpenClashAreaBypass.disabled);
     expect(settings.supports(OpenClashQuickSettingKey.streamUnlock), isFalse);
     final coreOnly = NikkiQuickSettingsAdapter(
         run: (_) async => fixture.replaceFirst('core_only=0', 'core_only=1'),
         restartCoordinator: restart);
     expect((await coreOnly.load()).unsupported,
         containsAll(OpenClashQuickSettingKey.values));
+  });
+  test('Nikki bypass maps both address families and retains split state',
+      () async {
+    final restart = coordinator(() async {});
+    addTearDown(restart.dispose);
+    for (final flags in [('0', '0'), ('1', '1'), ('1', '0'), ('0', '1')]) {
+      final service = NikkiQuickSettingsAdapter(
+          run: (_) async => fixture
+              .replaceFirst('bypass_china_mainland_ip=0',
+                  'bypass_china_mainland_ip=${flags.$1}')
+              .replaceFirst('bypass_china_mainland_ip6=0',
+                  'bypass_china_mainland_ip6=${flags.$2}'),
+          restartCoordinator: restart);
+      final settings = await service.load();
+      expect(settings.supports(OpenClashQuickSettingKey.areaBypass), isTrue);
+      expect(
+          settings.areaBypass,
+          flags.$1 != flags.$2
+              ? isNull
+              : flags.$1 == '1'
+                  ? OpenClashAreaBypass.mainland
+                  : OpenClashAreaBypass.disabled);
+      for (final target in [
+        OpenClashAreaBypass.mainland,
+        OpenClashAreaBypass.disabled
+      ]) {
+        final command = NikkiQuickSettingsAdapter.buildApplyCommand(
+            settings,
+            settings.copyWith(areaBypass: target),
+            OpenClashQuickSettingKey.areaBypass);
+        final value = target == OpenClashAreaBypass.mainland ? '1' : '0';
+        expect(command,
+            contains("set nikki.proxy.bypass_china_mainland_ip='$value'"));
+        expect(command,
+            contains("set nikki.proxy.bypass_china_mainland_ip6='$value'"));
+      }
+    }
+  });
+  test(
+      'bypass remains available with mixin files but malformed flags are hidden',
+      () async {
+    final restart = coordinator(() async {});
+    addTearDown(restart.dispose);
+    final settings = await NikkiQuickSettingsAdapter(
+            run: (_) async => '${fixture}mixin_file_content=1\n',
+            restartCoordinator: restart)
+        .load();
+    expect(settings.supports(OpenClashQuickSettingKey.areaBypass), isTrue);
+    expect(
+        settings.unsupported,
+        containsAll(OpenClashQuickSettingKey.values
+            .where((key) => key != OpenClashQuickSettingKey.areaBypass)));
+    for (final value in ['invalid', 'true', 'yes', 'on']) {
+      final invalid = await NikkiQuickSettingsAdapter(
+              run: (_) async => fixture.replaceFirst(
+                  'bypass_china_mainland_ip=0',
+                  'bypass_china_mainland_ip=$value'),
+              restartCoordinator: restart)
+          .load();
+      expect(invalid.areaBypass, isNull);
+      expect(invalid.supports(OpenClashQuickSettingKey.areaBypass), isFalse);
+    }
+  });
+  test('Nikki rejects overseas bypass before writing or restarting', () async {
+    var writes = 0;
+    var restarts = 0;
+    final restart = coordinator(() async => restarts++);
+    addTearDown(restart.dispose);
+    final service = NikkiQuickSettingsAdapter(
+        run: (command) async {
+          if (command == NikkiQuickSettingsAdapter.readCommand) return fixture;
+          writes++;
+          return 'PROXLY_NIKKI_PERSISTED=1';
+        },
+        restartCoordinator: restart);
+    final original = await service.load();
+    final desired = original.copyWith(areaBypass: OpenClashAreaBypass.overseas);
+    final result = await service.applyChange(
+        original: original,
+        desired: desired,
+        key: OpenClashQuickSettingKey.areaBypass);
+    expect(result.success, isFalse);
+    expect(result.errorCode, 'unsupported_feature');
+    expect(writes, 0);
+    expect(restarts, 0);
+    expect(
+        () => NikkiQuickSettingsAdapter.buildApplyCommand(
+            original, desired, OpenClashQuickSettingKey.areaBypass),
+        throwsUnsupportedError);
+  });
+  for (final target in [
+    OpenClashAreaBypass.mainland,
+    OpenClashAreaBypass.disabled
+  ]) {
+    test('split Nikki bypass applies $target and verifies both families',
+        () async {
+      var persisted = false;
+      var restarts = 0;
+      final restart = coordinator(() async {
+        expect(persisted, isTrue);
+        restarts++;
+      });
+      addTearDown(restart.dispose);
+      final service = NikkiQuickSettingsAdapter(
+          run: (command) async {
+            if (command == NikkiQuickSettingsAdapter.readCommand) {
+              final ip = !persisted || target == OpenClashAreaBypass.mainland
+                  ? '1'
+                  : '0';
+              final ip6 = persisted && target == OpenClashAreaBypass.mainland
+                  ? '1'
+                  : '0';
+              return fixture
+                  .replaceFirst('bypass_china_mainland_ip=0',
+                      'bypass_china_mainland_ip=$ip')
+                  .replaceFirst('bypass_china_mainland_ip6=0',
+                      'bypass_china_mainland_ip6=$ip6');
+            }
+            persisted = true;
+            return 'PROXLY_NIKKI_PERSISTED=1';
+          },
+          restartCoordinator: restart);
+      final original = await service.load();
+      expect(original.areaBypass, isNull);
+      final result = await service.applyChange(
+          original: original,
+          desired: original.copyWith(areaBypass: target),
+          key: OpenClashQuickSettingKey.areaBypass);
+      expect(result.success, isTrue);
+      expect(result.settings.areaBypass, target);
+      expect(restarts, 1);
+    });
+  }
+  test('Nikki split readback cannot verify a successful bypass change',
+      () async {
+    final restart = coordinator(() async {});
+    addTearDown(restart.dispose);
+    final service = NikkiQuickSettingsAdapter(
+        run: (command) async => command == NikkiQuickSettingsAdapter.readCommand
+            ? fixture.replaceFirst(
+                'bypass_china_mainland_ip=0', 'bypass_china_mainland_ip=1')
+            : 'PROXLY_NIKKI_PERSISTED=1',
+        restartCoordinator: restart);
+    final original = await service.load();
+    final result = await service.applyChange(
+        original: original,
+        desired: original.copyWith(areaBypass: OpenClashAreaBypass.mainland),
+        key: OpenClashQuickSettingKey.areaBypass);
+    expect(result.success, isFalse);
+    expect(result.changesPersisted, isTrue);
+    expect(result.errorCode, 'restart_failed');
   });
   test('save uses private UCI staging and validates the original revision',
       () async {

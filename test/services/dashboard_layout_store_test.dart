@@ -52,6 +52,81 @@ void main() {
     layout.dispose();
   });
 
+  test('software filtering preserves custom slots and manual visibility',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final layout = DashboardLayoutStore();
+    await layout.reorder(3, 0);
+    await layout.setVisible(DashboardCardId.traffic, false);
+    final original = layout.order;
+    final unavailable = {DashboardCardId.currentYaml};
+    final filtered = layout.availableOrder(unavailable: unavailable);
+    expect(filtered, original.where((id) => !unavailable.contains(id)));
+    await layout.reorder(0, 3, unavailable: unavailable);
+    expect(layout.order.first, DashboardCardId.currentYaml);
+    expect(layout.isVisible(DashboardCardId.traffic), isFalse);
+    final prefs = await SharedPreferences.getInstance();
+    final stored = prefs.getString(DashboardLayoutStore.preferenceKey);
+    for (final excluded in [unavailable, <DashboardCardId>{}, unavailable]) {
+      layout.availableOrder(unavailable: excluded);
+    }
+    expect(prefs.getString(DashboardLayoutStore.preferenceKey), stored);
+    final restored = DashboardLayoutStore();
+    await restored.load();
+    expect(restored.order, layout.order);
+    expect(restored.availableOrder().first, DashboardCardId.currentYaml);
+    expect(restored.isVisible(DashboardCardId.traffic), isFalse);
+    layout.dispose();
+    restored.dispose();
+  });
+
+  test('never arranged cards follow saved custom cards after software changes',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final layout = DashboardLayoutStore();
+    await layout.setVisible(DashboardCardId.traffic, false);
+    await layout.reorder(4, 0, unavailable: {DashboardCardId.currentYaml});
+    final arranged =
+        layout.availableOrder(unavailable: {DashboardCardId.currentYaml});
+    final restored = DashboardLayoutStore();
+    await restored.load();
+    expect(
+        restored.availableOrder(), [...arranged, DashboardCardId.currentYaml]);
+    expect(restored.isVisible(DashboardCardId.traffic), isFalse);
+    await restored.reorder(5, 1);
+    expect(restored.availableOrder()[1], DashboardCardId.currentYaml);
+    restored.availableOrder(unavailable: {DashboardCardId.currentYaml});
+    expect(restored.availableOrder()[1], DashboardCardId.currentYaml);
+    await restored.reset();
+    expect(restored.availableOrder(), DashboardCardId.values);
+    expect(restored.visible, DashboardCardId.values);
+    layout.dispose();
+    restored.dispose();
+  });
+
+  test('legacy custom order retains known cards and appends later additions',
+      () async {
+    SharedPreferences.setMockInitialValues({
+      DashboardLayoutStore.preferenceKey: jsonEncode({
+        'version': 2,
+        'order': ['operations', 'status', 'overview'],
+        'hidden': ['status']
+      })
+    });
+    final layout = DashboardLayoutStore();
+    await layout.load();
+    expect(layout.availableOrder(), [
+      DashboardCardId.operations,
+      DashboardCardId.status,
+      DashboardCardId.overview,
+      DashboardCardId.traffic,
+      DashboardCardId.currentYaml,
+      DashboardCardId.quickSettings
+    ]);
+    expect(layout.isVisible(DashboardCardId.status), isFalse);
+    layout.dispose();
+  });
+
   test('old default order migrates while preserving hidden cards', () async {
     SharedPreferences.setMockInitialValues({
       DashboardLayoutStore.preferenceKey: jsonEncode({

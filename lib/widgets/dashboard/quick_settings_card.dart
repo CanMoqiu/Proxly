@@ -51,11 +51,13 @@ class OpenClashQuickSettingsCard extends StatelessWidget {
         current?.supports(key) ??
         switch (routerTool) {
           RouterTool.openClash => true,
-          RouterTool.nikki => key != OpenClashQuickSettingKey.areaBypass &&
-              key != OpenClashQuickSettingKey.streamUnlock,
+          RouterTool.nikki => key != OpenClashQuickSettingKey.streamUnlock,
           RouterTool.generic => key == OpenClashQuickSettingKey.proxyMode,
         };
-    final compatibilityLabel = current?.routerTool == RouterTool.nikki
+    bool hasFollowing(OpenClashQuickSettingKey key) =>
+        OpenClashQuickSettingKey.values.skip(key.index + 1).any(supports);
+    final effectiveTool = current?.routerTool ?? routerTool;
+    final compatibilityLabel = effectiveTool == RouterTool.nikki
         ? 'Redirect + TPROXY'
         : current?.baseMode == OpenClashBaseMode.fakeIp
             ? tr('增强')
@@ -103,39 +105,44 @@ class OpenClashQuickSettingsCard extends StatelessWidget {
             ),
             const SizedBox(height: 12),
           ],
-          if (supports(OpenClashQuickSettingKey.baseMode)) ...[
-            _QuickChoiceGroup<OpenClashBaseMode>(
-              labels: const ['Fake-IP', 'Redir-Host'],
-              values: const [
-                OpenClashBaseMode.fakeIp,
-                OpenClashBaseMode.redirHost
-              ],
-              selected: current?.baseMode,
-              enabled: enabled &&
-                  runModeSupported &&
-                  supports(OpenClashQuickSettingKey.baseMode),
-              valueKeyPrefix: 'quick_setting_base',
-              onSelected: onBaseModeChanged,
-            ),
-            const SizedBox(height: 16),
-            if (supports(OpenClashQuickSettingKey.runVariant)) ...[],
-            _QuickSettingsSection(
-              title: tr('运行模式'),
-              description: tr('选择当前基础模式对应的运行方式'),
-              textColor: textColor,
-              hintColor: hintColor,
-              child: _QuickChoiceGroup<OpenClashRunVariant>(
-                labels: [compatibilityLabel, 'TUN', tr('混合')],
-                values: OpenClashRunVariant.values,
-                selected: current?.runVariant,
+          if (supports(OpenClashQuickSettingKey.baseMode) ||
+              supports(OpenClashQuickSettingKey.runVariant)) ...[
+            if (supports(OpenClashQuickSettingKey.baseMode))
+              _QuickChoiceGroup<OpenClashBaseMode>(
+                labels: const ['Fake-IP', 'Redir-Host'],
+                values: const [
+                  OpenClashBaseMode.fakeIp,
+                  OpenClashBaseMode.redirHost
+                ],
+                selected: current?.baseMode,
                 enabled: enabled &&
                     runModeSupported &&
-                    supports(OpenClashQuickSettingKey.runVariant),
-                valueKeyPrefix: 'quick_setting_run',
-                onSelected: onRunVariantChanged,
+                    supports(OpenClashQuickSettingKey.baseMode),
+                valueKeyPrefix: 'quick_setting_base',
+                onSelected: onBaseModeChanged,
               ),
-            ),
-            Divider(height: 24, color: cardBorder),
+            if (supports(OpenClashQuickSettingKey.baseMode) &&
+                supports(OpenClashQuickSettingKey.runVariant))
+              const SizedBox(height: 16),
+            if (supports(OpenClashQuickSettingKey.runVariant))
+              _QuickSettingsSection(
+                title: tr('运行模式'),
+                description: tr('选择当前基础模式对应的运行方式'),
+                textColor: textColor,
+                hintColor: hintColor,
+                child: _QuickChoiceGroup<OpenClashRunVariant>(
+                  labels: [compatibilityLabel, 'TUN', tr('混合')],
+                  values: OpenClashRunVariant.values,
+                  selected: current?.runVariant,
+                  enabled: enabled &&
+                      runModeSupported &&
+                      supports(OpenClashQuickSettingKey.runVariant),
+                  valueKeyPrefix: 'quick_setting_run',
+                  onSelected: onRunVariantChanged,
+                ),
+              ),
+            if (hasFollowing(OpenClashQuickSettingKey.runVariant))
+              Divider(height: 24, color: cardBorder),
           ],
           if (supports(OpenClashQuickSettingKey.proxyMode)) ...[
             _QuickSettingsSection(
@@ -153,19 +160,29 @@ class OpenClashQuickSettingsCard extends StatelessWidget {
                 onSelected: onProxyModeChanged,
               ),
             ),
-            Divider(height: 24, color: cardBorder),
+            if (hasFollowing(OpenClashQuickSettingKey.proxyMode))
+              Divider(height: 24, color: cardBorder),
           ],
           if (supports(OpenClashQuickSettingKey.areaBypass)) ...[
             _QuickSettingsSection(
               title: tr('区域绕过'),
-              description: tr('指定区域流量不经过内核'),
+              description: tr(effectiveTool == RouterTool.nikki
+                  ? current != null && current.areaBypass == null
+                      ? '当前 IPv4/IPv6 绕过设置不同，选择后将统一设置'
+                      : '同时设置大陆 IPv4/IPv6 流量绕过内核'
+                  : '指定区域流量不经过内核'),
               textColor: textColor,
               hintColor: hintColor,
               child: _QuickChoiceGroup<OpenClashAreaBypass>(
-                labels: [tr('大陆'), tr('海外'), tr('停用')],
-                values: const [
+                labels: [
+                  tr('大陆'),
+                  if (effectiveTool != RouterTool.nikki) tr('海外'),
+                  tr('停用')
+                ],
+                values: [
                   OpenClashAreaBypass.mainland,
-                  OpenClashAreaBypass.overseas,
+                  if (effectiveTool != RouterTool.nikki)
+                    OpenClashAreaBypass.overseas,
                   OpenClashAreaBypass.disabled,
                 ],
                 selected: current?.areaBypass,
@@ -175,7 +192,8 @@ class OpenClashQuickSettingsCard extends StatelessWidget {
                 onSelected: onAreaBypassChanged,
               ),
             ),
-            Divider(height: 24, color: cardBorder),
+            if (hasFollowing(OpenClashQuickSettingKey.areaBypass))
+              Divider(height: 24, color: cardBorder),
           ],
           if (supports(OpenClashQuickSettingKey.sniffer)) ...[
             _QuickSwitchRow(
@@ -188,12 +206,14 @@ class OpenClashQuickSettingsCard extends StatelessWidget {
               hintColor: hintColor,
               onChanged: onSnifferChanged,
             ),
-            Divider(height: 16, color: cardBorder),
+            if (hasFollowing(OpenClashQuickSettingKey.sniffer))
+              Divider(height: 16, color: cardBorder),
           ],
           if (supports(OpenClashQuickSettingKey.dnsProxy)) ...[
             _QuickSwitchRow(
               key: const ValueKey('quick_setting_dns_proxy'),
-              title: tr('DNS 代理'),
+              title:
+                  tr(effectiveTool == RouterTool.nikki ? 'DNS 遵循规则' : 'DNS 代理'),
               description: tr('让 DNS 查询遵循代理规则，减少解析与访问不一致'),
               value: current?.dnsProxyEnabled ?? false,
               enabled: enabled && supports(OpenClashQuickSettingKey.dnsProxy),
@@ -201,7 +221,8 @@ class OpenClashQuickSettingsCard extends StatelessWidget {
               hintColor: hintColor,
               onChanged: onDnsProxyChanged,
             ),
-            Divider(height: 16, color: cardBorder),
+            if (hasFollowing(OpenClashQuickSettingKey.dnsProxy))
+              Divider(height: 16, color: cardBorder),
           ],
           if (supports(OpenClashQuickSettingKey.streamUnlock)) ...[
             _QuickSwitchRow(

@@ -22,7 +22,7 @@ class OpenClashQuickSettings {
   final OpenClashBaseMode baseMode;
   final OpenClashRunVariant? runVariant;
   final OpenClashProxyMode proxyMode;
-  final OpenClashAreaBypass areaBypass;
+  final OpenClashAreaBypass? areaBypass;
   final bool snifferEnabled;
   final bool dnsProxyEnabled;
   final bool streamUnlockEnabled;
