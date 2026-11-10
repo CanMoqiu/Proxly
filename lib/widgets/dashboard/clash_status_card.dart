@@ -1,6 +1,7 @@
 import 'dashboard_card_titles.dart';
 import 'package:flutter/material.dart';
 import '../../l10n/app_locale.dart';
+import '../../services/router_tool.dart';
 import '../../theme/app_theme.dart';
 import 'dashboard_button_style.dart';
 
@@ -8,6 +9,7 @@ class ClashStatusCard extends StatelessWidget {
   final bool loading, online, restartBusy, restartFailed;
   final String? error;
   final String coreVersion;
+  final RouterTool? routerTool;
   final VoidCallback onRetry;
   const ClashStatusCard(
       {super.key,
@@ -17,6 +19,7 @@ class ClashStatusCard extends StatelessWidget {
       required this.restartFailed,
       required this.error,
       required this.coreVersion,
+      this.routerTool,
       required this.onRetry});
   @override
   Widget build(BuildContext context) {
@@ -98,41 +101,57 @@ class ClashStatusCard extends StatelessWidget {
                 child: Text(tr('重试'))),
           ],
           const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                  child: Text(
-                tr('内核版本'),
-                style: TextStyle(fontSize: 12, color: textSecondary),
-              )),
-              const SizedBox(width: 8),
-              Flexible(
-                child: Align(
-                  alignment: AlignmentDirectional.centerEnd,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 2,
-                    ),
-                    decoration: BoxDecoration(
-                      color: palette.inputBackground,
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Text(
-                      coreVersion,
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: textPrimary,
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
+          _StatusDetailRow(
+              label: tr('代理软件'),
+              value: routerTool == null ? '--' : tr(routerTool!.label)),
+          const SizedBox(height: 12),
+          _StatusDetailRow(label: tr('内核版本'), value: coreVersion),
         ],
       ),
+    );
+  }
+}
+
+class _StatusDetailRow extends StatelessWidget {
+  const _StatusDetailRow({required this.label, required this.value});
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = AppPalette.of(context);
+    return Row(
+      children: [
+        Expanded(
+            child: Text(
+          label,
+          style: TextStyle(fontSize: 12, color: palette.textSecondary),
+        )),
+        const SizedBox(width: 8),
+        Flexible(
+          child: Align(
+            alignment: AlignmentDirectional.centerEnd,
+            child: Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 8,
+                vertical: 2,
+              ),
+              decoration: BoxDecoration(
+                color: palette.inputBackground,
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Text(
+                value,
+                style: TextStyle(
+                  fontSize: 11,
+                  color: palette.textPrimary,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

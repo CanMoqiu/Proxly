@@ -7,6 +7,7 @@ import '../services/dashboard_layout_store.dart';
 import '../services/connection_settings_store.dart';
 import '../services/router_detection_session.dart';
 import '../services/router_tool.dart';
+import '../services/controller_connection_state.dart';
 import '../widgets/app_popup.dart';
 import '../services/openclash_restart_coordinator.dart';
 import '../services/web_panel_service.dart';
@@ -46,6 +47,7 @@ class _HomePageState extends State<HomePage>
   bool _selectionScheduled = false;
   bool _selectingTool = false;
   int? _promptedRevision;
+  final _connection = ControllerConnectionState.instance;
   RouterDetectionSession get _detection =>
       widget.detectionSession ?? RouterDetectionSession.instance;
 
@@ -65,6 +67,7 @@ class _HomePageState extends State<HomePage>
       _routeVisible &&
       _foreground &&
       !_detection.isDetecting &&
+      _connection.phase == ControllerConnectionPhase.online &&
       ModalRoute.of(context)?.isCurrent == true;
 
   Future<void> _chooseRouterToolIfNeeded() async {
@@ -77,6 +80,7 @@ class _HomePageState extends State<HomePage>
       if (!mounted ||
           !_canChooseTool ||
           request == null ||
+          !_detection.canSelectFor(request.host, request.revision) ||
           _promptedRevision == request.revision) {
         return;
       }
@@ -90,14 +94,18 @@ class _HomePageState extends State<HomePage>
                   for (final tool in RouterTool.values)
                     AppSheetOption(
                       value: tool,
-                      label: tool.label,
+                      label: tr(tool.label),
                       icon: Icons.hub_outlined,
                       subtitle:
                           tool == RouterTool.generic ? tr('仅使用通用控制器功能') : null,
                     )
                 ],
               ));
-      if (!mounted || selected == null) return;
+      if (!mounted ||
+          selected == null ||
+          _connection.phase != ControllerConnectionPhase.online) {
+        return;
+      }
       await store.confirmRouterTool(selected,
           expectedHost: request.host, expectedRevision: request.revision);
     } catch (_) {
@@ -129,6 +137,7 @@ class _HomePageState extends State<HomePage>
     WidgetsBinding.instance.addObserver(this);
     ConnectionSettingsStore.instance.addListener(_scheduleToolSelection);
     _detection.addListener(_scheduleToolSelection);
+    _connection.addListener(_scheduleToolSelection);
     _scheduleToolSelection();
   }
 
@@ -196,6 +205,7 @@ class _HomePageState extends State<HomePage>
     WidgetsBinding.instance.removeObserver(this);
     ConnectionSettingsStore.instance.removeListener(_scheduleToolSelection);
     _detection.removeListener(_scheduleToolSelection);
+    _connection.removeListener(_scheduleToolSelection);
     _layout.dispose();
     super.dispose();
   }

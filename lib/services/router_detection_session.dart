@@ -11,7 +11,11 @@ class RouterDetectionSession extends ChangeNotifier {
   final RouterDetectionService _detector;
   Future<void>? _inFlight;
   bool _repeat = false;
+  ({String host, int revision})? _selectionIdentity;
   bool get isDetecting => _inFlight != null;
+
+  bool canSelectFor(String host, int revision) =>
+      _selectionIdentity == (host: host, revision: revision);
 
   Future<void> refresh() {
     final current = _inFlight;
@@ -19,6 +23,7 @@ class RouterDetectionSession extends ChangeNotifier {
       _repeat = true;
       return current;
     }
+    _selectionIdentity = null;
     // Defer the first read until the in-flight identity has been installed.
     final future = Future<void>.microtask(() async {
       do {
@@ -38,12 +43,13 @@ class RouterDetectionSession extends ChangeNotifier {
   }
 
   Future<void> _recognize() async {
+    _selectionIdentity = null;
     final store = ConnectionSettingsStore.instance;
     try {
       final settings = await store.load();
       if (settings.host.isEmpty) return;
       final revision = store.revision;
-      RouterDetectionResult? result;
+      final RouterDetectionResult result;
       try {
         result = await _detector.detect(
             host: settings.host,
@@ -51,14 +57,20 @@ class RouterDetectionSession extends ChangeNotifier {
             sshPassword: settings.sshPassword,
             sshPort: settings.sshPort);
       } catch (_) {
-        // A failed probe leaves a manual choice available without a startup error.
+        // Connection failure does not identify a generic controller or request a choice.
+        if (store.revision != revision) _repeat = true;
+        return;
       }
       final applied = await store.applyRouterDetection(
           expectedHost: settings.host,
           expectedRevision: revision,
-          tool: result?.tool ?? RouterTool.generic,
-          core: result?.core ?? ProxyCore.unknown);
-      if (!applied) _repeat = true;
+          tool: result.tool,
+          core: result.core);
+      if (!applied) {
+        _repeat = true;
+      } else if (result.tool == RouterTool.generic) {
+        _selectionIdentity = (host: settings.host, revision: store.revision);
+      }
     } catch (_) {
       // Keychain and preference failures must not erase the saved configuration.
     }

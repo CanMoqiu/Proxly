@@ -1,37 +1,32 @@
-# Dialog and button interaction rules
+# Dialog interaction rules
 
 [简体中文](popup-interactions.zh-CN.md) · **English** · [Documentation](README.en.md)
 
-Proxly's native interface and native web-page toolbars share these rules. Menus inside Zashboard remain upstream-managed.
+Applies to native pages and native web-page toolbars. Zashboard's internal menus remain upstream-managed.
 
-| Purpose | Component | Dismissal and result |
+## Choosing components
+
+| Purpose | Component | Behavior |
 | --- | --- | --- |
-| Single selection, file management, import source | `AppOptionsSheet` | Selection returns a value; backdrop, swipe down, or back returns null |
-| Action and security confirmation | `AppDialog` | Name the action on the primary button; execute only after explicit consent |
-| Filename or SSH password input | Dedicated form in `AppDialog` | Show field errors inline and retain input on failure |
-| Connection details | Dedicated content with `AppPopup.sheet` | Shared padding, safe area, drag indicator, and dismissal behavior |
-| Brief result feedback | `AppFeedback` | Retain success and error lifetimes |
-| Persistent failure, installation, restart | Owning page state and recovery controls | Dismissing the interface does not cancel a remote operation |
+| Single selection, file actions, import source | `AppOptionsSheet` | Mark the current item; selection returns a value, while backdrop, swipe down, or back cancels |
+| Action or security confirmation | `AppDialog` | Name the action on the primary button; execute only after explicit confirmation |
+| Filename or SSH password | Form within `AppDialog` | Show errors inline and retain input on failure |
+| Connection details | `AppPopup.sheet` | Shared safe areas, padding, and drag indicator |
+| Brief feedback | `AppFeedback` | Shared duration and placement |
+| Persistent failure or restart | Page state and recovery controls | Dismissal does not undo a remote operation |
 
-## Display and execution
+## Results and asynchronous operations
 
-- Open through `AppPopup.dialog` or `AppPopup.sheet`; buttons return results with `AppPopup.close`.
-- Duplicate opens from the same source context return null, without sharing a successful result that could execute twice. SSH trust confirmation from a different source can still appear.
-- Wait for the exit animation and backdrop removal before returning the result and opening another confirmation or a system picker.
-- Another tap during exit must not close the underlying page.
-- Lists mark the current selection; business callers do not reapply the same configuration or language.
-- Put delete last in the action list and use the danger color. Preserve existing confirmations and validation for deletion, overwrite, installation, and SSH trust.
-- Unsaved edits offer Keep editing, Discard changes, and Save and continue. A failed save stays on the current file.
-- Presentation components do not access the router or add polling. Existing business state handles mutual exclusion, endpoint checks, timeouts, rollback, and retry.
+Open through `AppPopup.dialog` / `AppPopup.sheet` and return results through `AppPopup.close`. Duplicate opens from the same source return null; SSH security confirmation from a different source can still appear.
 
-## Layout and asynchronous operations
+Return results only after the exit animation and backdrop have finished, before opening the next confirmation or system picker. Repeated taps during exit must not close the underlying page. Callers own request exclusion, endpoint checks, timeouts, and retries; presentation components do not request router operations.
 
-- Bottom sheets share titles, option spacing, rounded corners, and safe areas; long lists scroll.
-- Centered dialog titles and content can scroll while actions remain separate. Three buttons stack vertically; two wrap when space is insufficient.
-- Forms retain keyboard avoidance and validation. While saving an SSH password, disable submit and cancel and intercept system back.
-- Disable update buttons during processing. Keep permission prompts and errors inside the update dialog; closing a download dialog sets the cancellation flag.
-- Apply these rules in Chinese and English, with large text, short screens, light/dark themes, and Android/iOS.
+Place deletion last and use the danger color. Require confirmation for deletion, overwrite, installation, and SSH trust. Unsaved edits offer Keep editing, Discard, and Save and continue; failed saves stay on the current file.
 
-## Regression focus
+Disable buttons and back navigation as required during submission to prevent duplicate requests. SSH password saves disable submit, cancel, and system back; dismissing a download cancels it. After asynchronous completion, check that the page is still valid before navigation.
 
-Check duplicate opens and submissions, sequential confirmations after selection, backdrop/gesture/system-back cancellation, SSH security confirmation, retained edits after save failure, and closing a dialog before asynchronous completion. For updates, also check browser-launch retry and scrolling long release notes.
+## Layout and checks
+
+Bottom sheets share titles, spacing, and safe areas; long content scrolls. Centered dialogs separate content from actions, stack three buttons, and wrap two when width is insufficient. Forms retain keyboard avoidance and inline validation.
+
+Check both languages, large text, short screens, light/dark themes, and back navigation on both platforms. Cover repeated submissions, sequential confirmations, cancellation, retained input on failure, and asynchronous callbacks after dismissal.

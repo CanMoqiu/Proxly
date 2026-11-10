@@ -1,34 +1,35 @@
 # Proxly 文档
 
-**简体中文** · [English](README.en.md) · [返回项目首页](../README.md)
+**简体中文** · [English](README.en.md) · [项目首页](../README.md)
 
-仓库默认使用简体中文，每篇公开文档提供完整英文版本。使用问题、错误反馈和功能建议可在 [提问入口](https://github.com/CanMoqiu/Proxly/issues/new/choose) 选择中文表单；安全漏洞请使用 [私密报告渠道](../SECURITY.md)。
+## 使用
 
-## 文档目录
+| 文档 | 内容 |
+| --- | --- |
+| [使用指南](dashboard.zh-CN.md) | 连接设置、首页、软件适配、YAML 管理及故障处理 |
+| [iOS 安装](ios-selfsign.zh-CN.md) | iPhone / iPad 安装、续签与覆盖更新 |
+| [Zashboard 面板](bundled-zashboard.md) | 布局、连接卡片、导入与更新 |
 
-| 内容 | 简体中文 | English |
+安装包见 [Releases](https://github.com/CanMoqiu/Proxly/releases)。使用问题和建议可通过 [问题表单](https://github.com/CanMoqiu/Proxly/issues/new/choose) 提交；漏洞请使用 [私密报告渠道](../SECURITY.md)。
+
+## 开发与维护
+
+| 文档 | 内容 |
+| --- | --- |
+| [贡献指南](../CONTRIBUTING.md) | 开发环境、代码结构、提交与双语文档约定 |
+| [双端构建](mobile-builds.zh-CN.md) | Actions、本地构建、签名和发布核验 |
+| [弹窗规范](popup-interactions.zh-CN.md) | 组件选择、异步结果和交互约束 |
+| [字体资源](../assets/fonts/README.md) | 字体来源、许可及加载方式 |
+| [iOS 启动页资源](../ios/Runner/Assets.xcassets/LaunchImage.imageset/README.md) | 图标 PDF 的制作与更新 |
+
+## 许可证
+
+中文译本用于阅读，不替代许可原文。
+
+| 内容 | 中文译本 | 原文 |
 | --- | --- | --- |
-| 项目介绍 | [阅读](../README.md) | [Project overview](../README.en.md) |
-| 贡献指南 | [阅读](../CONTRIBUTING.md) | [Contributing](../CONTRIBUTING.en.md) |
-| 安全说明 | [阅读](../SECURITY.md) | [Security policy](../SECURITY.en.md) |
-| 首页与 YAML 管理 | [阅读](dashboard.zh-CN.md) | [Dashboard and YAML](dashboard.en.md) |
-| Android 与 iOS 构建 | [阅读](mobile-builds.zh-CN.md) | [Mobile builds](mobile-builds.en.md) |
-| iPhone 自签与安装 | [阅读](ios-selfsign.zh-CN.md) | [iPhone self-signing](ios-selfsign.en.md) |
-| 弹窗交互规范 | [阅读](popup-interactions.zh-CN.md) | [Dialog interactions](popup-interactions.en.md) |
-| 内置 Zashboard | [阅读](bundled-zashboard.md) | [Bundled Zashboard](bundled-zashboard.en.md) |
-| 仓库语言约定 | [阅读](repository-language.zh-CN.md) | [Repository language policy](repository-language.en.md) |
-| 内置字体 | [阅读](../assets/fonts/README.md) | [Bundled fonts](../assets/fonts/README.en.md) |
-| iOS 启动页资源 | [阅读](../ios/Runner/Assets.xcassets/LaunchImage.imageset/README.md) | [iOS launch assets](../ios/Runner/Assets.xcassets/LaunchImage.imageset/README.en.md) |
-| 合并请求模板 | [阅读](../.github/pull_request_template.md) | [Pull request template](../.github/PULL_REQUEST_TEMPLATE/pull_request.en.md) |
-| Proxly MIT 许可证 | [阅读](../LICENSE.zh-CN.md) | [Proxly MIT license](../LICENSE) |
-| Zashboard MIT 许可证 | [阅读](licenses/zashboard.zh-CN.md) | [Zashboard MIT license](../assets/web_panel/LICENSE) |
-| JetBrains Mono 许可证 | [阅读](licenses/jetbrains-mono.zh-CN.md) | [JetBrains Mono license](../assets/fonts/JetBrainsMono-OFL.txt) |
-| Twemoji 许可声明 | [阅读](licenses/twemoji.zh-CN.md) | [Twemoji license notice](../assets/fonts/Twemoji-LICENSE.md) |
-| Zashboard 第三方声明 | [阅读](licenses/zashboard-third-party.zh-CN.md) | [Zashboard third-party notices](../assets/web_panel/THIRD_PARTY_NOTICES.md) |
-
-## 阅读说明
-
-- 先下载使用：[正式版本](https://github.com/CanMoqiu/Proxly/releases/latest)；iPhone 请先阅读自签说明。
-- 自行编译：按双端构建文档准备环境与签名，并在有权限的仓库副本运行手动工作流。
-- 许可证和上游声明保留英文原文，中文译本用于阅读，不替代原许可。
-- GitHub 自带导航和设置界面无法由仓库文件统一切换语言；可配置的内容采用中文优先。详见仓库语言约定。
+| Proxly MIT | [阅读](../LICENSE.zh-CN.md) | [LICENSE](../LICENSE) |
+| Zashboard MIT | [阅读](licenses/zashboard.zh-CN.md) | [LICENSE](../assets/web_panel/LICENSE) |
+| JetBrains Mono OFL | [阅读](licenses/jetbrains-mono.zh-CN.md) | [OFL](../assets/fonts/JetBrainsMono-OFL.txt) |
+| Twemoji 许可声明 | [阅读](licenses/twemoji.zh-CN.md) | [声明](../assets/fonts/Twemoji-LICENSE.md) |
+| Zashboard 第三方声明 | [阅读](licenses/zashboard-third-party.zh-CN.md) | [声明](../assets/web_panel/THIRD_PARTY_NOTICES.md) |

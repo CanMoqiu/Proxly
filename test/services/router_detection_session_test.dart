@@ -119,31 +119,74 @@ void main() {
     expect(writes, 0);
   });
   test(
-      'failed recognition requests a choice; confirmed choice survives later failures',
+      'failed connections preserve identity and never authorize automatic selection',
       () async {
     final session = RouterDetectionSession(
         detector: _Detector((host) async => throw StateError('offline')));
     addTearDown(session.dispose);
     final store = ConnectionSettingsStore.instance;
     await session.refresh();
-    final request = await store.pendingRouterToolSelection();
-    expect(request, isNotNull);
-    expect(
-        await store.confirmRouterTool(RouterTool.nikki,
-            expectedHost: request!.host, expectedRevision: request.revision),
-        isTrue);
-    await session.refresh();
-    expect(await store.loadRouterTool(), RouterTool.nikki);
     expect(await store.pendingRouterToolSelection(), isNull);
+    expect(session.canSelectFor('router.local:9090', store.revision), isFalse);
     final apiOnly = RouterDetectionSession(
         detector: _Detector((host) async => const RouterDetectionResult(
             tool: RouterTool.generic, core: ProxyCore.mihomo, version: 'v2')));
     addTearDown(apiOnly.dispose);
     await apiOnly.refresh();
+    final request = await store.pendingRouterToolSelection();
+    expect(request, isNotNull);
+    expect(apiOnly.canSelectFor(request!.host, request.revision), isTrue);
+    expect(
+        await store.confirmRouterTool(RouterTool.nikki,
+            expectedHost: request.host, expectedRevision: request.revision),
+        isTrue);
+    await session.refresh();
+    expect(await store.loadRouterTool(), RouterTool.nikki);
+    expect(await store.pendingRouterToolSelection(), isNull);
+    await apiOnly.refresh();
     expect((await store.load()).core, ProxyCore.mihomo);
     expect(await store.loadRouterTool(), RouterTool.nikki);
     expect(writes, 0);
   });
+  test('a failed probe revokes an earlier successful automatic selection',
+      () async {
+    var online = true;
+    final session = RouterDetectionSession(detector: _Detector((host) async {
+      if (!online) throw StateError('offline');
+      return const RouterDetectionResult(
+          tool: RouterTool.generic, core: ProxyCore.mihomo, version: 'v2');
+    }));
+    addTearDown(session.dispose);
+    final store = ConnectionSettingsStore.instance;
+    await session.refresh();
+    expect(session.canSelectFor('router.local:9090', store.revision), isTrue);
+    final revision = store.revision;
+    online = false;
+    await session.refresh();
+    expect(session.canSelectFor('router.local:9090', store.revision), isFalse);
+    expect(store.revision, revision);
+    expect((await store.load()).core, ProxyCore.mihomo);
+  });
+  test(
+      'manual software selection is bound to identity without a pending prompt',
+      () async {
+    final store = ConnectionSettingsStore.instance;
+    final identity = await store.loadRouterIdentity();
+    expect(identity.tool, RouterTool.generic);
+    expect(await store.pendingRouterToolSelection(), isNull);
+    expect(
+        await store.selectRouterTool(RouterTool.nikki,
+            expectedHost: identity.host, expectedRevision: identity.revision),
+        isTrue);
+    expect(await store.loadRouterTool(), RouterTool.nikki);
+    expect(
+        await store.selectRouterTool(RouterTool.openClash,
+            expectedHost: identity.host, expectedRevision: identity.revision),
+        isFalse);
+    expect(await store.loadRouterTool(), RouterTool.nikki);
+    expect(writes, 0);
+  });
+
   test('stale detection is discarded and refreshed for a changed controller',
       () async {
     final old = Completer<RouterDetectionResult>();

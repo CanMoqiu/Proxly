@@ -93,78 +93,36 @@ class AppLanguagePicker extends StatelessWidget {
     AppLocaleScope.watch(context);
     final appLocale = AppLocaleController.instance;
     final current = appLocale.language;
-    final colorScheme = Theme.of(context).colorScheme;
-    final foreground = colorScheme.onSurface;
 
-    return Tooltip(
-      message: tr('切换语言'),
-      child: Material(
-        type: MaterialType.transparency,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(12),
-          onTap: () async {
-            final language = await AppPopup.sheet<AppLanguage>(
-              context: context,
-              builder: (_) => AppOptionsSheet<AppLanguage>(
-                title: tr('切换语言'),
-                selectedValue: current,
-                options: [
-                  for (final value in AppLanguage.values)
-                    AppSheetOption(value: value, label: _languageLabel(value))
-                ],
-              ),
-            );
-            if (!context.mounted || language == null || language == current) {
-              return;
-            }
-            try {
-              await appLocale.setLanguage(language);
-            } catch (_) {
-              if (context.mounted) {
-                AppFeedback.showSnackBar(context, tr('保存语言失败，请重试'),
-                    tone: AppFeedbackTone.error);
-              }
-            }
-          },
-          child: Container(
-            padding: EdgeInsets.symmetric(
-              horizontal: compact ? 10 : 12,
-              vertical: compact ? 8 : 10,
-            ),
-            decoration: BoxDecoration(
-              border: Border.all(
-                color: foreground.withValues(alpha: 0.18),
-              ),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.language_rounded, size: 18, color: foreground),
-                const SizedBox(width: 8),
-                Flexible(
-                  child: AdaptiveSingleLineText(
-                    _languageLabel(current),
-                    style: TextStyle(
-                      fontSize: 12,
-                      letterSpacing: 0,
-                      color: foreground,
-                    ),
-                    alignment: Alignment.centerLeft,
-                    textAlign: TextAlign.left,
-                  ),
-                ),
-                const SizedBox(width: 4),
-                Icon(
-                  Icons.arrow_drop_down_rounded,
-                  size: 18,
-                  color: foreground,
-                ),
-              ],
-            ),
+    return AppSelectionPicker(
+      label: _languageLabel(current),
+      icon: Icons.language_rounded,
+      tooltip: tr('切换语言'),
+      compact: compact,
+      onTap: () async {
+        final language = await AppPopup.sheet<AppLanguage>(
+          context: context,
+          builder: (_) => AppOptionsSheet<AppLanguage>(
+            title: tr('切换语言'),
+            selectedValue: current,
+            options: [
+              for (final value in AppLanguage.values)
+                AppSheetOption(value: value, label: _languageLabel(value))
+            ],
           ),
-        ),
-      ),
+        );
+        if (!context.mounted || language == null || language == current) {
+          return;
+        }
+        try {
+          await appLocale.setLanguage(language);
+        } catch (_) {
+          if (context.mounted) {
+            AppFeedback.showSnackBar(context, tr('保存语言失败，请重试'),
+                tone: AppFeedbackTone.error);
+          }
+        }
+      },
     );
   }
 }
@@ -183,6 +141,20 @@ const _english = <String, String>{
   '选择后会写入代理服务当前配置，并在确认后重启。':
       'Select a profile to activate, then confirm the service restart.',
   "代理软件": "Proxy software",
+  'Mihomo 通用配置': 'Mihomo generic configuration',
+  '已根据连接自动选择，也可手动修改':
+      'Selected from your connection; you can change it manually',
+  '默认自动识别，也可手动选择当前使用的软件':
+      'Detect automatically by default, or select the software you use',
+  '自动识别不准确时，可手动选择当前使用的软件。':
+      'Select the software you use if automatic detection is inaccurate.',
+  '连接已改变，请重新选择代理软件':
+      'The connection changed. Please select the proxy software again',
+  'DNS 遵循规则': 'DNS respect rules',
+  '当前 IPv4/IPv6 绕过设置不同，选择后将统一设置':
+      'IPv4/IPv6 bypass settings differ. Selecting an option will set both.',
+  '同时设置大陆 IPv4/IPv6 流量绕过内核':
+      'Set bypass for mainland IPv4/IPv6 traffic together',
   "未识别内核": "Unidentified core",
   "正在识别...": "Detecting...",
   "识别代理软件和内核": "Identify proxy software and core",

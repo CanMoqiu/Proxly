@@ -575,6 +575,10 @@ class OpenClashQuickSettingsService {
     required OpenClashQuickSettings desired,
     required OpenClashQuickSettingKey key,
   }) {
+    if (key == OpenClashQuickSettingKey.areaBypass &&
+        desired.areaBypass == null) {
+      throw ArgumentError('Select an area bypass option before applying');
+    }
     final changed = OpenClashQuickSettingKey.values
         .where((candidate) => !_matches(candidate, original, desired))
         .toList();
@@ -953,10 +957,11 @@ uci commit openclash || fail persist_failed
     return '$base$suffix';
   }
 
-  static String _areaBypassValue(OpenClashAreaBypass area) => switch (area) {
+  static String _areaBypassValue(OpenClashAreaBypass? area) => switch (area) {
         OpenClashAreaBypass.disabled => '0',
         OpenClashAreaBypass.mainland => '1',
         OpenClashAreaBypass.overseas => '2',
+        null => throw ArgumentError('No area bypass option selected'),
       };
 
   static Map<String, String> _parseKeyValues(String output) {

@@ -1,59 +1,79 @@
-# Home dashboard
+# User guide
 
 [简体中文](dashboard.zh-CN.md) · **English** · [Documentation](README.en.md)
 
-The default order is Status, Traffic, Overview, Current configuration, Operations, and Quick settings. Overview retains connection counts, cumulative download/upload, speed charts, and time markers.
+## Connection setup
 
-Scroll to the bottom and select **Customize home** to edit the layout. Long-press a card and drag it to reorder; use its switch to show or hide it. Starting a drag provides haptic, scaling, elevation, and highlight feedback. Cards remain fully expanded while editing, with no height cap or internal scrolling. Only the dragged card shrinks and follows the finger. The page scrolls automatically only while the moving finger is within a narrow top or bottom edge area; a stationary long press does not start scrolling, and leaving the edge stops it. During dragging, a small gap and drop indicator replace a full-card placeholder. Releasing saves the destination order and smoothly expands the card and repositions its neighbors. Canceling leaves the order unchanged. Editing affects layout only; card contents cannot trigger business operations. The floating theme ball also provides haptic feedback for theme changes and long-press dragging.
+On first launch, enter the controller address and secret. Use a LAN IP, `.local` / `.lan` domain, or LAN hostname, such as `192.168.1.1:9090`. The secret must match the controller's `secret`. Check connection tests API access.
 
-Changes save locally. Select **Done** or navigate away to leave editing; **Restore defaults** resets order and visibility. The bottom button becomes **Done** while editing, and the page stays at the bottom. Instructions, restore, and done controls sit below the cards; restoring defaults also preserves the bottom position. Even when every card is hidden, the editing entry remains available.
+For OpenClash or Nikki configuration management, quick settings, and restart, also enter the SSH password. The account is `root`; the default port is `22` and can be changed. Verify the host fingerprint shown on the first SSH connection before accepting it.
 
-Home action buttons and quick options use a minimum height of 48 and corner radius of 12. Action spacing is 8. Quick options share a continuous background, with a rounded theme-colored highlight around the selection. Narrow screens or large text can stack options vertically; text and button height adapt to their content.
+Continue detects proxy software and core and preselects the software in Preferences. Unidentified software uses Mihomo generic configuration. You can change the choice manually or save setup and connect later. Proxy software in Advanced options can be changed at any time, including while offline.
 
-Cards use padding and corner radii of 16, spacing of 12, and a common left title baseline. Current configuration places refresh separately from file information, leaving room for full paths to wrap. Overview retains its statistics, charts, and time markers. All six titles contain only the name, without subtitles; necessary state, path, and setting explanations remain in the content. Subscription names and traffic align by text baseline; state values and switches align right. Quick-setting groups share consistent text spacing. Editing instructions and the restore button use separate lines to avoid crowding on narrow screens with large text.
+Detection runs on cold launch, return from the background, and after saving connection settings. An uncertain result retains a confirmed choice. When manual confirmation is needed, the selection sheet appears only on Home with a connected controller; connection failure does not open it.
 
-Fake-IP / Redir-Host options appear directly under Quick settings, without the former base-mode label. Switching preserves the current compatibility/enhanced, TUN, or mixed variant and uses UCI persistence, a coordinated OpenClash restart, health checks, and mode readback. Selection is disabled before loading, for unknown modes, after read failures, or while busy. A failed save does not start a restart; after a successful save but failed restart, the restart button can resume recovery.
+## Home
 
-## Proxy software detection and adapters
+The default order is Status, Traffic, Overview, Current configuration, Operations, and Quick settings. Status shows software, core version, and connection state. Traffic and Overview show usage, speeds, and connection counts.
 
-The app silently identifies proxy software and core after each cold launch reaches the main screen and when returning from the background. Recognition is not part of periodic home polling. Only returning after `hidden/paused` triggers another pass; a temporary `inactive` interruption does not. Setup and Settings have no software selector or recognition button. “Check connection” only validates the controller API, without an SSH probe. Saving changed connection settings also requests recognition.
+Open Customize home at the bottom, long-press and drag to reorder, and use switches to show or hide cards. Changes save locally. Restore defaults resets order and visibility. Customize home remains available even when every card is hidden.
 
-SSH uses the entered port and password with the existing host fingerprint confirmation. OpenClash and Nikki require a running service and matching controller port; the core version alone does not identify the manager. If recognition remains uncertain, Home presents the app’s standard bottom options sheet with OpenClash, Nikki, and Clash API. The sheet waits until Home is visible, the app is in the foreground, and recognition is complete. Choices are saved for the current connection and retained when later probes fail. Results and choices from a changed connection are rejected and the new connection is processed again.
+Layout preferences are shared across proxy software. Unsupported cards and options are hidden from Home and Customize home. Cards return to their saved positions when available again; cards never arranged before follow the arranged cards. Switching software does not reveal manually hidden cards.
 
-Home and Customize home only list cards supported by the selected software. Unsupported cards and individual controls are omitted. Changing adapters preserves saved order and visibility. Clash API mode keeps status, traffic, proxy mode, and connection operations, without dedicated YAML management or SSH restart. The bundled Zashboard shares the Clash/Mihomo API bridge and does not depend on OpenClash web directories.
+## Adapter support
 
-Initial Nikki support includes local YAML management, active profile and subscription identification, restart, DNS mode, Redirect/TPROXY/TUN combinations, proxy mode, sniffing, and DNS respect-rules. Area bypass and automatic streaming unlock have no adapter yet and are omitted. Quick settings are omitted in core-only mode or when a mixin file can override UCI settings. Local profiles use `/etc/nikki/profiles`; `/etc/nikki/subscriptions` is read-only cached content. Upload and activate a local profile to edit subscription content. The generated `/etc/nikki/run/config.yaml` is never edited as a user profile.
+| Feature | OpenClash | Nikki | Mihomo generic configuration |
+| --- | --- | --- | --- |
+| Status, traffic, proxies, rules, connection operations | Supported | Supported | Subject to controller API support |
+| Proxy mode | Supported | Supported | Supported |
+| DNS mode, traffic handling, bypass, sniffing, DNS respect-rules | Supported | Supported with the limits below | No dedicated settings |
+| Streaming auto-selection | When supported by the device | Unsupported | Unsupported |
+| YAML management and service restart | Supported | Supported; subscription caches are read-only | Unsupported |
 
-Nikki quick changes validate the original configuration digest and pending changes, prepare a private candidate, replace the configuration, then restart and verify. Unconfirmed writes are not replayed automatically. Restart retries after a confirmed save skip persistence. Connection changes require refreshing before retrying. This initial adapter does not cover all Nikki LuCI options and still requires verification on a real router.
+Software without a dedicated adapter uses Mihomo generic configuration. Software and core are displayed separately; a Mihomo core does not imply OpenClash management.
 
-## YAML configuration
+### Nikki
 
-- Current configuration shows the active OpenClash filename and path; subscriptions and states without a local file use the existing detection logic.
-- Switch configuration opens a bottom sheet. Selecting a file still requires confirmation, then saves the active reference, restarts, and verifies activation.
-- Edit configuration opens the editor directly. The filename at the top selects another YAML document for editing; it does not change the running configuration.
-- The top-right file menu provides upload, rename, export, and delete. Uploading over an existing file requires confirmation. Export includes the current editing buffer and does not automatically write to the router.
-- Delete requires confirmation and discards unsaved content. Failure keeps the buffer; success lets you select another YAML. The active file, including subscription-generated configuration, cannot be deleted until you switch away. Unknown active state also blocks deletion.
-- Before switching away from unsaved text, save, discard, or cancel. Renaming preserves the buffer; subsequent saves use the new path.
-- Rename checks remote canonical paths and does not confuse same-named files in different directories. Switch away before renaming an active subscription file. Unknown active state blocks renaming.
-- On exit, the editor rereads the active configuration and offers an OpenClash restart only if a save or upload during this session overwrote that file. Editing or uploading another YAML does not prompt a restart.
-- If the active configuration cannot be confirmed, the app suggests a manual restart if needed and still allows leaving the editor.
+- TCP/UDP handling uses combinations of Redirect, TPROXY, and TUN as presets.
+- Mainland bypass enables mainland IPv4 and IPv6 bypass together; Off disables both. If their current values differ, either choice sets them to the same value.
+- Core-only mode hides quick settings. With mixin-file overrides, only area bypass remains available.
+- Local profiles use `/etc/nikki/profiles`. Subscription caches under `/etc/nikki/subscriptions` are read-only; upload and activate a local profile to modify the content. The generated `/etc/nikki/run/config.yaml` is not an editing target.
 
-File operations retain SSH/SFTP, host-fingerprint confirmation, path and size restrictions, and rename rollback. YAML reads bound both the remote request length and actual accumulated bytes; growth during a read cannot bypass the 5 MiB limit.
+The adapter does not cover every Nikki LuCI option. Available quick settings depend on the device's current configuration.
 
-File operations check the SFTP handshake. After failure, the current SSH connection checks OpenWrt component status. When the component is confirmed missing, the editor offers installation and recheck. Before installation, the router address and command are shown and explicit user confirmation is required. Automatic installation requires root, detects opkg or apk, refreshes its package index, and installs `openssh-sftp-server`.
+## YAML management
 
-SFTP is checked again after installation. A previously unread file is reloaded; unsaved text is retained so the user can save again. A timeout or disconnect leaves installation status uncertain: recheck before starting another install. If the component is present but the handshake fails, check the SSH SFTP configuration. Ordinary network or authentication errors are not treated as a missing component. Detection happens only during file operations and adds no background polling. A file that failed to load cannot be saved.
+Current configuration shows the active configuration. Switching requires selecting a file and confirming; the app saves the reference, restarts the proxy service, and verifies the result. A restart may interrupt existing connections.
 
-## Refresh and recovery
+Edit configuration opens the editor. The filename at the top selects a document to edit without activating it. The top-right file menu provides upload, rename, export, and delete.
 
-Home reuses the shared realtime source and restart coordinator. Runtime data refreshes every second; subscriptions refresh independently every 30 seconds. Current configuration and quick settings share one SSH connection per cycle, checking every 5 seconds initially or after failure and every 15 seconds once successful. Manual refresh, reconnection and completed operations still trigger immediate reads. Hidden cards do not request their associated periodic reads. Home polling pauses when changing tabs, opening the editor, or backgrounding the app, then refreshes on return. In-flight reads are combined; results predating settings changes cannot replace current state.
+| Operation | Notes |
+| --- | --- |
+| Save | Writes the current file; on exit, changes to the active configuration can be followed by a service restart |
+| Upload | Overwriting requires confirmation; uploading another file does not activate it |
+| Export | Includes unsaved edits without writing to the router |
+| Rename | Preserves edits; switch away before renaming an active subscription file |
+| Delete | Requires confirmation; the active configuration cannot be deleted, and an unknown active state blocks deletion and renaming |
+| Switch editing file | Save, discard, or cancel when there are unsaved edits |
 
-A single top-right loading indicator combines initial reads and active operations. Cards retain status text and disabled buttons; Overview layout is unchanged. Periodic refreshes with existing data do not show the indicator.
+Only `.yaml` / `.yml` files in supported directories are handled, up to `5 MiB` each. OpenClash supports `/etc/openclash/config`, `/openclash/config`, `/etc/clash/config`, and `/root/.config/clash/config`; uploads go to `/etc/openclash/config`. Files that failed to load cannot be saved.
 
-On an offline cold start, automatic configuration and quick-setting failures stay within their cards instead of repeatedly showing error notices. Returning online immediately rereads YAML and quick settings. Old pre-disconnect results cannot overwrite recovered state or create duplicate reads.
+### SFTP unavailable
 
-Proxy, web Connections, and the standalone console distinguish unreachable networks, authentication failures, and panel initialization failures. Offline pages retain a message and retry button. Only the visible foreground offline page probes the controller every ten seconds and reloads on recovery; authentication and script failures do not automatically retry. iOS local-network permission is a troubleshooting suggestion, not an automatic diagnosis of every outage.
+Listing files uses SSH; reading and writing use SFTP. If files appear but cannot be opened, use the editor's SFTP diagnosis. When an OpenWrt component is confirmed missing, review and confirm the command to install `openssh-sftp-server` through `opkg` or `apk`. Root access is required.
 
-Home and web pages share connection observations from existing API and bridge requests, without additional permanent polling. During restarts they show a consistent restart message and ignore old results. After recovery, visible panels rebuild their services; hidden panels recover when shown. Concurrent recovery probes share a request. HTTP and WebSocket bridges both refuse upstream redirects.
+After an installation timeout or disconnect, recheck before retrying. If the component is present but the handshake fails, check SSH's SFTP configuration. Network and authentication failures do not imply a missing component.
 
-After an SSH timeout or disconnect, quick settings attempt transaction recovery. If the remote operation is still running or recovery cannot be verified, the result remains unconfirmed; old values are not presented as current. The native connection list removes a connection only after the controller confirms closure; failure retains the record and offers retry.
+## Refresh and troubleshooting
+
+Home refreshes while visible in the foreground. Runtime data updates about every second, subscriptions every 30 seconds, and configuration and quick settings every 15 seconds after successful reads. Manual refresh and reconnection trigger an immediate read. Changing tabs or backgrounding pauses the relevant polling.
+
+| Symptom | Action |
+| --- | --- |
+| Cannot connect | Check the network, controller address, port, and `external-controller`; on iOS, also check Local Network permission |
+| Authentication failed | Check the controller secret; for SSH, separately verify password, port, and host fingerprint |
+| Web panel failed to load | Retry; a visible foreground offline page checks for recovery automatically, while authentication errors require corrected settings |
+| Settings saved but restart failed | Retry through the restart control; confirmed saves do not need another write |
+| Operation result unconfirmed | Check the router's actual state and refresh before retrying to avoid duplicate operations |
+
+See the [Zashboard guide](bundled-zashboard.en.md) for layout, imports, and updates.

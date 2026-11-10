@@ -112,7 +112,7 @@ void main() {
     );
     expect(find.byType(AppLanguagePicker), findsOneWidget);
     expect(find.byIcon(Icons.language_rounded), findsOneWidget);
-    expect(find.byIcon(Icons.arrow_drop_down_rounded), findsOneWidget);
+    expect(find.byIcon(Icons.play_arrow_rounded), findsOneWidget);
 
     final closedContainer = tester.widget<Container>(
       find
@@ -126,7 +126,7 @@ void main() {
     expect(decoration.border, isA<Border>());
     expect(decoration.borderRadius, BorderRadius.circular(12));
 
-    await tester.tap(find.byIcon(Icons.arrow_drop_down_rounded));
+    await tester.tap(find.byIcon(Icons.play_arrow_rounded));
     await tester.pumpAndSettle();
 
     expect(find.byType(ListTile), findsNWidgets(2));

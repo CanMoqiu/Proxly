@@ -7,6 +7,8 @@ import '../services/ssh_host_trust_service.dart';
 import '../services/web_panel_service.dart';
 import '../services/web_panel_update_session.dart';
 import '../services/app_platform.dart';
+import '../services/connection_settings_store.dart';
+import '../services/router_tool.dart';
 import '../theme/app_theme.dart';
 import '../widgets/adaptive_ui.dart';
 import '../widgets/app_feedback.dart';
@@ -27,11 +29,15 @@ class _DeveloperOptionsPageState extends State<DeveloperOptionsPage> {
   String _webPanelVersion = WebPanelService.builtinVersion;
   final _panelUpdate = WebPanelUpdateSession.instance;
   bool _loaded = false;
+  RouterTool? _routerTool;
+  int _toolGeneration = 0;
+  bool _choosingRouterTool = false;
 
   @override
   void initState() {
     super.initState();
     _panelUpdate.addListener(_handlePanelUpdate);
+    ConnectionSettingsStore.instance.addListener(_loadRouterTool);
     _loadSettings();
   }
 
@@ -48,12 +54,14 @@ class _DeveloperOptionsPageState extends State<DeveloperOptionsPage> {
   @override
   void dispose() {
     _panelUpdate.removeListener(_handlePanelUpdate);
+    ConnectionSettingsStore.instance.removeListener(_loadRouterTool);
     super.dispose();
   }
 
   Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
     final webPanelVersion = await WebPanelService.getActiveVersion();
+    await _loadRouterTool();
     if (mounted) {
       setState(() {
         _showBall = prefs.getBool('show_floating_ball') ?? false;
@@ -65,6 +73,59 @@ class _DeveloperOptionsPageState extends State<DeveloperOptionsPage> {
       });
     }
     _loadTrustedSshHosts();
+  }
+
+  Future<void> _loadRouterTool() async {
+    final generation = ++_toolGeneration;
+    try {
+      final tool = await ConnectionSettingsStore.instance.loadRouterTool();
+      if (mounted && generation == _toolGeneration) {
+        setState(() => _routerTool = tool);
+      }
+    } catch (_) {
+      // Optional identity display must not block the other settings.
+    }
+  }
+
+  Future<void> _chooseRouterTool() async {
+    if (_choosingRouterTool) return;
+    setState(() => _choosingRouterTool = true);
+    try {
+      final store = ConnectionSettingsStore.instance;
+      final identity = await store.loadRouterIdentity();
+      if (!mounted) return;
+      final selected = await AppPopup.sheet<RouterTool>(
+          context: context,
+          builder: (_) => AppOptionsSheet<RouterTool>(
+                title: tr('选择代理软件'),
+                description: tr('自动识别不准确时，可手动选择当前使用的软件。'),
+                selectedValue: identity.tool,
+                options: [
+                  for (final tool in RouterTool.values)
+                    AppSheetOption(
+                        value: tool,
+                        label: tr(tool.label),
+                        icon: Icons.hub_outlined,
+                        subtitle: tool == RouterTool.generic
+                            ? tr('仅使用通用控制器功能')
+                            : null)
+                ],
+              ));
+      if (!mounted || selected == null) return;
+      final saved = await store.selectRouterTool(selected,
+          expectedHost: identity.host, expectedRevision: identity.revision);
+      if (!saved && mounted) {
+        AppFeedback.showSnackBar(context, tr('连接已改变，请重新选择代理软件'),
+            tone: AppFeedbackTone.error);
+      }
+    } catch (_) {
+      if (mounted) {
+        AppFeedback.showSnackBar(context, tr('保存代理软件失败，请重试'),
+            tone: AppFeedbackTone.error);
+      }
+    } finally {
+      if (mounted) setState(() => _choosingRouterTool = false);
+    }
   }
 
   Future<void> _loadTrustedSshHosts() async {
@@ -282,35 +343,28 @@ class _DeveloperOptionsPageState extends State<DeveloperOptionsPage> {
                     Divider(height: 0, color: cardBorder),
                     Padding(
                       padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  tr('应用语言'),
-                                  style: TextStyle(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w500,
-                                    color: textColor,
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  tr('语言切换会立即应用，并同步内置 Zashboard 面板。'),
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    color: hintColor,
-                                    height: 1.4,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          const AppLanguagePicker(compact: true),
-                        ],
+                      child: AppSettingPickerRow(
+                        title: tr('应用语言'),
+                        description: tr('语言切换会立即应用，并同步内置 Zashboard 面板。'),
+                        picker: const AppLanguagePicker(compact: true),
+                      ),
+                    ),
+                    Divider(height: 0, color: cardBorder),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
+                      child: AppSettingPickerRow(
+                        title: tr('代理软件'),
+                        description: tr('自动识别不准确时，可手动选择当前使用的软件。'),
+                        picker: AppSelectionPicker(
+                          key: const ValueKey('advanced_router_tool'),
+                          label: _routerTool == null
+                              ? '--'
+                              : tr(_routerTool!.label),
+                          tooltip: tr('选择代理软件'),
+                          icon: Icons.hub_outlined,
+                          compact: true,
+                          onTap: _choosingRouterTool ? null : _chooseRouterTool,
+                        ),
                       ),
                     ),
                     Divider(height: 0, color: cardBorder),

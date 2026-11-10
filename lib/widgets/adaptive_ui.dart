@@ -48,6 +48,86 @@ class AdaptiveSingleLineText extends StatelessWidget {
   }
 }
 
+class AppSelectionPicker extends StatelessWidget {
+  const AppSelectionPicker(
+      {super.key,
+      required this.label,
+      required this.icon,
+      required this.tooltip,
+      required this.onTap,
+      this.compact = false,
+      this.arrow = Icons.play_arrow_rounded});
+  final String label, tooltip;
+  final IconData icon, arrow;
+  final VoidCallback? onTap;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    final foreground = Theme.of(context).colorScheme.onSurface;
+    return Tooltip(
+        message: tooltip,
+        child: Material(
+          type: MaterialType.transparency,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(12),
+            onTap: onTap,
+            child: Container(
+              padding: EdgeInsets.symmetric(
+                  horizontal: compact ? 10 : 12, vertical: compact ? 8 : 10),
+              decoration: BoxDecoration(
+                  border: Border.all(color: foreground.withValues(alpha: 0.18)),
+                  borderRadius: BorderRadius.circular(12)),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(icon, size: 18, color: foreground),
+                const SizedBox(width: 8),
+                Flexible(
+                    child: AdaptiveSingleLineText(label,
+                        style: TextStyle(
+                            fontSize: 12, letterSpacing: 0, color: foreground),
+                        alignment: Alignment.centerLeft,
+                        textAlign: TextAlign.left)),
+                const SizedBox(width: 4),
+                Icon(arrow, size: 18, color: foreground),
+              ]),
+            ),
+          ),
+        ));
+  }
+}
+
+class AppSettingPickerRow extends StatelessWidget {
+  const AppSettingPickerRow(
+      {super.key,
+      required this.title,
+      required this.description,
+      required this.picker});
+  final String title, description;
+  final Widget picker;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = AppPalette.of(context);
+    return Row(children: [
+      Expanded(
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(title,
+            style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+                color: palette.textPrimary)),
+        const SizedBox(height: 4),
+        Text(description,
+            style: TextStyle(
+                fontSize: 11, color: palette.textSecondary, height: 1.4)),
+      ])),
+      const SizedBox(width: 12),
+      Expanded(child: Align(alignment: Alignment.centerRight, child: picker)),
+    ]);
+  }
+}
+
 class AdaptiveMarqueeText extends StatefulWidget {
   final String text;
   final TextStyle? style;

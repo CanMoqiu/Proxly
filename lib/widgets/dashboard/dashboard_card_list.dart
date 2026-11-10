@@ -66,8 +66,9 @@ class _DashboardCardListState extends State<DashboardCardList> {
       DashboardCardId.operations,
       DashboardCardId.quickSettings
     };
-    final ids = (editing ? layout.order : layout.visible)
-        .where((id) => !widget.unavailable.contains(id))
+    final ids = layout
+        .availableOrder(unavailable: widget.unavailable)
+        .where((id) => editing || layout.isVisible(id))
         .where((id) =>
             editing || widget.sshTrustNotice == null || !sshCards.contains(id))
         .toList();
@@ -78,8 +79,8 @@ class _DashboardCardListState extends State<DashboardCardList> {
       padding: AdaptiveScrollPadding.page(context, top: 16),
       onReorder: (oldIndex, newIndex) {
         if (editing) {
-          widget.onSave(layout.reorder(layout.order.indexOf(ids[oldIndex]),
-              layout.order.indexOf(ids[newIndex])));
+          widget.onSave(layout.reorder(oldIndex, newIndex,
+              unavailable: widget.unavailable));
         }
       },
       footer: Padding(

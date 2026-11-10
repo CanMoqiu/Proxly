@@ -1,4 +1,7 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:proxly/services/connection_settings_store.dart';
 import 'package:proxly/services/router_detection_service.dart';
 import 'package:proxly/services/router_tool.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -7,11 +10,12 @@ import 'package:proxly/pages/setup_wizard_page.dart';
 import 'package:proxly/theme/app_theme.dart';
 import 'package:proxly/widgets/adaptive_ui.dart';
 import 'package:proxly/widgets/keyboard_focus_reveal.dart';
+import 'package:proxly/widgets/app_popup.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   testWidgets(
-      'setup has no software selector and continue does not identify software',
+      'next detects software before preferences and preserves a manual choice',
       (tester) async {
     SharedPreferences.setMockInitialValues({'app_language': 'en'});
     await AppLocaleController.instance.load();
@@ -26,17 +30,182 @@ void main() {
         child: MaterialApp(
             theme: AppTheme.light(),
             home: SetupWizardPage(detectionService: service))));
+    final language = find.byType(AppLanguagePicker);
+    expect(
+        find.descendant(
+            of: language, matching: find.byIcon(Icons.play_arrow_rounded)),
+        findsOneWidget);
+    expect(tester.getRect(language).right,
+        closeTo(tester.getRect(find.byType(SetupWizardPage)).right - 32, 0.01));
     await tester.tap(find.text('Get started'));
     await tester.pumpAndSettle();
     expect(find.byType(DropdownButtonFormField<RouterTool>), findsNothing);
     expect(find.text('Identify proxy software and core'), findsNothing);
+    final selector = find.byKey(const ValueKey('setup_router_tool'));
+    expect(selector, findsNothing);
     await tester.enterText(find.byType(TextField).first, 'router.local:9090');
+    await tester.ensureVisible(find.byType(TextField).last);
+    await tester.enterText(find.byType(TextField).last, 'test-only-password');
     await tester.tap(find.text('Continue'));
     await tester.pumpAndSettle();
     expect(find.text('Preferences'), findsOneWidget);
-    expect(calls, 0);
+    expect(selector, findsOneWidget);
+    final pickerRect = tester.getRect(selector);
+    final pickerRow =
+        find.ancestor(of: selector, matching: find.byType(AppSettingPickerRow));
+    expect(pickerRect.right, closeTo(tester.getRect(pickerRow).right, 0.01));
+    expect(tester.getRect(find.text('Proxy software')).right,
+        lessThan(pickerRect.left));
+    expect(
+        tester
+            .getRect(find.text(
+                'Selected from your connection; you can change it manually'))
+            .right,
+        lessThan(pickerRect.left));
+    expect(
+        find.descendant(
+            of: selector, matching: find.byIcon(Icons.play_arrow_rounded)),
+        findsOneWidget);
+    expect(tester.getTopLeft(find.text('Appearance')).dy,
+        lessThan(tester.getTopLeft(find.text('Proxy software')).dy));
+    expect(tester.getTopLeft(find.text('Proxy software')).dy,
+        lessThan(tester.getTopLeft(find.text('Connections page display')).dy));
+    await tester.ensureVisible(selector);
+    await tester.tap(selector);
+    await tester.pumpAndSettle();
+    expect(
+        tester
+            .widget<AppOptionsSheet<RouterTool>>(
+                find.byType(AppOptionsSheet<RouterTool>))
+            .selectedValue,
+        RouterTool.nikki);
+    expect(service.lastHost, 'router.local:9090');
+    expect(service.lastPassword, 'test-only-password');
+    expect(service.lastPort, 22);
+    await tester.tap(find.text('OpenClash'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Back'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
+    expect(find.text('Preferences'), findsOneWidget);
+    expect(find.text('OpenClash'), findsOneWidget);
+    await tester.tap(selector);
+    await tester.pumpAndSettle();
+    final options = tester.widget<AppOptionsSheet<RouterTool>>(
+        find.byType(AppOptionsSheet<RouterTool>));
+    expect(options.options.map((option) => option.value), RouterTool.values);
+    expect(find.text('Automatic detection'), findsNothing);
+    await tester.tap(find.text('Mihomo generic configuration'));
+    await tester.pumpAndSettle();
+    expect(find.text('Mihomo generic configuration'), findsOneWidget);
+    expect(calls, 2);
     await tester.pumpWidget(const SizedBox());
   });
+
+  testWidgets(
+      'old detection cannot advance changed inputs or duplicate requests',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({'app_language': 'en'});
+    await AppLocaleController.instance.load();
+    final response = Completer<RouterDetectionResult>();
+    var calls = 0;
+    final detector = _Detection(() async {
+      calls++;
+      if (calls == 1) return response.future;
+      throw StateError('offline');
+    });
+    await tester.pumpWidget(AppLocaleScope(
+        controller: AppLocaleController.instance,
+        child: MaterialApp(
+            theme: AppTheme.light(),
+            home: SetupWizardPage(detectionService: detector))));
+    await tester.tap(find.text('Get started'));
+    await tester.pumpAndSettle();
+    final address = find.byType(TextField).first;
+    await tester.enterText(address, 'old-router.local:9090');
+    final nextPosition = tester.getCenter(find.text('Continue'));
+    await tester.tapAt(nextPosition);
+    await tester.pump();
+    expect(calls, 1);
+    expect(find.text('Preferences'), findsNothing);
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    await tester.tapAt(nextPosition);
+    await tester.pump();
+    expect(calls, 1);
+    await tester.enterText(address, 'new-router.local:9090');
+    response.complete(const RouterDetectionResult(
+        tool: RouterTool.nikki, core: ProxyCore.mihomo, version: 'old'));
+    await tester.pumpAndSettle();
+    expect(find.text('Preferences'), findsNothing);
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
+    expect(calls, 2);
+    expect(find.text('Preferences'), findsOneWidget);
+    expect(find.text('Mihomo generic configuration'), findsOneWidget);
+    expect(find.byType(AppOptionsSheet<RouterTool>), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  for (final choice in [RouterTool.nikki, RouterTool.generic, null]) {
+    testWidgets('finishing setup persists software choice $choice',
+        (tester) async {
+      SharedPreferences.setMockInitialValues(
+          {'app_language': 'en', 'automatic_update_check_enabled': false});
+      const channel =
+          MethodChannel('plugins.it_nomads.com/flutter_secure_storage');
+      final secrets = <String, String>{};
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel,
+          (call) async {
+        final args = Map<String, dynamic>.from(call.arguments as Map);
+        if (call.method == 'write') secrets[args['key']] = args['value'];
+        if (call.method == 'read') return secrets[args['key']];
+        return null;
+      });
+      addTearDown(() => tester.binding.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, null));
+      await AppLocaleController.instance.load();
+      final detector = _Detection(() async {
+        if (choice == null) throw StateError('offline');
+        return RouterDetectionResult(
+            tool: choice, core: ProxyCore.mihomo, version: 'test');
+      });
+      await tester.pumpWidget(AppLocaleScope(
+          controller: AppLocaleController.instance,
+          child: MaterialApp(
+              theme: AppTheme.light(),
+              home: SetupWizardPage(detectionService: detector))));
+      await tester.tap(find.text('Get started'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField).first, 'router.local:9090');
+      await tester.tap(find.text('Continue'));
+      await tester.pumpAndSettle();
+      if (choice != null) {
+        final selector = find.byKey(const ValueKey('setup_router_tool'));
+        await tester.ensureVisible(selector);
+        await tester.tap(selector);
+        await tester.pumpAndSettle();
+        await tester.tap(find.descendant(
+            of: find.byType(AppOptionsSheet<RouterTool>),
+            matching: find.text(tr(choice.label))));
+        await tester.pumpAndSettle();
+      }
+      await tester.tap(find.text('Finish setup'));
+      final prefs = await SharedPreferences.getInstance();
+      for (var i = 0; i < 30 && prefs.getString('clash_host') == null; i++) {
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+      final saved = await ConnectionSettingsStore.instance.load();
+      expect(saved.host, 'router.local:9090');
+      expect(saved.routerTool, choice ?? RouterTool.generic);
+      expect(saved.core, choice == null ? ProxyCore.unknown : ProxyCore.mihomo);
+      expect(prefs.getBool('router_tool_confirmed'), isTrue);
+      expect(prefs.getBool('router_tool_selection_pending'), isFalse);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(const Duration(seconds: 4));
+      expect(tester.takeException(), isNull);
+    });
+  }
 
   testWidgets('keyboard reveals setup inputs without lifting navigation',
       (tester) async {
@@ -235,11 +404,17 @@ void main() {
 class _Detection extends RouterDetectionService {
   _Detection(this.result);
   final Future<RouterDetectionResult> Function() result;
+  String? lastHost, lastPassword;
+  int? lastPort;
   @override
   Future<RouterDetectionResult> detect(
-          {required String host,
-          required String token,
-          required String sshPassword,
-          required int sshPort}) =>
-      result();
+      {required String host,
+      required String token,
+      required String sshPassword,
+      required int sshPort}) {
+    lastHost = host;
+    lastPassword = sshPassword;
+    lastPort = sshPort;
+    return result();
+  }
 }

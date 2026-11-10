@@ -1,127 +1,60 @@
 <div align="center">
   <img src="proxly-icon.png" width="96" alt="Proxly icon" />
   <h1>Proxly</h1>
-  <p><strong>An Android and iOS monitoring and management client for user-operated router proxy environments</strong></p>
-  <p>Provides runtime status, proxy connections, and configuration management through the Clash API, bundled Zashboard, and SSH/SFTP.</p>
+  <p><strong>An Android and iOS client for router proxy management</strong></p>
+  <p>Monitor status, switch proxies, inspect rules and connections, and manage YAML configurations.</p>
 
-  [![Latest Release](https://img.shields.io/github/v/release/CanMoqiu/proxly?label=release)](https://github.com/CanMoqiu/proxly/releases/latest)
-  [![Platform](https://img.shields.io/badge/platform-Android%20%26%20iOS-3DDC84?logo=android&logoColor=white)](#compatibility-and-limits)
-  [![Flutter](https://img.shields.io/badge/Flutter-stable-02569B?logo=flutter&logoColor=white)](https://flutter.dev/)
+  [![Latest release](https://img.shields.io/github/v/release/CanMoqiu/proxly?label=release)](https://github.com/CanMoqiu/proxly/releases/latest)
+  [![Platform](https://img.shields.io/badge/platform-Android%20%26%20iOS-3DDC84?logo=android&logoColor=white)](#requirements)
   [![License](https://img.shields.io/github/license/CanMoqiu/proxly)](LICENSE)
 
-  [GitHub Releases](https://github.com/CanMoqiu/proxly/releases) · **English** · [简体中文](README.md)
+  [Downloads](https://github.com/CanMoqiu/proxly/releases) · [Documentation](docs/README.en.md) · [简体中文](README.md)
 </div>
 
-## Documentation and discussion
+Proxly connects to your own OpenClash, Nikki, or compatible Clash/Mihomo API controller. It combines a native interface, bundled Zashboard, and SSH/SFTP for device management. It does not include a proxy core, provide nodes or subscriptions, or forward traffic.
 
-[Documentation](docs/README.en.md) · [Contributing](CONTRIBUTING.en.md) · [Security policy](SECURITY.en.md) · [Issues and usage questions](https://github.com/CanMoqiu/Proxly/issues/new/choose)
+## Getting started
 
-Repository documentation and entry points default to Simplified Chinese, with complete English counterparts. Original licenses remain intact, with a [Chinese translation](LICENSE.zh-CN.md) available.
+1. Download a package from [Releases](https://github.com/CanMoqiu/proxly/releases). For iPhone and iPad, follow the [iOS installation guide](docs/ios-selfsign.en.md).
+2. Enter the controller address and secret. For configuration management, also enter the SSH password and port (default `22`).
+3. Select Continue to detect the proxy software and preselect it in Preferences. Unidentified software uses Mihomo generic configuration; you can also choose manually. Finish Preferences to open Home.
 
-## Overview
-
-Android and iOS share the `main` branch, Flutter 3.47.5 and a common version number. Download official packages from Releases. To build your own copy, manually run GitHub Actions in a repository where you have permission to produce a signed Android APK and an unsigned Release IPA for self-signing on iOS 18+ iPhones and iPads. See the [shared build guide](docs/mobile-builds.en.md) and [iPhone installation guide](docs/ios-selfsign.en.md).
-
-Proxly is a Flutter-based Android and iOS client that connects to an OpenClash / Mihomo controller deployed and administered by the user. It combines the Clash REST API, a bundled Zashboard web panel, and SSH/SFTP-based OpenClash configuration management.
-
-Proxly does not contain the Clash or Mihomo proxy core and does not supply proxy nodes, subscriptions, network access, or traffic forwarding. The data displayed and actions executed by the app originate from the controller and OpenClash device configured by the user.
+You can later edit connection details in Settings, and change proxy software, language, or the Connections view in Advanced options. See the [user guide](docs/dashboard.en.md).
 
 ## Features
 
-| Area | Function |
+| Feature | Description |
 | --- | --- |
-| Home dashboard | Reorder, show, and hide cards with a locally saved layout; retains the existing runtime overview structure |
-| Runtime overview | Reads the core version, online state, live speeds, cumulative traffic, active connections, and proxy-provider traffic information |
-| Proxy panel | Uses the bundled Zashboard to display proxy nodes, proxy groups, and rules, and synchronizes the web pages after app theme, language, or controller changes |
-| Connections | Provides a native connection list and a mobile Zashboard view for connection metadata, proxy chains, and matched rules |
-| Home quick settings | Exposes OpenClash run mode, proxy mode, region bypass, domain sniffing, DNS rule handling, and streaming auto-selection settings |
-| Maintenance | Restarts OpenClash, flushes the Clash DNS cache, and closes all current proxy connections |
-| YAML management | Switches the active configuration in a bottom sheet; selects, edits, uploads, renames, exports, and deletes YAML within the editor using the existing SSH/SFTP checks |
-| Zashboard settings | Imports structurally validated and conflict-filtered Zashboard JSON settings, then reloads the active proxy, connection, and console WebViews |
-| Updates | Checks application and Zashboard releases on GitHub; Android updates use APK assets; iOS opens GitHub Releases for manual installation; panel updates require a release archive with a SHA-256 digest |
-| Interface | Supports Simplified Chinese, English, and system, light, or dark theme modes |
+| Home | Runtime status, software and core versions, live traffic, connection overview, and subscription usage; reorder or hide cards |
+| Proxies and rules | Bundled Zashboard for proxy and group selection, rule inspection, and a standalone console |
+| Connections | Native list or web panel; web Connections uses cards on phones and tablets with automatically saved content customization |
+| Quick settings | Adjust proxy mode, DNS, traffic handling, bypass, and other supported settings |
+| Configuration | Switch, edit, upload, rename, export, and delete supported YAML files |
+| Maintenance and updates | Restart proxy services, flush DNS caches, close connections, and update the app or dashboard |
+| Interface | Simplified Chinese and English; system, light, and dark themes; portrait and landscape on tablets |
 
-See the [dashboard guide](docs/dashboard.en.md) for layout and YAML operations.
+OpenClash and Nikki have dedicated adapters. Other compatible controllers use Mihomo generic configuration, which provides controller API features without SSH configuration management or service restart. Unsupported features are hidden while saved Home preferences are retained. See [adapter support](docs/dashboard.en.md#adapter-support).
 
-## Technical architecture
+## Requirements
 
-```mermaid
-flowchart LR
-    UI[Flutter native UI] --> Hub[Shared realtime data layer]
-    Hub --> API[Clash REST API]
-    UI --> Web[Local Zashboard WebView]
-    Web --> API
-    UI --> SSH[SSH / SFTP service]
-    SSH --> OC[OpenClash / UCI / YAML]
-    UI --> Store[Local preferences and platform secure storage]
-    UI --> Release[GitHub Releases]
-```
+- **Android 7.0+**: ARM64 and x86_64 only. Use 26.8 on a 32-bit Android system.
+- **iOS 18+**: iPhone and iPad.
+- **Controller**: enable `external-controller` and use a LAN IP or hostname reachable from your device. The default port is `9090`. If `secret` is configured, enter the same secret in the app.
+- **SSH/SFTP**: OpenClash and Nikki configuration management and service restart require SSH access as `root`. Reading and writing YAML files also requires SFTP.
 
-| Layer | Implementation |
-| --- | --- |
-| Native UI | Flutter Material components implement setup, home, native connections, settings, customizable home cards, and YAML editor screens |
-| Realtime data | `ClashDataHub` combines connection, traffic, and proxy-provider requests and shares short-lived state across native pages |
-| Web panel | Zashboard static assets ship with the app and load from a local server; Proxy, Connections, and the standalone console own separate WebViews |
-| Web synchronization | `WebPanelSync` synchronizes theme, language, controller settings, and imported Zashboard data, then broadcasts reloads to live WebViews |
-| Controller transport | `ClashService` uses the Clash REST API for status, configuration, connection, DNS-cache, and connection-control operations |
-| Device management | `dartssh2` provides SSH and SFTP; OpenClash quick settings write restricted UCI options, and YAML operations are confined to configuration directories |
-| Local storage | `shared_preferences` stores interface and non-sensitive preferences; `flutter_secure_storage` stores the Clash secret, SSH password, and SSH host fingerprints |
-| Updates | Application and Zashboard checks keep separate in-process state; downloaded files are checked for format, size, and digest before installation or activation |
+Connection credentials and SSH host fingerprints use platform secure storage. First SSH connections and changed fingerprints require confirmation. YAML operations are restricted to supported directories and file sizes; imported settings and update packages are validated before use.
 
-## Compatibility and limits
+## Documentation and participation
 
-| Item | Current implementation |
-| --- | --- |
-| Platform | Android 7.0+ (ARM64, x86_64) and iOS 18+ iPhone / iPad; application ID / Bundle ID `top.canmoqiu.proxly` |
-| Clash address | Accepts localhost, private or link-local IP addresses, `.local` / `.lan` domains, and local hostnames; the default controller port is `9090` |
-| Clash API | The controller must expose `external-controller`; environments configured with a `secret` use the corresponding controller secret |
-| SSH | OpenClash settings, YAML management, and restart operations use the `root` account; the SSH port is configurable in setup or Settings and defaults to `22` |
-| YAML directories | `/etc/openclash/config`, `/openclash/config`, `/etc/clash/config`, and `/root/.config/clash/config` |
-| YAML files | Only `.yaml` and `.yml` files under a supported configuration directory are processed; each file is limited to `5 MB` |
-| Zashboard JSON | Maximum `5 MB`, `2,000` top-level keys, and `1 MB` per serialized value |
-| Zashboard ZIP | Maximum `50 MB` download, `2,000` entries, `20 MB` per file, `100 MB` extracted total, and `100:1` compression ratio |
-| Restart impact | Applying OpenClash settings, changing the active YAML, and some configuration operations require an OpenClash restart and may interrupt existing proxy connections |
+- [User guide](docs/dashboard.en.md): connections, Home, software support, YAML management, and troubleshooting.
+- [Zashboard](docs/bundled-zashboard.en.md): panel layout, settings import, and asset maintenance.
+- [Build guide](docs/mobile-builds.en.md): mobile packaging, Android signing, and package verification.
+- [Contributing](CONTRIBUTING.en.md): development environment, repository layout, and code and documentation conventions.
+- [Bug reports and feature requests](https://github.com/CanMoqiu/Proxly/issues/new/choose). Use [private reporting](SECURITY.en.md) for vulnerabilities.
 
-Android builds after 26.8 no longer support ARM32 devices; ARM64 and x86_64 remain supported. Devices running a 32-bit Android OS should stay on 26.8. See the [architecture and storage guide](docs/mobile-builds.en.md).
+## Technology and acknowledgements
 
-## Security mechanisms
-
-- The Clash controller secret, SSH password, and trusted SSH host records use platform secure storage; iOS uses device-only Keychain items accessible while unlocked.
-- A first SSH connection displays the host, port, algorithm, and SHA-256 fingerprint. A changed stored fingerprint requires another confirmation.
-- Android cloud backup and device-transfer backup are disabled, so connection credentials are not migrated through app backup.
-- Remote YAML paths are normalized and restricted to `.yaml` / `.yml` files under Clash / OpenClash `config` directories.
-- Zashboard archives are checked for digest, entry count, file size, total extracted size, compression ratio, duplicate paths, symbolic links, and directory traversal before extraction.
-- Zashboard JSON is subject to bounded reads, structural limits, and conflicting-key filtering before persistence. A failed validation does not replace the existing configuration.
-- Application updates validate the APK response, file size, and basic APK structure. A SHA-256 digest is also verified when supplied by GitHub Releases.
-
-## Repository layout
-
-```text
-lib/l10n/         Application language and interface translations
-lib/pages/        Native pages, WebView containers, and interactions
-lib/services/     Clash, SSH, OpenClash, update, and web-panel services
-lib/widgets/      Shared interface components
-assets/web_panel/ Bundled Zashboard static assets
-assets/icons/     Application interface icons
-android/          Android project configuration
-ios/              iPhone / iPad project configuration
-test/             Widget and service tests
-```
-
-## Core technologies and dependencies
-
-| Project | Purpose | License |
-| --- | --- | --- |
-| [Flutter](https://flutter.dev/) | Shared mobile interface and application lifecycle | BSD-3-Clause |
-| [Zashboard](https://github.com/Zephyruso/zashboard) | Clash web control panel | MIT |
-| [flutter_inappwebview](https://github.com/pichillilorenzo/flutter_inappwebview) | Embedded web-panel rendering and JavaScript integration | Apache-2.0 |
-| [dartssh2](https://github.com/TerminalStudio/dartssh2) | SSH, host-key verification, and SFTP | MIT |
-| [Re-Editor](https://pub.dev/packages/re_editor) | YAML text editing and syntax highlighting | MIT |
-| [flutter_secure_storage](https://pub.dev/packages/flutter_secure_storage) | Platform secure storage | BSD-3-Clause |
-| [archive](https://pub.dev/packages/archive) | Zashboard release archive parsing and extraction | BSD-3-Clause |
-| [http](https://pub.dev/packages/http) | Clash API and GitHub API requests | BSD-3-Clause |
-
-See [pubspec.yaml](pubspec.yaml) for declared dependencies and versions.
+Built with [Flutter](https://flutter.dev/), [Zashboard](https://github.com/Zephyruso/zashboard), [flutter_inappwebview](https://github.com/pichillilorenzo/flutter_inappwebview), [dartssh2](https://github.com/TerminalStudio/dartssh2), [Re-Editor](https://pub.dev/packages/re_editor), and other open-source projects. See [pubspec.yaml](pubspec.yaml) for dependencies and the [license index](docs/README.en.md#licenses) for licenses and third-party notices.
 
 ## Legal and service boundaries
 

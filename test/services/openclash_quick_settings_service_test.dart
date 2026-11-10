@@ -1291,6 +1291,7 @@ String _settingsOutput(OpenClashQuickSettings settings) {
     OpenClashAreaBypass.mainland => '1',
     OpenClashAreaBypass.overseas => '2',
     OpenClashAreaBypass.disabled => '0',
+    null => throw ArgumentError('Fixture requires a known area bypass mode'),
   };
   return '''
 en_mode=$runBase$runSuffix

@@ -6,7 +6,7 @@ enum RouterTool {
   String get label => switch (this) {
         openClash => 'OpenClash',
         nikki => 'Nikki',
-        generic => 'Clash API',
+        generic => 'Mihomo 通用配置',
       };
   bool get supportsSshManagement => this != generic;
   String get uciPackage => switch (this) {
