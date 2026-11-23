@@ -133,6 +133,40 @@ String _languageLabel(AppLanguage language) => switch (language) {
     };
 
 const _english = <String, String>{
+  '选择控制器': 'Select controller',
+  '控制器设置': 'Controller settings',
+  '名称': 'Name',
+  '代理后端': 'Proxy backend',
+  '自动识别': 'Detect automatically',
+  '控制器端口': 'Controller port',
+  '控制器端口必须为 1–65535 之间的整数':
+      'Controller port must be an integer between 1 and 65535',
+  'SSH 密钥': 'SSH secret',
+  '可选': 'Optional',
+  '切换': 'Switch',
+  '编辑': 'Edit',
+  '显示': 'Show',
+  '隐藏': 'Hide',
+  '已连接': 'Connected',
+  '设备离线': 'Device offline',
+  '请检查控制器密钥。': 'Check the controller secret.',
+  '远端操作完成后可切换设备。': 'You can switch devices when the remote operation finishes.',
+  '控制器响应无效，请检查端口。': 'Invalid controller response. Check the port.',
+  '新增设备': 'Add device',
+  '编辑设备': 'Edit device',
+  '删除设备': 'Delete device',
+  '设备名称': 'Device name',
+  '设备名称（可选）': 'Device name (optional)',
+  '留空时使用控制器地址作为名称': 'Leave blank to use the controller address',
+  '请填写设备名称': 'Enter a device name',
+  '设备名称已使用': 'This device name is already in use',
+  '无法切换设备，请稍后重试。': 'Could not switch devices. Try again shortly.',
+  '无法读取目标设备的凭据，请解锁后重试。':
+      'Unlock your device to access the saved credentials and try again.',
+  '无法删除设备，请重试。': 'Could not delete the device. Try again.',
+  '无法保存设备，请重试。': 'Could not save the device. Try again.',
+  '重新填写凭据': 'Enter replacement credentials',
+  'SSH 设置': 'SSH settings',
   '选择代理软件': 'Select proxy software',
   '未能自动识别代理软件，请选择当前使用的软件。':
       'Could not identify the proxy software automatically. Select the software you use.',
@@ -142,19 +176,17 @@ const _english = <String, String>{
       'Select a profile to activate, then confirm the service restart.',
   "代理软件": "Proxy software",
   'Mihomo 通用配置': 'Mihomo generic configuration',
+  'Mihomo / Clash通用配置': 'Mihomo / Clash generic configuration',
+  '通用配置': 'Generic config',
   '已根据连接自动选择，也可手动修改':
       'Selected from your connection; you can change it manually',
   '默认自动识别，也可手动选择当前使用的软件':
       'Detect automatically by default, or select the software you use',
-  '自动识别不准确时，可手动选择当前使用的软件。':
-      'Select the software you use if automatic detection is inaccurate.',
   '连接已改变，请重新选择代理软件':
       'The connection changed. Please select the proxy software again',
   'DNS 遵循规则': 'DNS respect rules',
   '当前 IPv4/IPv6 绕过设置不同，选择后将统一设置':
       'IPv4/IPv6 bypass settings differ. Selecting an option will set both.',
-  '同时设置大陆 IPv4/IPv6 流量绕过内核':
-      'Set bypass for mainland IPv4/IPv6 traffic together',
   "未识别内核": "Unidentified core",
   "正在识别...": "Detecting...",
   "识别代理软件和内核": "Identify proxy software and core",
@@ -214,8 +246,6 @@ const _english = <String, String>{
       'Current configuration unavailable. Check the router connection and SSH settings.',
   '快捷设置暂时无法刷新，请检查软路由连接和 SSH 设置。':
       'Quick settings could not refresh. Check the router connection and SSH settings.',
-  '若已连接正确网络，请检查系统设置中的 Proxly 局域网权限。':
-      'If you are on the correct network, check Proxly Local Network permission in system settings.',
   '已检测到 SFTP 组件，但服务不可用，请检查路由器 SSH 的 SFTP 配置。':
       'The SFTP component is installed, but unavailable. Check the router’s SSH SFTP configuration.',
   '路由器缺少 SFTP 组件，无法读写 YAML 文件。':
@@ -315,16 +345,10 @@ const _english = <String, String>{
   '无法打开链接，请检查浏览器设置': 'Could not open the link. Check your browser settings',
   '使用与支持': 'Help and support',
   'iOS 安装与更新': 'iOS installation and updates',
-  '下载 IPA、自签安装和覆盖更新说明': 'Download, sign and update your IPA',
   '问题反馈': 'Report an issue',
-  '请附版本信息、复现步骤和已脱敏的截图':
-      'Include version information, steps and screenshots with secrets removed',
   '项目源码': 'Source code',
-  'Proxly 的使用与分发许可': 'Terms for using and distributing Proxly',
   '开源致谢': 'Open-source acknowledgements',
   '第三方许可证': 'Third-party licenses',
-  'Flutter、依赖库、JetBrains Mono 与旗帜字体':
-      'Flutter, dependencies, JetBrains Mono and flag fonts',
   "通过自签安装新版": "Install new versions with your signing tool",
   "凭据暂时不可用，请解锁设备后重试。已保存的配置未被删除。":
       "Credentials are temporarily unavailable. Unlock the device and retry. Your saved settings have been preserved.",
@@ -415,7 +439,6 @@ const _english = <String, String>{
   '等待 Clash 重新上线...': 'Waiting for Clash to come back online...',
   '等待超时，请手动检查 Clash 状态': 'Timed out. Please check the Clash status manually',
   '第三方依赖': 'Third-party dependencies',
-  '调试与实验性功能': 'Debugging and experimental features',
   '读取 OpenClash 当前使用的配置来源':
       'Read the configuration source currently used by OpenClash',
   '读取、编辑并上传 OpenClash YAML': 'Read, edit, and upload OpenClash YAML files',
@@ -432,6 +455,9 @@ const _english = <String, String>{
   '读取文件失败': 'Failed to read file',
   '读取更新检测设置失败': 'Failed to load update check setting',
   '保存更新检测设置失败': 'Failed to save update check setting',
+  '开启成功': 'Options shown',
+  '隐藏成功': 'Options hidden',
+  '保存设置失败，请重试': 'Could not save settings. Try again.',
   '读取中…': 'Loading…',
   '发布、分发、再授权及销售本软件的副本，但须保留上述版权声明与本许可声明。\n\n':
       'publish, distribute, sublicense, and/or sell copies of the software, provided that the copyright and permission notices are retained.\n\n',
@@ -442,8 +468,6 @@ const _english = <String, String>{
   '返回': 'Back',
   '格式错误：不是有效的配置文件': 'Invalid format: not a valid configuration file',
   '跟随系统': 'Follow system',
-  '更新内置 Web 控制面板。新版可能需要重新适配代理页和连接页。':
-      'Update the built-in web panel. New versions may require Proxy and Connections page adjustments.',
   '更新': 'Update',
   '解析失败：文件内容不是合法 JSON': 'Parsing failed: the file does not contain valid JSON',
   '解析': 'Parse',
@@ -453,7 +477,6 @@ const _english = <String, String>{
   '更新检测已关闭，可在关于页重新开启':
       'Update checks disabled. You can re-enable them on the About page.',
   '功能介绍': 'Features',
-  '功能介绍、版本日志、开源协议': 'Features, release notes, and open-source licenses',
   '关于': 'About',
   '关于 Proxly': 'About Proxly',
   '规则': 'Rule',
@@ -492,8 +515,6 @@ const _english = <String, String>{
   '将立即关闭所有当前 Clash 代理连接，部分应用可能会自动重新连接。确定继续？':
       'This immediately closes all active Clash proxy connections. Some apps may reconnect automatically. Continue?',
   '关闭中': 'Closing',
-  '关闭后不再自动检测新版本，仍可在关于页手动检查更新。':
-      'When off, Proxly will not detect new versions automatically. You can still check manually on the About page.',
   '关闭更新检测': 'Disable update checks',
   '开始设置': 'Get started',
   '开源协议': 'Open-source license',
@@ -527,14 +548,11 @@ const _english = <String, String>{
   '面板发布包校验失败，请稍后重试':
       'Panel release package verification failed. Please try again later',
   '面板尚未加载，请稍后再试': 'The panel is not ready. Please try again shortly',
-  '默认跟随系统，也可以固定为浅色或深色。':
-      'Follows the system by default, or choose a fixed light or dark theme.',
   '目标地址': 'Destination address',
   '内核版本': 'Core version',
   '排序': 'Sort',
   '配置文件': 'Configuration file',
-  '屏幕上显示可拖动的深浅色切换按钮，长按拖动，点击切换':
-      'Show a draggable theme button. Long-press to move it and tap to switch theme',
+  '点按切换主题，长按拖动': 'Tap to switch themes. Hold to move.',
   '浅色': 'Light',
   '切换并重启': 'Switch and restart',
   '切换当前配置？': 'Switch the active configuration?',
@@ -544,8 +562,6 @@ const _english = <String, String>{
   '切换语言': 'Change language',
   '应用语言': 'App language',
   '语言': 'Language',
-  '语言切换会立即应用，并同步内置 Zashboard 面板。':
-      'Language changes apply immediately and are synchronized with the built-in Zashboard panel.',
   '请求超时，请检查网络连接后重试':
       'Request timed out. Check your network connection and try again',
   '请输入密码': 'Enter password',
@@ -614,8 +630,6 @@ const _english = <String, String>{
   '编码': 'Encoding',
   '尚未读取': 'Not loaded yet',
   '设置': 'Settings',
-  '设置外观模式和连接页默认显示方式':
-      'Choose the appearance and default Connections page display',
   '设置页未保存 SSH 密码，本次输入后会同步保存到设置页。':
       'No SSH password is saved in Settings. This password will also be saved there.',
   '设置已保存': 'Settings saved',
@@ -658,8 +672,6 @@ const _english = <String, String>{
   '下载内容不是有效 APK': 'Downloaded file is not a valid APK',
   '下载速度': 'Download speed',
   '显示控制台按钮': 'Show Console button',
-  '在首页左上角显示 Zashboard 控制台入口':
-      'Show the Zashboard Console shortcut in the top-left corner of Home',
   '显示主题悬浮球': 'Show floating theme button',
   '新连接': 'New connection',
   '嗅探主机': 'Sniffed host',
@@ -667,7 +679,6 @@ const _english = <String, String>{
   '选择 YAML 配置': 'Select YAML configuration',
   'YAML 配置文件': 'YAML configuration files',
   '选择 YAML 配置文件': 'Select a YAML configuration file',
-  '选择底部「连接」Tab 的显示内容': 'Choose what to show in the bottom Connections tab',
   '选择后会写入 OpenClash 当前配置，并在确认后重启。':
       'The selected file becomes the active OpenClash configuration and OpenClash restarts after confirmation.',
   '已复制': 'Copied',
@@ -682,16 +693,14 @@ const _english = <String, String>{
       'Used to manage configuration files and restart OpenClash',
   '已用': 'Used',
   '原生列表': 'Native list',
-  '原生列表响应更快；Zashboard 面板会以移动端模式打开。':
-      'The native list is faster; the Zashboard panel opens in mobile mode.',
+  '原生列表更快，面板采用移动布局。':
+      'The native list is faster. The panel uses a mobile layout.',
   '源地址': 'Source address',
   '远程路径': 'Remote path',
   '远程路径需以 .yaml 或 .yml 结尾': 'The remote path must end with .yaml or .yml',
   '远端地址': 'Remote address',
   '运行概览': 'Overview',
   '运行中': 'Running',
-  '在 GitHub Releases 查看所有版本': 'View all versions on GitHub Releases',
-  '在 GitHub 查看完整功能说明': 'View the full feature guide on GitHub',
   '暂无活跃连接': 'No active connections',
   '正在读取...': 'Loading...',
   '正在加载控制台': 'Loading console',
@@ -730,28 +739,19 @@ const _english = <String, String>{
   '运行模式': 'Running mode',
   '所有 Clash 代理连接已关闭': 'All Clash proxy connections have been closed',
   '更新检测': 'Update checks',
-  '选择当前基础模式对应的运行方式': 'Choose how the selected base mode handles traffic',
   '增强': 'Enhanced',
   '兼容': 'Compatible',
   '混合': 'Mixed',
   '代理模式': 'Proxy mode',
-  '切换 Mihomo 处理连接时使用的规则范围': 'Choose how Mihomo applies rules to connections',
   '全局': 'Global',
   '区域绕过': 'Area bypass',
-  '指定区域流量不经过内核': 'Bypass the core for the selected region',
   '未知错误': 'Unknown error',
   '大陆': 'Mainland',
   '海外': 'Overseas',
   '停用': 'Off',
   '域名嗅探': 'Domain sniffing',
-  '识别连接中的域名，降低按域名分流失效的概率':
-      'Detect domains in connections to improve domain-based routing',
   'DNS 代理': 'DNS proxy',
-  '让 DNS 查询遵循代理规则，减少解析与访问不一致':
-      'Make DNS queries follow proxy rules to avoid routing inconsistencies',
   '流媒体解锁': 'Streaming unlock',
-  '自动为常见流媒体服务选择可解锁节点':
-      'Automatically select unlock-capable nodes for popular streaming services',
   '当前 OpenClash 未提供流媒体解锁组件':
       'The current OpenClash installation does not provide streaming unlock',
   '需要先在 OpenClash 中启用路由器本机代理': 'Enable router-self proxy in OpenClash first',

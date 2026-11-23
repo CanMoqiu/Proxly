@@ -83,6 +83,32 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
+  testWidgets('toolbar uses the shared Material sort button', (tester) async {
+    SharedPreferences.setMockInitialValues({'app_language': 'zh_CN'});
+    await AppLocaleController.instance.load();
+    await tester.pumpWidget(AppLocaleScope(
+      controller: AppLocaleController.instance,
+      child: MaterialApp(
+        home: NativeConnectionsPage(
+          loadSnapshot: () async => _emptySnapshot(1),
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    final sort = find.widgetWithIcon(IconButton, Icons.sort_rounded);
+    expect(sort, findsOneWidget);
+    expect(tester.widget<IconButton>(sort).tooltip, '排序');
+    await tester.tap(sort);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('下载速度'));
+    await tester.pumpAndSettle();
+    expect(find.text('下载速度'), findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+  },
+      variant:
+          TargetPlatformVariant({TargetPlatform.android, TargetPlatform.iOS}));
+
   testWidgets('close waits for confirmation, keeps failures and allows retry',
       (tester) async {
     SharedPreferences.setMockInitialValues({'app_language': 'zh_CN'});

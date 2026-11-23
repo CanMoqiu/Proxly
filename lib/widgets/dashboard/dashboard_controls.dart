@@ -1173,6 +1173,7 @@ class _SshPasswordDialog extends StatefulWidget {
 }
 
 class _SshPasswordDialogState extends State<_SshPasswordDialog> {
+  final _generation = ConnectionSettingsStore.instance.deviceGeneration;
   late final TextEditingController _controller = TextEditingController(
     text: widget.savedPassword,
   );
@@ -1200,8 +1201,10 @@ class _SshPasswordDialogState extends State<_SshPasswordDialog> {
       _error = null;
     });
     try {
+      ConnectionSettingsStore.instance.requireDeviceGeneration(_generation);
       if (!_hasSavedPassword) {
-        await ClashConfigFileService.savePassword(password);
+        await ClashConfigFileService.savePassword(password,
+            expectedGeneration: _generation);
       }
       if (mounted) {
         setState(() => _saving = false);

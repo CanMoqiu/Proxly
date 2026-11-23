@@ -1,17 +1,19 @@
 import '../l10n/app_locale.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../main.dart';
 import '../services/connection_settings_store.dart';
 import '../services/clash_host_validator.dart';
 import '../services/clash_service.dart';
 import '../services/connection_feedback.dart';
+import '../services/optional_settings_visibility.dart';
 import '../services/router_detection_service.dart';
 import '../services/router_tool.dart';
 import '../theme/app_theme.dart';
 import '../widgets/adaptive_ui.dart';
 import '../widgets/app_feedback.dart';
-import '../widgets/app_popup.dart';
+import '../widgets/controller_form_fields.dart';
 import 'main_shell.dart';
 
 /// Guides initial Clash connection setup.
@@ -32,12 +34,12 @@ class _SetupWizardPageState extends State<SetupWizardPage>
   int _currentStep = 0;
 
   final _hostController = TextEditingController();
+  final _controllerPort = TextEditingController();
+  final _deviceNameController = TextEditingController();
   final _tokenController = TextEditingController();
   final _sshPasswordController = TextEditingController();
-  final _sshPortController = TextEditingController(text: '22');
+  final _sshPortController = TextEditingController();
   final _hostFocusNode = FocusNode();
-  bool _obscureToken = true;
-  bool _obscureSshPassword = true;
   bool _testing = false;
   bool _recognizing = false;
   RouterTool _routerTool = RouterTool.generic;
@@ -47,6 +49,7 @@ class _SetupWizardPageState extends State<SetupWizardPage>
 
   String get _detectionInput => [
         _hostController.text,
+        _controllerPort.text,
         _tokenController.text,
         _sshPortController.text,
         _sshPasswordController.text
@@ -55,13 +58,16 @@ class _SetupWizardPageState extends State<SetupWizardPage>
   String? _testResult;
   bool _testSuccess = false;
   bool _hostRequiredError = false;
+  bool _showOptionalSettings = false;
   String _connectionsTabMode = 'webview';
   ThemeMode _themeMode = ThemeMode.system;
 
   @override
   void initState() {
     super.initState();
+    _loadOptionalSettings();
     _hostController.addListener(_clearHostErrorOnInput);
+    _controllerPort.addListener(_clearTestResultOnInput);
     _tokenController.addListener(_clearTestResultOnInput);
     _sshPortController.addListener(_clearTestResultOnInput);
     _sshPasswordController.addListener(_clearTestResultOnInput);
@@ -70,6 +76,7 @@ class _SetupWizardPageState extends State<SetupWizardPage>
   @override
   void dispose() {
     _hostController.removeListener(_clearHostErrorOnInput);
+    _controllerPort.removeListener(_clearTestResultOnInput);
     _tokenController.removeListener(_clearTestResultOnInput);
     _sshPortController.removeListener(_clearTestResultOnInput);
     _sshPasswordController.removeListener(_clearTestResultOnInput);
@@ -77,10 +84,22 @@ class _SetupWizardPageState extends State<SetupWizardPage>
     _hostFocusNode.dispose();
     _pageController.dispose();
     _hostController.dispose();
+    _controllerPort.dispose();
+    _deviceNameController.dispose();
     _tokenController.dispose();
     _sshPasswordController.dispose();
     _sshPortController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadOptionalSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted || !OptionalSettingsVisibility.read(prefs)) return;
+    setState(() {
+      _showOptionalSettings = true;
+      _connectionsTabMode =
+          prefs.getString('connections_tab_mode') ?? 'webview';
+    });
   }
 
   void _goToStep(int step) {
@@ -99,23 +118,14 @@ class _SetupWizardPageState extends State<SetupWizardPage>
 
   void _previousStep() => _goToStep(_currentStep - 1);
 
+  RouterTool? get _visibleBackend =>
+      _manualRouterTool || _routerToolInput == _detectionInput
+          ? _routerTool
+          : null;
+
   Future<void> _chooseRouterTool() async {
-    FocusScope.of(context).unfocus();
-    final selected = await AppPopup.sheet<RouterTool>(
-        context: context,
-        builder: (_) => AppOptionsSheet<RouterTool>(
-              title: tr('选择代理软件'),
-              selectedValue: _routerTool,
-              options: [
-                for (final tool in RouterTool.values)
-                  AppSheetOption(
-                      value: tool,
-                      label: tr(tool.label),
-                      icon: Icons.hub_outlined,
-                      subtitle:
-                          tool == RouterTool.generic ? tr('仅使用通用控制器功能') : null)
-              ],
-            ));
+    final selected =
+        await showControllerBackendPicker(context, _visibleBackend);
     if (!mounted || selected == null) return;
     setState(() {
       _routerTool = selected;
@@ -137,9 +147,15 @@ class _SetupWizardPageState extends State<SetupWizardPage>
   }
 
   void _clearTestResultOnInput() {
-    if (_testResult == null) return;
+    final staleBackend = !_manualRouterTool &&
+        _routerToolInput != null &&
+        _routerToolInput != _detectionInput;
+    if (_testResult == null && !staleBackend) return;
     cancelFeedbackClear('connection_test');
-    setState(() => _testResult = null);
+    setState(() {
+      if (staleBackend) _routerToolInput = null;
+      _testResult = null;
+    });
   }
 
   void _setTestResult(String message, {required bool success}) {
@@ -166,20 +182,20 @@ class _SetupWizardPageState extends State<SetupWizardPage>
       _setTestResult('SSH 端口必须为 1–65535 之间的整数', success: false);
       return;
     }
-    final hostError = ClashHostValidator.validationError(_hostController.text);
-    if (hostError != null) {
-      _setTestResult(hostError, success: false);
+    final endpoint = ClashHostValidator.fromFields(
+        _hostController.text, _controllerPort.text);
+    if (endpoint.error case final error?) {
+      _setTestResult(error, success: false);
       return;
     }
     FocusScope.of(context).unfocus();
     final input = _detectionInput;
-    final keepManualChoice = _manualRouterTool && input == _routerToolInput;
     setState(() => _recognizing = true);
     RouterDetectionResult? result;
     try {
       result = await (widget.detectionService ?? RouterDetectionService())
           .detect(
-              host: ClashHostValidator.normalizeAddress(_hostController.text),
+              host: endpoint.address,
               token: _tokenController.text.trim(),
               sshPassword: _sshPasswordController.text,
               sshPort:
@@ -192,7 +208,7 @@ class _SetupWizardPageState extends State<SetupWizardPage>
     }
     if (!mounted || input != _detectionInput || _currentStep != 1) return;
     setState(() {
-      if (!keepManualChoice) {
+      if (!_manualRouterTool) {
         _routerTool = result?.tool ?? RouterTool.generic;
         _manualRouterTool = false;
       }
@@ -208,14 +224,10 @@ class _SetupWizardPageState extends State<SetupWizardPage>
       _setTestResult('SSH 端口必须为 1–65535 之间的整数', success: false);
       return;
     }
-    final host = ClashHostValidator.normalizeAddress(_hostController.text);
-    if (host.isEmpty) {
-      _setTestResult('请先填写控制器地址', success: false);
-      return;
-    }
-    final hostError = ClashHostValidator.validationError(host);
-    if (hostError != null) {
-      _setTestResult(hostError, success: false);
+    final endpoint = ClashHostValidator.fromFields(
+        _hostController.text, _controllerPort.text);
+    if (endpoint.error case final error?) {
+      _setTestResult(error, success: false);
       return;
     }
     cancelFeedbackClear('connection_test');
@@ -226,7 +238,7 @@ class _SetupWizardPageState extends State<SetupWizardPage>
     final input = _detectionInput;
     try {
       await (widget.detectionService ?? RouterDetectionService()).detect(
-          host: host,
+          host: endpoint.address,
           token: _tokenController.text.trim(),
           sshPassword: '',
           sshPort:
@@ -246,23 +258,18 @@ class _SetupWizardPageState extends State<SetupWizardPage>
   }
 
   Future<void> _finish() async {
-    final host = ClashHostValidator.normalizeAddress(_hostController.text);
-    if (host.isEmpty) {
-      setState(() => _hostRequiredError = true);
+    final endpoint = ClashHostValidator.fromFields(
+        _hostController.text, _controllerPort.text);
+    if (endpoint.error case final error?) {
+      final missingAddress = _hostController.text.trim().isEmpty;
+      setState(() => _hostRequiredError = missingAddress);
+      _setTestResult(error, success: false);
       _goToStep(1);
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _hostFocusNode.requestFocus();
-      });
-      return;
-    }
-    final hostError = ClashHostValidator.validationError(host);
-    if (hostError != null) {
-      setState(() => _hostRequiredError = true);
-      _setTestResult(hostError, success: false);
-      _goToStep(1);
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _hostFocusNode.requestFocus();
-      });
+      if (missingAddress) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _hostFocusNode.requestFocus();
+        });
+      }
       return;
     }
     final sshPort = ConnectionSettings.parseSshPort(_sshPortController.text);
@@ -271,13 +278,17 @@ class _SetupWizardPageState extends State<SetupWizardPage>
       _goToStep(1);
       return;
     }
+    final deviceName = _deviceNameController.text;
     setState(() => _saving = true);
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('connections_tab_mode', _connectionsTabMode);
+      if (_showOptionalSettings) {
+        await prefs.setString('connections_tab_mode', _connectionsTabMode);
+      }
       await prefs.setString('theme_mode', _themeModeString(_themeMode));
       await ConnectionSettingsStore.instance.saveController(
-        host: host,
+        host: endpoint.address,
+        deviceName: deviceName,
         token: _tokenController.text.trim(),
         sshPassword: _sshPasswordController.text,
         sshPort: sshPort,
@@ -329,24 +340,23 @@ class _SetupWizardPageState extends State<SetupWizardPage>
       backgroundColor: bgColor,
       body: SafeArea(
         bottom: false,
-        child: PageView(
+        child: AdaptiveContent(
+            child: PageView(
           controller: _pageController,
           physics: const NeverScrollableScrollPhysics(),
           children: [
             _WelcomePage(onNext: _nextStep),
             _ConfigPage(
               hostController: _hostController,
+              controllerPort: _controllerPort,
+              backend: _visibleBackend,
+              onChooseBackend: _chooseRouterTool,
+              deviceNameController: _deviceNameController,
               hostFocusNode: _hostFocusNode,
               tokenController: _tokenController,
               sshPasswordController: _sshPasswordController,
               sshPortController: _sshPortController,
               showHostRequiredError: _hostRequiredError,
-              obscureToken: _obscureToken,
-              onToggleObscure: () =>
-                  setState(() => _obscureToken = !_obscureToken),
-              obscureSshPassword: _obscureSshPassword,
-              onToggleSshObscure: () =>
-                  setState(() => _obscureSshPassword = !_obscureSshPassword),
               testing: _testing,
               recognizing: _recognizing,
               testResult: _testResult,
@@ -356,19 +366,18 @@ class _SetupWizardPageState extends State<SetupWizardPage>
               onNext: _testing || _recognizing ? null : _handleConfigNext,
             ),
             _PreferencesPage(
-              routerTool: _routerTool,
-              onChooseRouterTool: _chooseRouterTool,
               saving: _saving,
               themeMode: _themeMode,
               onThemeModeChanged: _setThemeMode,
               onBack: _previousStep,
               onFinish: _finish,
+              showOptionalSettings: _showOptionalSettings,
               connectionsTabMode: _connectionsTabMode,
               onSetConnectionsMode: (m) =>
                   setState(() => _connectionsTabMode = m),
             ),
           ],
-        ),
+        )),
       ),
       bottomNavigationBar: SafeArea(
         top: false,
@@ -412,134 +421,140 @@ class _WelcomePage extends StatelessWidget {
     final primary = Theme.of(context).colorScheme.primary;
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(32, 0, 32, 24),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          return Column(
-            children: [
-              const SizedBox(height: 16),
-              const Align(
-                alignment: Alignment.centerRight,
-                child: AppLanguagePicker(compact: true),
-              ),
-              const SizedBox(height: 8),
-              Expanded(
-                child: SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(32, 16, 32, 24),
+      child: Column(
+        children: [
+          const Align(
+            alignment: Alignment.centerRight,
+            child: AppLanguagePicker(compact: true),
+          ),
+          Expanded(
+            child: LayoutBuilder(
+              builder: (context, viewport) {
+                final compact = viewport.maxHeight < 490;
+                final logoSize = compact ? 64.0 : 88.0;
+                return SingleChildScrollView(
                   key: const ValueKey('setup_welcome_scroll'),
-                  child: SizedBox(
-                    width: constraints.maxWidth,
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Container(
-                          width: 72,
-                          height: 72,
-                          decoration: BoxDecoration(
-                            color: Colors.transparent,
-                            borderRadius: BorderRadius.circular(22),
-                          ),
-                          clipBehavior: Clip.antiAlias,
-                          child: Image.asset(
-                            'assets/app_icon.png',
-                            fit: BoxFit.cover,
-                          ),
-                        ),
-                        const SizedBox(height: 20),
-                        Text(
-                          tr('欢迎使用 Proxly'),
-                          style: TextStyle(
-                            fontSize: 23,
-                            fontWeight: FontWeight.w700,
-                            color: textColor,
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        Text(
-                          tr(
-                            'Proxly 帮你管理软路由代理工具，查看运行状态、流量、连接和 YAML 配置。',
-                          ),
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: hintColor,
-                            height: 1.55,
-                          ),
-                        ),
-                        const SizedBox(height: 22),
-                        ..._highlights.map(
-                          (h) => Padding(
-                            padding: const EdgeInsets.only(bottom: 10),
-                            child: Row(
-                              children: [
-                                Container(
-                                  width: 36,
-                                  height: 36,
-                                  decoration: BoxDecoration(
-                                    color: primary.withValues(alpha: 0.1),
-                                    borderRadius: BorderRadius.circular(11),
-                                  ),
-                                  child: Icon(h.icon, size: 19, color: primary),
-                                ),
-                                const SizedBox(width: 14),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        tr(h.title),
-                                        style: TextStyle(
-                                          fontSize: 13,
-                                          fontWeight: FontWeight.w500,
-                                          color: textColor,
-                                        ),
-                                      ),
-                                      Text(
-                                        tr(h.desc),
-                                        style: TextStyle(
-                                          fontSize: 11,
-                                          color: hintColor,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
+                  padding: EdgeInsets.only(
+                    top: (viewport.maxHeight * .055).clamp(12.0, 36.0),
+                    bottom: 12,
+                  ),
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 420),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(logoSize * .25),
+                            child: Image.asset(
+                              'assets/app_icon.png',
+                              width: logoSize,
+                              height: logoSize,
+                              fit: BoxFit.cover,
                             ),
                           ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                child: GestureDetector(
-                  onTap: onNext,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    decoration: BoxDecoration(
-                      color: primary,
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    child: Center(
-                      child: AdaptiveSingleLineText(
-                        tr('开始设置'),
-                        style: TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.white,
-                        ),
+                          SizedBox(height: compact ? 10 : 16),
+                          Text(
+                            tr('欢迎使用 Proxly'),
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: compact ? 25 : 30,
+                              fontWeight: FontWeight.w700,
+                              color: textColor,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            tr('Proxly 帮你管理软路由代理工具，查看运行状态、流量、连接和 YAML 配置。'),
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: hintColor,
+                              height: 1.45,
+                            ),
+                          ),
+                          SizedBox(height: compact ? 16 : 24),
+                          for (final highlight in _highlights)
+                            Padding(
+                              padding: EdgeInsets.symmetric(
+                                  vertical: compact ? 4 : 6),
+                              child: Row(
+                                children: [
+                                  Container(
+                                    width: 36,
+                                    height: 36,
+                                    decoration: BoxDecoration(
+                                      color: primary.withValues(alpha: .10),
+                                      borderRadius: BorderRadius.circular(11),
+                                    ),
+                                    child: Center(
+                                      child: highlight.asset != null
+                                          ? SvgPicture.asset(
+                                              highlight.asset!,
+                                              width: 20,
+                                              height: 20,
+                                              colorFilter: ColorFilter.mode(
+                                                  primary, BlendMode.srcIn),
+                                              excludeFromSemantics: true,
+                                            )
+                                          : Icon(highlight.icon,
+                                              size: 20, color: primary),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          tr(highlight.title),
+                                          style: TextStyle(
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w600,
+                                            color: textColor,
+                                          ),
+                                        ),
+                                        Text(
+                                          tr(highlight.desc),
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            height: 1.4,
+                                            color: hintColor,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                        ],
                       ),
                     ),
                   ),
+                );
+              },
+            ),
+          ),
+          const SizedBox(height: 12),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size(0, 48),
+                  padding:
+                      const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
                 ),
+                onPressed: onNext,
+                child: Text(tr('开始设置'), textAlign: TextAlign.center),
               ),
-            ],
-          );
-        },
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -550,9 +565,10 @@ class _WelcomePage extends StatelessWidget {
       title: '实时流量',
       desc: '查看速率曲线与上传、下载用量',
     ),
-    _Highlight(icon: Icons.lan_outlined, title: '连接详情', desc: '查看活跃连接和完整代理链路'),
     _Highlight(
-      icon: Icons.hub_outlined,
+        asset: 'assets/icons/link.svg', title: '连接详情', desc: '查看活跃连接和完整代理链路'),
+    _Highlight(
+      asset: 'assets/icons/proxy.svg',
       title: '代理控制',
       desc: '通过 Zashboard 管理代理节点',
     ),
@@ -565,11 +581,13 @@ class _WelcomePage extends StatelessWidget {
 }
 
 class _Highlight {
-  final IconData icon;
+  final IconData? icon;
+  final String? asset;
   final String title;
   final String desc;
   const _Highlight({
-    required this.icon,
+    this.icon,
+    this.asset,
     required this.title,
     required this.desc,
   });
@@ -577,15 +595,15 @@ class _Highlight {
 
 class _ConfigPage extends StatelessWidget {
   final TextEditingController hostController;
+  final TextEditingController controllerPort;
+  final RouterTool? backend;
+  final VoidCallback onChooseBackend;
+  final TextEditingController deviceNameController;
   final FocusNode hostFocusNode;
   final TextEditingController tokenController;
   final TextEditingController sshPasswordController;
   final TextEditingController sshPortController;
   final bool showHostRequiredError;
-  final bool obscureToken;
-  final VoidCallback onToggleObscure;
-  final bool obscureSshPassword;
-  final VoidCallback onToggleSshObscure;
   final bool testing;
   final bool recognizing;
   final String? testResult;
@@ -596,15 +614,15 @@ class _ConfigPage extends StatelessWidget {
 
   const _ConfigPage({
     required this.hostController,
+    required this.controllerPort,
+    required this.backend,
+    required this.onChooseBackend,
+    required this.deviceNameController,
     required this.hostFocusNode,
     required this.tokenController,
     required this.sshPasswordController,
     required this.sshPortController,
     required this.showHostRequiredError,
-    required this.obscureToken,
-    required this.onToggleObscure,
-    required this.obscureSshPassword,
-    required this.onToggleSshObscure,
     required this.testing,
     required this.recognizing,
     required this.testResult,
@@ -620,28 +638,8 @@ class _ConfigPage extends StatelessWidget {
     final palette = AppPalette.of(context);
     final cardBg = palette.surface;
     final cardBorder = palette.border;
-    final inputBg = palette.inputBackground;
-    final labelColor = palette.textSecondary;
     final textColor = palette.textPrimary;
-    final hintColor = palette.textSecondary;
     final primary = Theme.of(context).colorScheme.primary;
-
-    final inputBorder = OutlineInputBorder(
-      borderRadius: BorderRadius.circular(10),
-      borderSide: BorderSide(color: cardBorder, width: 0.5),
-    );
-    final focusedBorder = OutlineInputBorder(
-      borderRadius: BorderRadius.circular(10),
-      borderSide: BorderSide(color: primary, width: 1),
-    );
-    final hostErrorBorder = OutlineInputBorder(
-      borderRadius: BorderRadius.circular(10),
-      borderSide: BorderSide(color: palette.error, width: 1.2),
-    );
-    final hostEnabledBorder =
-        showHostRequiredError ? hostErrorBorder : inputBorder;
-    final hostFocusedBorder =
-        showHostRequiredError ? hostErrorBorder : focusedBorder;
 
     return GestureDetector(
       onTap: () => FocusScope.of(context).unfocus(),
@@ -681,17 +679,9 @@ class _ConfigPage extends StatelessWidget {
                               color: textColor,
                             ),
                           ),
-                          const SizedBox(height: 6),
-                          Text(
-                            tr('填写控制器地址；密钥和 SSH 密码可按需填写，之后可在设置页修改'),
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: hintColor,
-                              height: 1.5,
-                            ),
-                          ),
                           const SizedBox(height: 18),
                           Container(
+                            key: const ValueKey('setup_connection_card'),
                             decoration: BoxDecoration(
                               color: cardBg,
                               borderRadius: BorderRadius.circular(18),
@@ -699,246 +689,46 @@ class _ConfigPage extends StatelessWidget {
                             ),
                             padding: const EdgeInsets.all(16),
                             child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
-                                LabeledInputField(
-                                  title: tr('控制器地址'),
-                                  description: tr(
-                                    '填写 Clash API 地址，格式为 IP:端口',
-                                  ),
-                                  titleColor: textColor,
-                                  descriptionColor: labelColor,
-                                  child: TextField(
-                                    controller: hostController,
-                                    focusNode: hostFocusNode,
-                                    style: TextStyle(
-                                      fontSize: 14,
-                                      color: textColor,
-                                    ),
-                                    keyboardType: TextInputType.url,
-                                    textInputAction: TextInputAction.next,
-                                    autocorrect: false,
-                                    enableSuggestions: false,
-                                    decoration: InputDecoration(
-                                      hintText: tr('IP:端口'),
-                                      hintStyle: TextStyle(color: hintColor),
-                                      filled: true,
-                                      fillColor: inputBg,
-                                      border: inputBorder,
-                                      enabledBorder: hostEnabledBorder,
-                                      focusedBorder: hostFocusedBorder,
-                                      contentPadding:
-                                          const EdgeInsets.symmetric(
-                                        horizontal: 14,
-                                        vertical: 12,
-                                      ),
-                                    ),
-                                  ),
+                                ControllerFormFields(
+                                  name: deviceNameController,
+                                  address: hostController,
+                                  port: controllerPort,
+                                  secret: tokenController,
+                                  sshPort: sshPortController,
+                                  sshSecret: sshPasswordController,
+                                  backend: backend,
+                                  onChooseBackend:
+                                      recognizing ? null : onChooseBackend,
+                                  addressFocus: hostFocusNode,
+                                  addressError: showHostRequiredError,
                                 ),
                                 const SizedBox(height: 16),
-                                LabeledInputField(
-                                  title: tr('控制器密钥'),
-                                  description: tr('用于访问已设置密钥的控制器，未设置可留空'),
-                                  titleColor: textColor,
-                                  descriptionColor: labelColor,
-                                  child: TextField(
-                                    controller: tokenController,
-                                    obscureText: obscureToken,
-                                    style: TextStyle(
-                                      fontSize: 14,
-                                      color: textColor,
-                                    ),
-                                    textInputAction: TextInputAction.next,
-                                    autocorrect: false,
-                                    enableSuggestions: false,
-                                    decoration: InputDecoration(
-                                      hintText: tr('请输入密钥'),
-                                      hintStyle: TextStyle(color: hintColor),
-                                      filled: true,
-                                      fillColor: inputBg,
-                                      border: inputBorder,
-                                      enabledBorder: inputBorder,
-                                      focusedBorder: focusedBorder,
-                                      contentPadding:
-                                          const EdgeInsets.symmetric(
-                                        horizontal: 14,
-                                        vertical: 12,
-                                      ),
-                                      suffixIcon: IconButton(
-                                        icon: Icon(
-                                          obscureToken
-                                              ? Icons.visibility_off_outlined
-                                              : Icons.visibility_outlined,
-                                          color: hintColor,
-                                          size: 20,
+                                OutlinedButton(
+                                  onPressed:
+                                      testing || recognizing ? null : onTest,
+                                  child: testing
+                                      ? SizedBox.square(
+                                          dimension: 18,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                            color: primary,
+                                          ),
+                                        )
+                                      : Text(
+                                          tr('测试连接'),
+                                          textAlign: TextAlign.center,
                                         ),
-                                        onPressed: onToggleObscure,
-                                      ),
-                                    ),
-                                  ),
                                 ),
-                                const SizedBox(height: 16),
-                                LabeledInputField(
-                                  title: tr('SSH 端口'),
-                                  description: tr('留空使用默认端口 22'),
-                                  titleColor: textColor,
-                                  descriptionColor: labelColor,
-                                  child: TextField(
-                                    key: const ValueKey('ssh_port_field'),
-                                    controller: sshPortController,
-                                    style: TextStyle(
-                                      fontSize: 14,
-                                      color: textColor,
-                                    ),
-                                    keyboardType: TextInputType.number,
-                                    textInputAction: TextInputAction.next,
-                                    autocorrect: false,
-                                    enableSuggestions: false,
-                                    decoration: InputDecoration(
-                                      hintText: '22',
-                                      hintStyle: TextStyle(color: hintColor),
-                                      filled: true,
-                                      fillColor: inputBg,
-                                      border: inputBorder,
-                                      enabledBorder: inputBorder,
-                                      focusedBorder: focusedBorder,
-                                      contentPadding:
-                                          const EdgeInsets.symmetric(
-                                        horizontal: 14,
-                                        vertical: 12,
-                                      ),
-                                    ),
+                                if (testResult case final result?)
+                                  ControllerTestFeedback(
+                                    message: result,
+                                    success: testSuccess,
                                   ),
-                                ),
-                                const SizedBox(height: 16),
-                                LabeledInputField(
-                                  title: tr('SSH 密码（可选）'),
-                                  description: tr(
-                                    '用于识别代理软件、管理 YAML 和重启服务，未使用 SSH 可留空',
-                                  ),
-                                  titleColor: textColor,
-                                  descriptionColor: labelColor,
-                                  child: TextField(
-                                    controller: sshPasswordController,
-                                    obscureText: obscureSshPassword,
-                                    style: TextStyle(
-                                      fontSize: 14,
-                                      color: textColor,
-                                    ),
-                                    textInputAction: TextInputAction.done,
-                                    autocorrect: false,
-                                    enableSuggestions: false,
-                                    decoration: InputDecoration(
-                                      hintText: tr('请输入密码'),
-                                      hintStyle: TextStyle(color: hintColor),
-                                      filled: true,
-                                      fillColor: inputBg,
-                                      border: inputBorder,
-                                      enabledBorder: inputBorder,
-                                      focusedBorder: focusedBorder,
-                                      contentPadding:
-                                          const EdgeInsets.symmetric(
-                                        horizontal: 14,
-                                        vertical: 12,
-                                      ),
-                                      suffixIcon: IconButton(
-                                        icon: Icon(
-                                          obscureSshPassword
-                                              ? Icons.visibility_off_outlined
-                                              : Icons.visibility_outlined,
-                                          color: hintColor,
-                                          size: 20,
-                                        ),
-                                        onPressed: onToggleSshObscure,
-                                      ),
-                                    ),
-                                  ),
-                                ),
                               ],
                             ),
                           ),
-                          const SizedBox(height: 12),
-                          GestureDetector(
-                            onTap: testing || recognizing ? null : onTest,
-                            child: Container(
-                              width: double.infinity,
-                              decoration: BoxDecoration(
-                                color: cardBg,
-                                borderRadius: BorderRadius.circular(14),
-                                border:
-                                    Border.all(color: cardBorder, width: 0.5),
-                              ),
-                              padding: const EdgeInsets.all(14),
-                              child: Center(
-                                child: testing
-                                    ? SizedBox(
-                                        width: 18,
-                                        height: 18,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                          color: primary,
-                                        ),
-                                      )
-                                    : AdaptiveSingleLineText(
-                                        tr('检查连接'),
-                                        style: TextStyle(
-                                          fontSize: 14,
-                                          fontWeight: FontWeight.w500,
-                                          color: primary,
-                                        ),
-                                      ),
-                              ),
-                            ),
-                          ),
-                          if (testResult != null) ...[
-                            const SizedBox(height: 10),
-                            Container(
-                              width: double.infinity,
-                              decoration: BoxDecoration(
-                                color: (testSuccess
-                                        ? palette.success
-                                        : palette.error)
-                                    .withValues(alpha: 0.10),
-                                borderRadius: BorderRadius.circular(14),
-                                border: Border.all(
-                                  color: testSuccess
-                                      ? palette.success
-                                      : palette.error,
-                                  width: 0.5,
-                                ),
-                              ),
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 16,
-                                vertical: 12,
-                              ),
-                              child: Row(
-                                children: [
-                                  Container(
-                                    width: 8,
-                                    height: 8,
-                                    decoration: BoxDecoration(
-                                      color: testSuccess
-                                          ? palette.success
-                                          : palette.error,
-                                      shape: BoxShape.circle,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 10),
-                                  Expanded(
-                                    child: Text(
-                                      tr(testResult!),
-                                      style: TextStyle(
-                                        fontSize: 13,
-                                        color: testSuccess
-                                            ? palette.success
-                                            : palette.error,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
                         ],
                       ),
                     ),
@@ -1039,22 +829,20 @@ class _WizardNavButtons extends StatelessWidget {
 }
 
 class _PreferencesPage extends StatelessWidget {
-  final RouterTool routerTool;
-  final VoidCallback onChooseRouterTool;
   final bool saving;
   final ThemeMode themeMode;
   final ValueChanged<ThemeMode> onThemeModeChanged;
+  final bool showOptionalSettings;
   final String connectionsTabMode;
   final ValueChanged<String> onSetConnectionsMode;
   final VoidCallback onBack;
   final VoidCallback onFinish;
 
   const _PreferencesPage({
-    required this.routerTool,
-    required this.onChooseRouterTool,
     required this.saving,
     required this.themeMode,
     required this.onThemeModeChanged,
+    required this.showOptionalSettings,
     required this.connectionsTabMode,
     required this.onSetConnectionsMode,
     required this.onBack,
@@ -1067,7 +855,6 @@ class _PreferencesPage extends StatelessWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final palette = AppPalette.of(context);
     final textColor = palette.textPrimary;
-    final hintColor = palette.textSecondary;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(24, 24, 24, 18),
@@ -1092,19 +879,9 @@ class _PreferencesPage extends StatelessWidget {
                           color: textColor,
                         ),
                       ),
-                      const SizedBox(height: 6),
-                      Text(
-                        tr('设置外观模式和连接页默认显示方式'),
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: hintColor,
-                          height: 1.5,
-                        ),
-                      ),
                       const SizedBox(height: 16),
                       _PreferenceSection(
                         title: tr('外观模式'),
-                        description: tr('默认跟随系统，也可以固定为浅色或深色。'),
                         child: ThemeModeSelector(
                           mode: themeMode,
                           isDark: isDark,
@@ -1114,50 +891,31 @@ class _PreferencesPage extends StatelessWidget {
                           onChanged: onThemeModeChanged,
                         ),
                       ),
-                      const SizedBox(height: 14),
-                      Container(
-                        decoration: BoxDecoration(
-                          color: palette.surface,
-                          borderRadius: BorderRadius.circular(18),
-                          border: Border.all(color: palette.border, width: 0.5),
-                        ),
-                        padding: const EdgeInsets.all(16),
-                        child: AppSettingPickerRow(
-                          title: tr('代理软件'),
-                          description: tr('已根据连接自动选择，也可手动修改'),
-                          picker: AppSelectionPicker(
-                            key: const ValueKey('setup_router_tool'),
-                            label: tr(routerTool.label),
-                            tooltip: tr('选择代理软件'),
-                            icon: Icons.hub_outlined,
-                            compact: true,
-                            onTap: saving ? null : onChooseRouterTool,
+                      if (showOptionalSettings) ...[
+                        const SizedBox(height: 14),
+                        _PreferenceSection(
+                          title: tr('连接页显示'),
+                          description: tr('原生列表更快，面板采用移动布局。'),
+                          child: AdaptiveOptionGroup(
+                            labels: [tr('原生列表'), tr('Zashboard 面板')],
+                            spacing: 10,
+                            children: [
+                              _ModeButton(
+                                label: tr('原生列表'),
+                                icon: Icons.list_alt_rounded,
+                                selected: connectionsTabMode == 'native',
+                                onTap: () => onSetConnectionsMode('native'),
+                              ),
+                              _ModeButton(
+                                label: tr('Zashboard 面板'),
+                                icon: Icons.language_rounded,
+                                selected: connectionsTabMode == 'webview',
+                                onTap: () => onSetConnectionsMode('webview'),
+                              ),
+                            ],
                           ),
                         ),
-                      ),
-                      const SizedBox(height: 14),
-                      _PreferenceSection(
-                        title: tr('连接页显示'),
-                        description: tr('原生列表响应更快；Zashboard 面板会以移动端模式打开。'),
-                        child: AdaptiveOptionGroup(
-                          labels: [tr('原生列表'), tr('Zashboard 面板')],
-                          spacing: 10,
-                          children: [
-                            _ModeButton(
-                              label: tr('原生列表'),
-                              icon: Icons.list_alt_rounded,
-                              selected: connectionsTabMode == 'native',
-                              onTap: () => onSetConnectionsMode('native'),
-                            ),
-                            _ModeButton(
-                              label: tr('Zashboard 面板'),
-                              icon: Icons.language_rounded,
-                              selected: connectionsTabMode == 'webview',
-                              onTap: () => onSetConnectionsMode('webview'),
-                            ),
-                          ],
-                        ),
-                      ),
+                      ],
                     ],
                   ),
                 ),
@@ -1179,12 +937,12 @@ class _PreferencesPage extends StatelessWidget {
 
 class _PreferenceSection extends StatelessWidget {
   final String title;
-  final String description;
+  final String? description;
   final Widget child;
 
   const _PreferenceSection({
     required this.title,
-    required this.description,
+    this.description,
     required this.child,
   });
 
@@ -1215,11 +973,13 @@ class _PreferenceSection extends StatelessWidget {
               color: textColor,
             ),
           ),
-          const SizedBox(height: 4),
-          Text(
-            description,
-            style: TextStyle(fontSize: 12, color: hintColor, height: 1.45),
-          ),
+          if (description case final details?) ...[
+            const SizedBox(height: 4),
+            Text(
+              details,
+              style: TextStyle(fontSize: 12, color: hintColor, height: 1.45),
+            ),
+          ],
           const SizedBox(height: 14),
           child,
         ],

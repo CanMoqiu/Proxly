@@ -10,6 +10,7 @@ import 'package:flutter/services.dart' show rootBundle;
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'connection_settings_store.dart';
 import 'package:archive/archive.dart';
 
 import 'version_comparator.dart';
@@ -537,6 +538,7 @@ class WebPanelControllerBridge {
   final String _session;
   final ControllerConnectionState? connectionState;
   final int? _connectionGeneration;
+  final int? deviceGeneration;
   final Set<WebSocket> _webSockets = <WebSocket>{};
   bool _closed = false;
 
@@ -547,6 +549,7 @@ class WebPanelControllerBridge {
     HttpClient? client,
     String? session,
     this.connectionState,
+    this.deviceGeneration,
   })  : _token = token,
         _connectionGeneration = connectionState?.generation,
         _client = client ?? HttpClient(),
@@ -568,6 +571,14 @@ class WebPanelControllerBridge {
 
   Future<bool> handle(HttpRequest request) async {
     if (!matches(request.uri)) return false;
+    final store = ConnectionSettingsStore.instance;
+    final generation = deviceGeneration;
+    if (_closed ||
+        (generation != null && generation != store.deviceGeneration)) {
+      request.response.statusCode = HttpStatus.gone;
+      await request.response.close();
+      return true;
+    }
     if (request.method == 'OPTIONS') {
       _setCorsHeaders(request.response);
       request.response.statusCode = HttpStatus.noContent;
@@ -585,8 +596,14 @@ class WebPanelControllerBridge {
     final upstreamPath = relativePath.isEmpty ? '/' : relativePath;
     final observation = _observation();
     try {
+      if (generation != null) store.requireDeviceGeneration(generation);
       if (WebSocketTransformer.isUpgradeRequest(request)) {
         await _proxyWebSocket(request, upstreamPath, observation);
+      } else if (generation != null && request.method != 'GET') {
+        await store.runRemoteOperation(
+          () => _proxyHttp(request, upstreamPath, observation),
+          expectedGeneration: generation,
+        );
       } else {
         await _proxyHttp(request, upstreamPath, observation);
       }
@@ -1433,6 +1450,8 @@ class WebPanelSync {
   Future<void> Function()? _syncAppearance;
   Future<void> Function()? _reloadConnections;
   Future<void> Function()? _syncConnectionsAppearance;
+  Object? _proxyOwner;
+  Object? _connectionsOwner;
   final Map<Object, Future<void> Function()> _webViewReloaders = {};
   final Map<Object, Future<void> Function()> _webViewRestarters = {};
 
@@ -1444,30 +1463,38 @@ class WebPanelSync {
   bool proxyTabActive = false;
 
   void register({
+    Object? owner,
     required Future<void> Function() save,
     required Future<void> Function() reload,
     Future<void> Function()? syncAppearance,
   }) {
+    _proxyOwner = owner;
     _save = save;
     _reload = reload;
     _syncAppearance = syncAppearance;
   }
 
-  void unregister() {
+  void unregister({Object? owner}) {
+    if (owner != null && !identical(owner, _proxyOwner)) return;
+    _proxyOwner = null;
     _save = null;
     _reload = null;
     _syncAppearance = null;
   }
 
   void registerConnections({
+    Object? owner,
     required Future<void> Function() reload,
     Future<void> Function()? syncAppearance,
   }) {
+    _connectionsOwner = owner;
     _reloadConnections = reload;
     _syncConnectionsAppearance = syncAppearance;
   }
 
-  void unregisterConnections() {
+  void unregisterConnections({Object? owner}) {
+    if (owner != null && !identical(owner, _connectionsOwner)) return;
+    _connectionsOwner = null;
     _reloadConnections = null;
     _syncConnectionsAppearance = null;
   }

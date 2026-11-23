@@ -57,6 +57,26 @@ class ClashHostValidator {
     return ClashControllerEndpoint(hostname: hostname, port: port);
   }
 
+  static ({String address, String? error}) fromFields(
+      String rawAddress, String rawPort) {
+    final error = validationError(rawAddress);
+    if (error != null) return (address: '', error: error);
+    final endpoint = parseEndpoint(rawAddress);
+    if (endpoint == null) {
+      return (address: '', error: tr('请先填写控制器地址'));
+    }
+    final portText = rawPort.trim();
+    final port = portText.isEmpty
+        ? endpoint.port
+        : RegExp(r'^[0-9]+$').hasMatch(portText)
+            ? int.tryParse(portText)
+            : null;
+    if (port == null || port < 1 || port > 65535) {
+      return (address: '', error: tr('控制器端口必须为 1–65535 之间的整数'));
+    }
+    return (address: _formatHostPort(endpoint.hostname, port), error: null);
+  }
+
   static String hostOnly(String raw) {
     var value = raw.trim();
     if (value.isEmpty) return '';

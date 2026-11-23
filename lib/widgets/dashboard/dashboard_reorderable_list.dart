@@ -204,6 +204,36 @@ class _DashboardReorderableListState extends State<DashboardReorderableList>
             ? _dropIndex + 1
             : _dropIndex;
     return LayoutBuilder(builder: (context, constraints) {
+      Widget card(int index) => GestureDetector(
+            key: ValueKey(widget.children[index].key),
+            behavior: HitTestBehavior.opaque,
+            onLongPressStart:
+                widget.editing ? (details) => _startDrag(index, details) : null,
+            onLongPressMoveUpdate: widget.editing ? _moveDrag : null,
+            onLongPressEnd:
+                widget.editing ? (_) => _finishDrag(commit: true) : null,
+            child: Container(
+              key: _itemKeys.putIfAbsent(
+                  widget.children[index].key!, GlobalKey.new),
+              foregroundDecoration: BoxDecoration(
+                border: Border(
+                  top: BorderSide(
+                      color: boundary == index && _dropIndex != dragged
+                          ? primary
+                          : Colors.transparent,
+                      width: 2),
+                  bottom: BorderSide(
+                      color: boundary == widget.children.length &&
+                              index == widget.children.length - 1 &&
+                              _dropIndex != dragged
+                          ? primary
+                          : Colors.transparent,
+                      width: 2),
+                ),
+              ),
+              child: _content(context, index),
+            ),
+          );
       final scale = dragged == null
           ? 1.0
           : (constraints.maxHeight * 0.6 / _dragSize.height).clamp(0.01, 0.88);
@@ -226,39 +256,7 @@ class _DashboardReorderableListState extends State<DashboardReorderableList>
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   for (var index = 0; index < widget.children.length; index++)
-                    GestureDetector(
-                      key: ValueKey(widget.children[index].key),
-                      behavior: HitTestBehavior.opaque,
-                      onLongPressStart: widget.editing
-                          ? (details) => _startDrag(index, details)
-                          : null,
-                      onLongPressMoveUpdate: widget.editing ? _moveDrag : null,
-                      onLongPressEnd: widget.editing
-                          ? (_) => _finishDrag(commit: true)
-                          : null,
-                      child: Container(
-                        key: _itemKeys.putIfAbsent(
-                            widget.children[index].key!, GlobalKey.new),
-                        foregroundDecoration: BoxDecoration(
-                          border: Border(
-                            top: BorderSide(
-                                color:
-                                    boundary == index && _dropIndex != dragged
-                                        ? primary
-                                        : Colors.transparent,
-                                width: 2),
-                            bottom: BorderSide(
-                                color: boundary == widget.children.length &&
-                                        index == widget.children.length - 1 &&
-                                        _dropIndex != dragged
-                                    ? primary
-                                    : Colors.transparent,
-                                width: 2),
-                          ),
-                        ),
-                        child: _content(context, index),
-                      ),
-                    ),
+                    card(index),
                   widget.footer,
                 ],
               ),

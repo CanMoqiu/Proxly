@@ -10,11 +10,12 @@ def keystorePropertiesFile = rootProject.file("key.properties")
 if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
 }
+def unsignedRelease = System.getenv("PROXLY_UNSIGNED_ANDROID_RELEASE") == "1"
 def hasReleaseSigning = ["storeFile", "storePassword", "keyAlias", "keyPassword"]
         .every { keystoreProperties[it] != null && keystoreProperties[it].toString().trim() }
 
 gradle.taskGraph.whenReady { graph ->
-    if (!hasReleaseSigning &&
+    if (!unsignedRelease && !hasReleaseSigning &&
             graph.allTasks.any { it.name.toLowerCase().contains("release") }) {
         throw new GradleException(
                 "Release signing is not configured. Create android/key.properties with storeFile, storePassword, keyAlias, and keyPassword.")
@@ -66,7 +67,7 @@ android {
             applicationIdSuffix = ".debug"
         }
         release {
-            if (hasReleaseSigning) {
+            if (hasReleaseSigning && !unsignedRelease) {
                 signingConfig = signingConfigs.release
             }
         }

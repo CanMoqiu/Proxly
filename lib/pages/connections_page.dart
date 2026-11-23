@@ -84,6 +84,7 @@ class _ConnectionsPageState extends State<ConnectionsPage>
   // Plugin callbacks can wrap the same native controller in different Dart
   // objects. Compare their shared platform controller to reject stale views.
   bool _isCurrentController(InAppWebViewController controller) =>
+      _currentDevice &&
       identical(controller.platform, _webViewController?.platform);
   UserScript? _connectionUserScript;
   UserScript? _restoreUserScript;
@@ -93,7 +94,13 @@ class _ConnectionsPageState extends State<ConnectionsPage>
   bool _webViewReady = false;
   bool _coreSettingsImportInProgress = false;
 
-  static const _prefLocalStorage = ZashboardSettingsImportService.preferenceKey;
+  late final int _deviceGeneration;
+  late final String? _deviceId;
+  bool get _currentDevice =>
+      _deviceId == null ||
+      _deviceGeneration == ConnectionSettingsStore.instance.deviceGeneration;
+  String get _prefLocalStorage =>
+      ZashboardSettingsImportService.storageKeyFor(_deviceId);
   static const _mobileUserAgent =
       'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 '
       '(KHTML, like Gecko) Chrome/125.0.0.0 Mobile Safari/537.36';
@@ -270,9 +277,13 @@ class _ConnectionsPageState extends State<ConnectionsPage>
   @override
   void initState() {
     super.initState();
+    final store = ConnectionSettingsStore.instance;
+    _deviceId = store.activeDevice?.id;
+    _deviceGeneration = store.deviceGeneration;
     _panelLoad.addListener(_handlePanelLoad);
     WidgetsBinding.instance.addObserver(this);
     WebPanelSync.instance.registerConnections(
+      owner: this,
       reload: _reloadWebView,
       syncAppearance: _syncAppearanceFromApp,
     );
@@ -308,6 +319,7 @@ class _ConnectionsPageState extends State<ConnectionsPage>
   }
 
   Future<void> _startLocalServerImpl() async {
+    if (!_currentDevice) return;
     final generation = ++_serverGeneration;
     await _buildRestoreScript();
     if (!mounted || generation != _serverGeneration) return;
@@ -316,6 +328,7 @@ class _ConnectionsPageState extends State<ConnectionsPage>
     _themeUserScript = _buildThemeUserScript(_isDark);
 
     final settings = await ConnectionSettingsStore.instance.load();
+    if (!_currentDevice) return;
     final endpoint = ClashHostValidator.parseEndpoint(settings.host);
     if (!mounted || generation != _serverGeneration) return;
     if (endpoint == null) {
@@ -327,6 +340,7 @@ class _ConnectionsPageState extends State<ConnectionsPage>
       port: endpoint.port,
       token: settings.token,
       connectionState: ControllerConnectionState.instance,
+      deviceGeneration: _deviceId == null ? null : _deviceGeneration,
     );
     AssetHttpServer? assetServer;
     FileHttpServer? fileServer;
@@ -405,7 +419,7 @@ class _ConnectionsPageState extends State<ConnectionsPage>
     _panelLoad.removeListener(_handlePanelLoad);
     _panelLoad.dispose();
     WidgetsBinding.instance.removeObserver(this);
-    WebPanelSync.instance.unregisterConnections();
+    WebPanelSync.instance.unregisterConnections(owner: this);
     WebPanelSync.instance.unregisterWebView(this);
     ConnectionSettingsStore.instance
         .removeListener(_handleConnectionSettingsChanged);
@@ -415,6 +429,13 @@ class _ConnectionsPageState extends State<ConnectionsPage>
   }
 
   void _handleConnectionSettingsChanged() {
+    if (!_currentDevice) {
+      _serverGeneration++;
+      _webViewController = null;
+      _assetServer?.close();
+      _fileServer?.close();
+      return;
+    }
     final change = ConnectionSettingsStore.instance.lastChange;
     if (change == ConnectionSettingsChange.controller ||
         change == ConnectionSettingsChange.reset) {
@@ -493,7 +514,9 @@ class _ConnectionsPageState extends State<ConnectionsPage>
       if (raw.isEmpty || raw == 'null') return false;
 
       try {
-        await ZashboardSettingsImportService.instance.importSnapshot(raw);
+        await ZashboardSettingsImportService.instance.importSnapshot(raw,
+            deviceId: _deviceId,
+            expectedGeneration: _deviceId == null ? null : _deviceGeneration);
       } catch (error) {
         debugPrint('[ConnectionsPage] 核心设置导入失败: $error');
       }
@@ -583,8 +606,10 @@ class _ConnectionsPageState extends State<ConnectionsPage>
 
   Future<void> _buildRestoreScript() async {
     final prefs = await SharedPreferences.getInstance();
-    final content =
-        await ConnectionPanelPreferences.instance.load(tablet: _tablet);
+    final content = await ConnectionPanelPreferences.instance.load(
+      tablet: _tablet,
+      deviceId: _deviceId,
+    );
     _connectionViewScript = UserScript(
       source: ConnectionPanelPreferences.script(content, tablet: _tablet),
       injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
@@ -603,7 +628,7 @@ class _ConnectionsPageState extends State<ConnectionsPage>
         return;
       }
       if (sanitized != raw) {
-        await prefs.setString(_prefLocalStorage, sanitized);
+        if (_currentDevice) await prefs.setString(_prefLocalStorage, sanitized);
         raw = sanitized;
       }
     } catch (_) {
@@ -828,8 +853,10 @@ class _ConnectionsPageState extends State<ConnectionsPage>
   }
 
   Future<void> _applyConnectionViewPrefs({bool reveal = true}) async {
-    final content =
-        await ConnectionPanelPreferences.instance.load(tablet: _tablet);
+    final content = await ConnectionPanelPreferences.instance.load(
+      tablet: _tablet,
+      deviceId: _deviceId,
+    );
     await _webViewController?.evaluateJavascript(
       source: ConnectionPanelPreferences.script(content, tablet: _tablet),
     );
@@ -916,6 +943,7 @@ class _ConnectionsPageState extends State<ConnectionsPage>
                 ConnectionPanelPreferences.instance.bind(
                   c,
                   tablet: _tablet,
+                  deviceId: _deviceId,
                   port: _serverPort,
                   isCurrent: () => mounted && _isCurrentController(c),
                 );

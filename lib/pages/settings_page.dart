@@ -1,12 +1,17 @@
 import 'dart:async';
+
 import '../l10n/app_locale.dart';
+
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import '../services/app_secure_storage.dart';
 import '../services/clash_data_hub.dart';
 import '../services/connection_settings_store.dart';
 import '../services/clash_host_validator.dart';
 import '../services/clash_service.dart';
 import '../services/connection_feedback.dart';
+import '../services/controller_connection_state.dart';
 import '../services/router_tool.dart';
 import '../services/router_detection_service.dart';
 import '../services/router_detection_session.dart';
@@ -14,37 +19,63 @@ import '../services/web_panel_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/adaptive_ui.dart';
 import '../widgets/app_feedback.dart';
+import '../widgets/app_popup.dart';
+import '../widgets/controller_form_fields.dart';
+import '../widgets/dashboard/dashboard_button_style.dart';
 import 'about_page.dart';
 import 'developer_options_page.dart';
+import 'device_management_page.dart';
 import '../main.dart';
 
 class SettingsPage extends StatefulWidget {
-  const SettingsPage({super.key, this.detectionService});
+  const SettingsPage({super.key, this.detectionService, this.active = true});
   final RouterDetectionService? detectionService;
+  final bool active;
   @override
   State<SettingsPage> createState() => _SettingsPageState();
 }
 
 class _SettingsPageState extends State<SettingsPage>
     with TransientFeedbackStateMixin<SettingsPage> {
+  final _deviceNameController = TextEditingController();
   final _hostController = TextEditingController();
+  final _controllerPort = TextEditingController();
   final _tokenController = TextEditingController();
   final _sshPasswordController = TextEditingController();
   final _sshPortController = TextEditingController(text: '22');
-  bool _obscureToken = true;
-  bool _obscureSshPassword = true;
+  late final _fields = [
+    _deviceNameController,
+    _hostController,
+    _controllerPort,
+    _tokenController,
+    _sshPasswordController,
+    _sshPortController,
+  ];
+  late Map<TextEditingController, String> _savedFields = {
+    for (final field in _fields) field: field.text,
+  };
+  RouterTool _savedRouterTool = RouterTool.generic;
+  ProxyCore _savedCore = ProxyCore.unknown;
+  RouterTool? _backendChoice;
   bool _testing = false;
+  int _testRevision = 0;
+  int _settingsRevision = 0;
   RouterTool _routerTool = RouterTool.generic;
   ProxyCore _core = ProxyCore.unknown;
   String? _detectedInput;
 
   String get _detectionInput => [
         _hostController.text,
+        _controllerPort.text,
         _tokenController.text,
         _sshPortController.text,
-        _sshPasswordController.text
+        _sshPasswordController.text,
       ].join("\u0000");
   bool _saving = false;
+  bool _switchingDevice = false;
+  String? _deviceSwitchMessage;
+  bool _deviceSwitchFailed = false;
+  Future<void>? _settingsReload;
   bool _updatingControllerValues = false;
   bool _settingsLoadFailed = false;
   String? _testResult;
@@ -55,10 +86,21 @@ class _SettingsPageState extends State<SettingsPage>
     super.initState();
     ConnectionSettingsStore.instance.addListener(_handleSettingsChanged);
     _hostController.addListener(_clearTestResultOnInput);
+    _controllerPort.addListener(_clearTestResultOnInput);
     _tokenController.addListener(_clearTestResultOnInput);
     _sshPortController.addListener(_clearTestResultOnInput);
     _sshPasswordController.addListener(_clearTestResultOnInput);
     _loadSettings();
+  }
+
+  @override
+  void didUpdateWidget(covariant SettingsPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.active && !widget.active) {
+      _testRevision++;
+      _testing = false;
+      _restoreSavedController();
+    }
   }
 
   void _handleSettingsChanged() {
@@ -66,17 +108,25 @@ class _SettingsPageState extends State<SettingsPage>
         ConnectionSettingsChange.routerIdentity) {
       unawaited(_syncRouterIdentity());
     } else {
-      unawaited(_loadSettings());
+      final reload = _loadSettings();
+      _settingsReload = reload;
+      unawaited(reload);
     }
   }
 
   Future<void> _syncRouterIdentity() async {
+    final store = ConnectionSettingsStore.instance;
+    final revision = store.revision;
     try {
-      final settings = await ConnectionSettingsStore.instance.load();
-      if (!mounted || _detectedInput != _detectionInput) return;
+      final settings = await store.load();
+      if (!mounted || store.revision != revision) return;
       setState(() {
-        _routerTool = settings.routerTool;
-        _core = settings.core;
+        _savedRouterTool = settings.routerTool;
+        _savedCore = settings.core;
+        if (_detectedInput == _detectionInput) {
+          _routerTool = _savedRouterTool;
+          _core = _savedCore;
+        }
       });
     } catch (_) {
       // Keep the current form if credentials are temporarily unavailable.
@@ -110,27 +160,45 @@ class _SettingsPageState extends State<SettingsPage>
     );
   }
 
+  void _restoreSavedController() {
+    cancelFeedbackClear('connection_test');
+    _updatingControllerValues = true;
+    for (final entry in _savedFields.entries) {
+      if (entry.key.text != entry.value) entry.key.text = entry.value;
+    }
+    _updatingControllerValues = false;
+    _backendChoice = null;
+    _routerTool = _savedRouterTool;
+    _core = _savedCore;
+    _detectedInput = _detectionInput;
+    _testResult = null;
+  }
+
   Future<void> _loadSettings() async {
+    final revision = ++_settingsRevision;
+    final store = ConnectionSettingsStore.instance;
     try {
-      final settings = await ConnectionSettingsStore.instance.load();
-      if (mounted) {
-        cancelFeedbackClear('connection_test');
-        setState(() {
-          _settingsLoadFailed = false;
-          _routerTool = settings.routerTool;
-          _core = settings.core;
-          _updatingControllerValues = true;
-          _hostController.text = settings.host;
-          _tokenController.text = settings.token;
-          _sshPasswordController.text = settings.sshPassword;
-          _sshPortController.text = settings.sshPort.toString();
-          _updatingControllerValues = false;
-          _detectedInput = _detectionInput;
-          _testResult = null;
-        });
-      }
+      final settings = await store.load();
+      if (!mounted || revision != _settingsRevision) return;
+      final endpoint = ClashHostValidator.parseEndpoint(settings.host);
+      setState(() {
+        _settingsLoadFailed = false;
+        _savedRouterTool = settings.routerTool;
+        _savedCore = settings.core;
+        _savedFields = {
+          _deviceNameController: store.activeDevice?.name ?? '',
+          _hostController: endpoint?.hostname ?? '',
+          _controllerPort: endpoint?.portText ?? '',
+          _tokenController: settings.token,
+          _sshPasswordController: settings.sshPassword,
+          _sshPortController: settings.sshPort.toString(),
+        };
+        _restoreSavedController();
+      });
     } catch (_) {
-      if (mounted) setState(() => _settingsLoadFailed = true);
+      if (mounted && revision == _settingsRevision) {
+        setState(() => _settingsLoadFailed = true);
+      }
     }
   }
 
@@ -148,28 +216,16 @@ class _SettingsPageState extends State<SettingsPage>
   }
 
   Future<void> _saveSettings() async {
-    if (_testing || _saving) return;
+    if (_testing || _saving || _switchingDevice) return;
     if (_settingsLoadFailed) {
       await _loadSettings();
       return;
     }
     FocusManager.instance.primaryFocus?.unfocus();
-    final host = ClashHostValidator.normalizeAddress(_hostController.text);
-    if (host.isEmpty) {
-      AppFeedback.showSnackBar(
-        context,
-        tr('请先填写控制器地址'),
-        tone: AppFeedbackTone.error,
-      );
-      return;
-    }
-    final hostError = ClashHostValidator.validationError(host);
-    if (hostError != null) {
-      AppFeedback.showSnackBar(
-        context,
-        hostError,
-        tone: AppFeedbackTone.error,
-      );
+    final endpoint = ClashHostValidator.fromFields(
+        _hostController.text, _controllerPort.text);
+    if (endpoint.error case final error?) {
+      AppFeedback.showSnackBar(context, error, tone: AppFeedbackTone.error);
       return;
     }
     final sshPort = ConnectionSettings.parseSshPort(_sshPortController.text);
@@ -184,14 +240,21 @@ class _SettingsPageState extends State<SettingsPage>
     setState(() => _saving = true);
     try {
       await ConnectionSettingsStore.instance.saveController(
-        host: host,
+        host: endpoint.address,
+        deviceName: ConnectionSettingsStore.instance.activeDevice != null ||
+                _deviceNameController.text.trim().isNotEmpty
+            ? _deviceNameController.text
+            : null,
         token: _tokenController.text.trim(),
         sshPassword: _sshPasswordController.text,
         sshPort: sshPort,
-        routerTool: _routerTool,
+        routerTool: _backendChoice ?? _routerTool,
         core: _core,
-        routerSelectionPending: _routerTool == RouterTool.generic,
+        routerToolConfirmed: _backendChoice != null,
+        routerSelectionPending:
+            _backendChoice == null && _routerTool == RouterTool.generic,
       );
+      await _settingsReload;
       await ClashService.instance.loadConfig();
       unawaited(RouterDetectionSession.instance.refresh());
       ClashDataHub.instance.resetBaseline(clearSnapshot: true);
@@ -205,6 +268,11 @@ class _SettingsPageState extends State<SettingsPage>
           tr('设置已保存'),
           tone: AppFeedbackTone.success,
         );
+      }
+    } on ArgumentError {
+      if (mounted) {
+        AppFeedback.showSnackBar(context, tr('设备名称已使用'),
+            tone: AppFeedbackTone.error);
       }
     } catch (e) {
       if (mounted) {
@@ -220,19 +288,15 @@ class _SettingsPageState extends State<SettingsPage>
   }
 
   Future<void> _testConnection() async {
-    if (_testing) return;
+    if (_testing || _saving || _switchingDevice) return;
     if (ConnectionSettings.parseSshPort(_sshPortController.text) == null) {
       _setTestResult('SSH 端口必须为 1–65535 之间的整数', success: false);
       return;
     }
-    final host = ClashHostValidator.normalizeAddress(_hostController.text);
-    if (host.isEmpty) {
-      _setTestResult('请先填写 Clash 控制器地址', success: false);
-      return;
-    }
-    final hostError = ClashHostValidator.validationError(host);
-    if (hostError != null) {
-      _setTestResult(hostError, success: false);
+    final endpoint = ClashHostValidator.fromFields(
+        _hostController.text, _controllerPort.text);
+    if (endpoint.error case final error?) {
+      _setTestResult(error, success: false);
       return;
     }
     cancelFeedbackClear('connection_test');
@@ -241,31 +305,133 @@ class _SettingsPageState extends State<SettingsPage>
       _testResult = null;
     });
     final input = _detectionInput;
+    final revision = ++_testRevision;
     try {
       await (widget.detectionService ?? RouterDetectionService()).detect(
-          host: host,
-          token: _tokenController.text.trim(),
-          sshPassword: '',
-          sshPort:
-              ConnectionSettings.parseSshPort(_sshPortController.text) ?? 22);
-      if (!mounted || input != _detectionInput) return;
+        host: endpoint.address,
+        token: _tokenController.text.trim(),
+        sshPassword: '',
+        sshPort: ConnectionSettings.parseSshPort(_sshPortController.text) ?? 22,
+      );
+      if (!mounted || revision != _testRevision || input != _detectionInput) {
+        return;
+      }
       _setTestResult('连接正常', success: true);
-    } catch (e) {
-      _setTestResult(ConnectionFeedback.unavailable, success: false);
+    } catch (_) {
+      if (mounted && revision == _testRevision && input == _detectionInput) {
+        _setTestResult(ConnectionFeedback.unavailable, success: false);
+      }
     } finally {
-      if (mounted) setState(() => _testing = false);
+      if (mounted && revision == _testRevision) {
+        setState(() => _testing = false);
+      }
     }
+  }
+
+  Future<void> _chooseBackend() async {
+    final store = ConnectionSettingsStore.instance;
+    final generation = store.deviceGeneration;
+    final selected = await showControllerBackendPicker(
+        context, _backendChoice ?? _routerTool);
+    if (!mounted ||
+        !widget.active ||
+        selected == null ||
+        store.deviceGeneration != generation) {
+      return;
+    }
+    setState(() => _backendChoice = selected);
+  }
+
+  Future<void> _openDeviceSwitcher() async {
+    if (_saving || _testing || _switchingDevice) return;
+    FocusManager.instance.primaryFocus?.unfocus();
+    final store = ConnectionSettingsStore.instance;
+    cancelFeedbackClear('device_switch');
+    setState(() {
+      _switchingDevice = true;
+      _deviceSwitchMessage = null;
+    });
+    try {
+      final selected = await AppPopup.sheet<DeviceProfile>(
+        context: context,
+        builder: (_) => const DeviceManagementSheet(),
+      );
+      if (!mounted ||
+          selected == null ||
+          selected.id == store.activeDevice?.id) {
+        return;
+      }
+
+      if (!store.canSwitchDevice) {
+        _setDeviceSwitchFeedback('远端操作完成后可切换设备。', failed: true);
+        return;
+      }
+      await store.switchDevice(selected.id);
+      await _settingsReload;
+      _setDeviceSwitchFeedback('已切换到 ${selected.name}');
+    } on SecureStorageUnavailableException {
+      _setDeviceSwitchFeedback('无法读取目标设备的凭据，请解锁后重试。', failed: true);
+    } catch (_) {
+      _setDeviceSwitchFeedback('无法切换设备，请稍后重试。', failed: true);
+    } finally {
+      if (mounted) setState(() => _switchingDevice = false);
+    }
+  }
+
+  void _setDeviceSwitchFeedback(String message, {bool failed = false}) {
+    if (!mounted) return;
+    setState(() {
+      _deviceSwitchMessage = message;
+      _deviceSwitchFailed = failed;
+    });
+    scheduleFeedbackClear(
+      'device_switch',
+      isError: failed,
+      clear: () => setState(() => _deviceSwitchMessage = null),
+    );
+  }
+
+  Widget _controllerStatus(AppPalette palette) {
+    final connection = ControllerConnectionState.instance;
+    return ListenableBuilder(
+      listenable: connection,
+      builder: (context, _) {
+        final phase = connection.phase;
+        final message = switch (phase) {
+          ControllerConnectionPhase.unknown => '检查中…',
+          ControllerConnectionPhase.online => '已连接',
+          ControllerConnectionPhase.offline => '设备离线',
+          ControllerConnectionPhase.unauthorized => '请检查控制器密钥。',
+          ControllerConnectionPhase.restarting => '重启中',
+        };
+        final failed = phase == ControllerConnectionPhase.offline ||
+            phase == ControllerConnectionPhase.unauthorized;
+        return Semantics(
+          liveRegion: true,
+          child: Text(
+            tr(message),
+            style: TextStyle(
+              fontSize: 12,
+              color: failed ? palette.error : palette.textSecondary,
+            ),
+          ),
+        );
+      },
+    );
   }
 
   @override
   void dispose() {
     ConnectionSettingsStore.instance.removeListener(_handleSettingsChanged);
     _hostController.removeListener(_clearTestResultOnInput);
+    _controllerPort.removeListener(_clearTestResultOnInput);
     _tokenController.removeListener(_clearTestResultOnInput);
     _sshPortController.removeListener(_clearTestResultOnInput);
     _sshPasswordController.removeListener(_clearTestResultOnInput);
     disposeTransientFeedback();
+    _deviceNameController.dispose();
     _hostController.dispose();
+    _controllerPort.dispose();
     _tokenController.dispose();
     _sshPasswordController.dispose();
     _sshPortController.dispose();
@@ -279,20 +445,8 @@ class _SettingsPageState extends State<SettingsPage>
     final palette = AppPalette.of(context);
     final cardBg = palette.surface;
     final cardBorder = palette.border;
-    final inputBg = palette.inputBackground;
-    final labelColor = palette.textSecondary;
     final textColor = palette.textPrimary;
     final hintColor = palette.textSecondary;
-    final primary = Theme.of(context).colorScheme.primary;
-    final inputBorder = OutlineInputBorder(
-      borderRadius: BorderRadius.circular(10),
-      borderSide: BorderSide(color: cardBorder, width: 0.5),
-    );
-    final focusedBorder = OutlineInputBorder(
-      borderRadius: BorderRadius.circular(10),
-      borderSide: BorderSide(color: primary, width: 1),
-    );
-
     final bgColor = palette.pageBackground;
     final dividerColor = palette.border;
 
@@ -319,326 +473,211 @@ class _SettingsPageState extends State<SettingsPage>
       ),
       body: GestureDetector(
         onTap: () => FocusScope.of(context).unfocus(),
-        child: SingleChildScrollView(
-          padding: AdaptiveScrollPadding.page(context, top: 24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Container(
-                key: const ValueKey('settings_connection_card'),
-                decoration: BoxDecoration(
-                  color: cardBg,
-                  borderRadius: BorderRadius.circular(18),
-                  border: Border.all(color: cardBorder, width: 0.5),
-                ),
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (_settingsLoadFailed) ...[
-                      Text(tr('凭据暂时不可用，请解锁设备后重试。已保存的配置未被删除。')),
-                      TextButton(
-                          onPressed: _loadSettings, child: Text(tr('重试'))),
-                    ],
-                    LabeledInputField(
-                      title: tr('控制器地址'),
-                      description: tr('填写 Clash API 地址，格式为 IP:端口'),
-                      titleColor: textColor,
-                      descriptionColor: labelColor,
-                      child: TextField(
-                        controller: _hostController,
-                        style: TextStyle(fontSize: 14, color: textColor),
-                        keyboardType: TextInputType.url,
-                        textInputAction: TextInputAction.next,
-                        autocorrect: false,
-                        enableSuggestions: false,
-                        decoration: InputDecoration(
-                          hintText: tr('IP:端口'),
-                          hintStyle: TextStyle(color: hintColor),
-                          filled: true,
-                          fillColor: inputBg,
-                          border: inputBorder,
-                          enabledBorder: inputBorder,
-                          focusedBorder: focusedBorder,
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 14,
-                            vertical: 12,
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    LabeledInputField(
-                      title: tr('外部控制密钥（可选）'),
-                      description: tr('用于访问已设置密钥的控制器，未设置可留空'),
-                      titleColor: textColor,
-                      descriptionColor: labelColor,
-                      child: TextField(
-                        controller: _tokenController,
-                        obscureText: _obscureToken,
-                        style: TextStyle(fontSize: 14, color: textColor),
-                        textInputAction: TextInputAction.next,
-                        autocorrect: false,
-                        enableSuggestions: false,
-                        decoration: InputDecoration(
-                          hintText: tr('请输入密钥'),
-                          hintStyle: TextStyle(color: hintColor),
-                          filled: true,
-                          fillColor: inputBg,
-                          border: inputBorder,
-                          enabledBorder: inputBorder,
-                          focusedBorder: focusedBorder,
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 14,
-                            vertical: 12,
-                          ),
-                          suffixIcon: IconButton(
-                            icon: Icon(
-                              _obscureToken
-                                  ? Icons.visibility_off_outlined
-                                  : Icons.visibility_outlined,
-                              color: hintColor,
-                              size: 20,
-                            ),
-                            onPressed: () =>
-                                setState(() => _obscureToken = !_obscureToken),
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    LabeledInputField(
-                      title: tr('SSH 端口'),
-                      description: tr('留空使用默认端口 22'),
-                      titleColor: textColor,
-                      descriptionColor: labelColor,
-                      child: TextField(
-                        key: const ValueKey('ssh_port_field'),
-                        controller: _sshPortController,
-                        style: TextStyle(fontSize: 14, color: textColor),
-                        keyboardType: TextInputType.number,
-                        textInputAction: TextInputAction.next,
-                        autocorrect: false,
-                        enableSuggestions: false,
-                        decoration: InputDecoration(
-                          hintText: '22',
-                          hintStyle: TextStyle(color: hintColor),
-                          filled: true,
-                          fillColor: inputBg,
-                          border: inputBorder,
-                          enabledBorder: inputBorder,
-                          focusedBorder: focusedBorder,
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 14,
-                            vertical: 12,
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    LabeledInputField(
-                      title: tr('SSH 密码（可选）'),
-                      description: tr('用于识别代理软件、管理 YAML 和重启服务，未使用 SSH 可留空'),
-                      titleColor: textColor,
-                      descriptionColor: labelColor,
-                      child: TextField(
-                        controller: _sshPasswordController,
-                        obscureText: _obscureSshPassword,
-                        style: TextStyle(fontSize: 14, color: textColor),
-                        textInputAction: TextInputAction.done,
-                        autocorrect: false,
-                        enableSuggestions: false,
-                        decoration: InputDecoration(
-                          hintText: tr('请输入密码'),
-                          hintStyle: TextStyle(color: hintColor),
-                          filled: true,
-                          fillColor: inputBg,
-                          border: inputBorder,
-                          enabledBorder: inputBorder,
-                          focusedBorder: focusedBorder,
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 14,
-                            vertical: 12,
-                          ),
-                          suffixIcon: IconButton(
-                            icon: Icon(
-                              _obscureSshPassword
-                                  ? Icons.visibility_off_outlined
-                                  : Icons.visibility_outlined,
-                              color: hintColor,
-                              size: 20,
-                            ),
-                            onPressed: () => setState(
-                              () => _obscureSshPassword = !_obscureSshPassword,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                    if (_testResult != null) ...[
-                      const SizedBox(height: 12),
+        child: AdaptiveContent(
+          child: SingleChildScrollView(
+            padding: AdaptiveScrollPadding.page(context, top: 24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Container(
+                  key: const ValueKey('settings_connection_card'),
+                  decoration: BoxDecoration(
+                    color: cardBg,
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(color: cardBorder, width: 0.5),
+                  ),
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
                       Row(
                         children: [
-                          Container(
-                            width: 7,
-                            height: 7,
-                            decoration: BoxDecoration(
-                              color: _testSuccess
-                                  ? palette.success
-                                  : palette.error,
-                              shape: BoxShape.circle,
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  tr('控制器设置'),
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                    color: textColor,
+                                  ),
+                                ),
+                                if (ConnectionSettingsStore
+                                        .instance.activeDevice !=
+                                    null)
+                                  _controllerStatus(palette),
+                              ],
                             ),
                           ),
                           const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              tr(_testResult!),
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: _testSuccess
-                                    ? palette.success
-                                    : palette.error,
+                          TextButton(
+                            key: const ValueKey('settings_switch_device'),
+                            style: ButtonStyle(
+                              splashFactory: NoSplash.splashFactory,
+                              overlayColor: WidgetStateProperty.resolveWith(
+                                (states) => states.contains(WidgetState.pressed)
+                                    ? Colors.transparent
+                                    : null,
                               ),
                             ),
+                            onPressed: _saving || _testing || _switchingDevice
+                                ? null
+                                : _openDeviceSwitcher,
+                            child: Text(tr('切换')),
                           ),
                         ],
                       ),
-                    ],
-                    const SizedBox(height: 16),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: GestureDetector(
-                            onTap: _testing ? null : _testConnection,
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                              decoration: BoxDecoration(
-                                border: Border.all(color: primary, width: 0.8),
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: Center(
-                                child: _testing
-                                    ? SizedBox(
-                                        width: 16,
-                                        height: 16,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                          color: primary,
-                                        ),
-                                      )
-                                    : AdaptiveSingleLineText(
-                                        tr('测试连接'),
-                                        style: TextStyle(
-                                          fontSize: 14,
-                                          fontWeight: FontWeight.w500,
-                                          color: primary,
-                                        ),
-                                      ),
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          flex: 2,
-                          child: GestureDetector(
-                            onTap: _saving ? null : _saveSettings,
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                              decoration: BoxDecoration(
-                                color: primary,
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: Center(
-                                child: _saving
-                                    ? const SizedBox(
-                                        width: 16,
-                                        height: 16,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                          color: Colors.white,
-                                        ),
-                                      )
-                                    : AdaptiveSingleLineText(
-                                        tr('保存'),
-                                        style: TextStyle(
-                                          fontSize: 14,
-                                          fontWeight: FontWeight.w500,
-                                          color: Colors.white,
-                                        ),
-                                      ),
-                              ),
+                      if (_deviceSwitchMessage case final message?) ...[
+                        const SizedBox(height: 12),
+                        Semantics(
+                          liveRegion: true,
+                          child: Text(
+                            tr(message),
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: _deviceSwitchFailed
+                                  ? palette.error
+                                  : palette.success,
                             ),
                           ),
                         ),
                       ],
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 12),
-              Container(
-                key: const ValueKey('settings_theme_card'),
-                decoration: BoxDecoration(
-                  color: cardBg,
-                  borderRadius: BorderRadius.circular(18),
-                  border: Border.all(color: cardBorder, width: 0.5),
-                ),
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      tr('外观主题'),
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w500,
-                        color: textColor,
+                      const SizedBox(height: 16),
+                      if (_settingsLoadFailed) ...[
+                        Text(tr('凭据暂时不可用，请解锁设备后重试。已保存的配置未被删除。')),
+                        TextButton(
+                          onPressed: _loadSettings,
+                          child: Text(tr('重试')),
+                        ),
+                      ],
+                      ControllerFormFields(
+                        name: _deviceNameController,
+                        address: _hostController,
+                        port: _controllerPort,
+                        secret: _tokenController,
+                        sshPort: _sshPortController,
+                        sshSecret: _sshPasswordController,
+                        backend: _backendChoice ?? _routerTool,
+                        backendEdited: _backendChoice != null &&
+                            _backendChoice != _savedRouterTool,
+                        onChooseBackend: _chooseBackend,
+                        enabled: !_saving && !_switchingDevice,
+                        editedFields: {
+                          for (final entry in _savedFields.entries)
+                            if (entry.key.text != entry.value) entry.key,
+                        },
+                        onChanged: (_) => setState(() {}),
                       ),
-                    ),
-                    const SizedBox(height: 14),
-                    ThemeModeSelector(
-                      mode: ProxlyApp.activeThemeMode,
-                      isDark: isDark,
-                      lightLabel: tr('浅色'),
-                      darkLabel: tr('深色'),
-                      followSystemLabel: tr('跟随系统'),
-                      onChanged: _setTheme,
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 12),
-              _NavRow(
-                icon: Icons.code_rounded,
-                title: tr('高级选项'),
-                subtitle: tr('调试与实验性功能'),
-                cardBg: cardBg,
-                cardBorder: cardBorder,
-                textColor: textColor,
-                hintColor: hintColor,
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => const DeveloperOptionsPage(),
+                      const SizedBox(height: 16),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: _testing || _saving || _switchingDevice
+                                  ? null
+                                  : _testConnection,
+                              style: DashboardButtonStyle.action,
+                              child: _testing
+                                  ? const SizedBox.square(
+                                      dimension: 16,
+                                      child: CircularProgressIndicator(
+                                          strokeWidth: 2),
+                                    )
+                                  : AdaptiveSingleLineText(tr('测试连接')),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            flex: 2,
+                            child: FilledButton(
+                              onPressed: _testing || _saving || _switchingDevice
+                                  ? null
+                                  : _saveSettings,
+                              style: DashboardButtonStyle.action,
+                              child: _saving
+                                  ? const SizedBox.square(
+                                      dimension: 16,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: Colors.white,
+                                      ),
+                                    )
+                                  : AdaptiveSingleLineText(tr('保存')),
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (_testResult case final result?)
+                        ControllerTestFeedback(
+                          message: result,
+                          success: _testSuccess,
+                        ),
+                    ],
                   ),
                 ),
-              ),
-              const SizedBox(height: 12),
-              _NavRow(
-                icon: Icons.info_outline_rounded,
-                title: tr('关于 Proxly'),
-                subtitle: tr('功能介绍、版本日志、开源协议'),
-                cardBg: cardBg,
-                cardBorder: cardBorder,
-                textColor: textColor,
-                hintColor: hintColor,
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const AboutPage()),
+                const SizedBox(height: 12),
+                Container(
+                  key: const ValueKey('settings_theme_card'),
+                  decoration: BoxDecoration(
+                    color: cardBg,
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(color: cardBorder, width: 0.5),
+                  ),
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        tr('外观主题'),
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                          color: textColor,
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      ThemeModeSelector(
+                        mode: ProxlyApp.activeThemeMode,
+                        isDark: isDark,
+                        lightLabel: tr('浅色'),
+                        darkLabel: tr('深色'),
+                        followSystemLabel: tr('跟随系统'),
+                        onChanged: _setTheme,
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-            ],
+                const SizedBox(height: 12),
+                _NavRow(
+                  icon: Icons.code_rounded,
+                  title: tr('高级选项'),
+                  cardBg: cardBg,
+                  cardBorder: cardBorder,
+                  textColor: textColor,
+                  hintColor: hintColor,
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) => const DeveloperOptionsPage()),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                _NavRow(
+                  icon: Icons.info_outline_rounded,
+                  title: tr('关于 Proxly'),
+                  cardBg: cardBg,
+                  cardBorder: cardBorder,
+                  textColor: textColor,
+                  hintColor: hintColor,
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const AboutPage()),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -649,7 +688,6 @@ class _SettingsPageState extends State<SettingsPage>
 class _NavRow extends StatelessWidget {
   final IconData icon;
   final String title;
-  final String subtitle;
   final Color cardBg;
   final Color cardBorder;
   final Color textColor;
@@ -659,7 +697,6 @@ class _NavRow extends StatelessWidget {
   const _NavRow({
     required this.icon,
     required this.title,
-    required this.subtitle,
     required this.cardBg,
     required this.cardBorder,
     required this.textColor,
@@ -685,9 +722,10 @@ class _NavRow extends StatelessWidget {
               width: 34,
               height: 34,
               decoration: BoxDecoration(
-                color: Theme.of(
-                  context,
-                ).colorScheme.primary.withValues(alpha: 0.1),
+                color: Theme.of(context)
+                    .colorScheme
+                    .primary
+                    .withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(9),
               ),
               child: Icon(
@@ -698,23 +736,13 @@ class _NavRow extends StatelessWidget {
             ),
             const SizedBox(width: 12),
             Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    tr(title),
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w500,
-                      color: textColor,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    tr(subtitle),
-                    style: TextStyle(fontSize: 11, color: hintColor),
-                  ),
-                ],
+              child: Text(
+                tr(title),
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                  color: textColor,
+                ),
               ),
             ),
             Icon(Icons.chevron_right_rounded, size: 18, color: hintColor),

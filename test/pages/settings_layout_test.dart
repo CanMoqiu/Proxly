@@ -5,11 +5,12 @@ import 'package:proxly/l10n/app_locale.dart';
 import 'package:proxly/pages/settings_page.dart';
 import 'package:proxly/services/connection_settings_store.dart';
 import 'package:proxly/services/router_tool.dart';
+import 'package:proxly/theme/app_theme.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   testWidgets(
-      'background identity recognition preserves unsaved settings and has no software selector',
+      'background identity recognition preserves an unsaved controller address',
       (tester) async {
     SharedPreferences.setMockInitialValues({
       'app_language': 'en',
@@ -29,8 +30,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(DropdownButtonFormField<RouterTool>), findsNothing);
     expect(find.text('Identify proxy software and core'), findsNothing);
-    final host = find.byType(TextField).first;
-    await tester.enterText(host, 'unsaved-router.local:9095');
+    final host = find.byKey(const ValueKey('controller_address_field'));
+    await tester.enterText(host, 'unsaved-router.local');
     final store = ConnectionSettingsStore.instance;
     await store.applyRouterDetection(
         expectedHost: 'router.local:9090',
@@ -39,7 +40,7 @@ void main() {
         core: ProxyCore.mihomo);
     await tester.pumpAndSettle();
     expect(tester.widget<TextField>(host).controller!.text,
-        'unsaved-router.local:9095');
+        'unsaved-router.local');
     await tester.pumpWidget(const SizedBox());
   });
 
@@ -70,6 +71,9 @@ void main() {
     expect(tester.widget<TextField>(port).controller!.text, '2222');
     await tester.ensureVisible(port);
     await tester.enterText(port, '0');
+    expect(
+        find.widgetWithText(OutlinedButton, 'Test connection'), findsOneWidget);
+    expect(find.widgetWithText(FilledButton, 'Save'), findsOneWidget);
     tester.testTextInput.hide();
     await tester.ensureVisible(find.text('Save'));
     await tester.tap(find.text('Save'));
@@ -77,8 +81,80 @@ void main() {
     expect(find.text('SSH port must be an integer between 1 and 65535'),
         findsOneWidget);
     expect(writes, 0);
+    final warning = AppPalette.of(tester.element(port)).warning;
+    final decoration = tester.widget<TextField>(port).decoration!;
+    expect(decoration.enabledBorder?.borderSide.color, warning);
+    expect(decoration.focusedBorder?.borderSide.color, warning);
     expect((await SharedPreferences.getInstance()).getInt('ssh_port'), 2222);
     await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets(
+      'floating controller labels fit large text and leave port validation intact',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({
+      'app_language': 'en',
+      'clash_host': 'router.local:9095',
+    });
+    const channel =
+        MethodChannel('plugins.it_nomads.com/flutter_secure_storage');
+    tester.binding.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async => null);
+    addTearDown(() => tester.binding.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, null));
+    tester.view.physicalSize = const Size(360, 640);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await AppLocaleController.instance.load();
+    await tester.pumpWidget(AppLocaleScope(
+      controller: AppLocaleController.instance,
+      child: MaterialApp(
+        theme: ThemeData.dark(),
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(context)
+              .copyWith(textScaler: const TextScaler.linear(1.6)),
+          child: child!,
+        ),
+        home: const SettingsPage(),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    final name = find.byKey(const ValueKey('controller_name_field'));
+    final backend = find.byKey(const ValueKey('controller_backend_picker'));
+    final address = find.byKey(const ValueKey('controller_address_field'));
+    final port = find.byKey(const ValueKey('controller_port_field'));
+    expect(tester.getTopLeft(name).dy, lessThan(tester.getTopLeft(backend).dy));
+    expect(
+        tester.getTopLeft(backend).dy, lessThan(tester.getTopLeft(address).dy));
+    final addressLabel =
+        find.descendant(of: address, matching: find.text('Controller address'));
+    final addressValue =
+        find.descendant(of: address, matching: find.byType(EditableText));
+    expect(tester.getTopLeft(addressLabel).dy,
+        lessThan(tester.getTopLeft(addressValue).dy));
+    final addressInput = tester.widget<TextField>(address);
+    expect(addressInput.controller!.text, 'router.local');
+    expect(addressInput.textAlign, TextAlign.start);
+    expect(tester.getTopLeft(addressLabel).dx,
+        closeTo(tester.getTopLeft(addressValue).dx, .1));
+    expect(addressInput.decoration!.border, isA<OutlineInputBorder>());
+    expect(find.descendant(of: address, matching: find.text('192.168.1.1')),
+        findsNothing);
+    expect(tester.widget<TextField>(port).controller!.text, '9095');
+
+    await tester.ensureVisible(port);
+    await tester.enterText(port, '65536');
+    final save = find.text('Save');
+    await tester.ensureVisible(save);
+    await tester.pumpAndSettle();
+    await tester.tap(save);
+    await tester.pumpAndSettle();
+    expect(find.text('Controller port must be an integer between 1 and 65535'),
+        findsOneWidget);
+    expect((await SharedPreferences.getInstance()).getString('clash_host'),
+        'router.local:9095');
   });
 
   testWidgets('connection settings appear before appearance settings',

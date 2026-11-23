@@ -48,6 +48,14 @@ void main() {
         retries++;
       },
     ))));
+    expect(find.byIcon(Icons.wifi_off_rounded), findsOneWidget);
+    expect(
+      find.textContaining(RegExp(
+        r'局域网权限|local network permission',
+        caseSensitive: false,
+      )),
+      findsNothing,
+    );
     await tester.pump(const Duration(seconds: 10));
     expect(probes, 0);
     active = true;
@@ -64,7 +72,9 @@ void main() {
     expect(probes, 2);
     expect(retries, 1);
     await tester.pumpWidget(const SizedBox());
-  });
+  },
+      variant:
+          TargetPlatformVariant({TargetPlatform.android, TargetPlatform.iOS}));
 
   testWidgets('authentication errors never auto retry and taps cannot overlap',
       (tester) async {

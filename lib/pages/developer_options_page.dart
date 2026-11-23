@@ -1,14 +1,14 @@
 import '../widgets/app_popup.dart';
 import '../l10n/app_locale.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../main.dart';
+import '../services/optional_settings_visibility.dart';
 import '../services/ssh_host_trust_service.dart';
 import '../services/web_panel_service.dart';
 import '../services/web_panel_update_session.dart';
 import '../services/app_platform.dart';
-import '../services/connection_settings_store.dart';
-import '../services/router_tool.dart';
 import '../theme/app_theme.dart';
 import '../widgets/adaptive_ui.dart';
 import '../widgets/app_feedback.dart';
@@ -21,6 +21,7 @@ class DeveloperOptionsPage extends StatefulWidget {
 }
 
 class _DeveloperOptionsPageState extends State<DeveloperOptionsPage> {
+  bool _showOptionalSettings = false;
   bool _showBall = false;
   bool _showConsoleButton = false;
   int _trustedSshHosts = 0;
@@ -29,15 +30,11 @@ class _DeveloperOptionsPageState extends State<DeveloperOptionsPage> {
   String _webPanelVersion = WebPanelService.builtinVersion;
   final _panelUpdate = WebPanelUpdateSession.instance;
   bool _loaded = false;
-  RouterTool? _routerTool;
-  int _toolGeneration = 0;
-  bool _choosingRouterTool = false;
 
   @override
   void initState() {
     super.initState();
     _panelUpdate.addListener(_handlePanelUpdate);
-    ConnectionSettingsStore.instance.addListener(_loadRouterTool);
     _loadSettings();
   }
 
@@ -54,16 +51,15 @@ class _DeveloperOptionsPageState extends State<DeveloperOptionsPage> {
   @override
   void dispose() {
     _panelUpdate.removeListener(_handlePanelUpdate);
-    ConnectionSettingsStore.instance.removeListener(_loadRouterTool);
     super.dispose();
   }
 
   Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
     final webPanelVersion = await WebPanelService.getActiveVersion();
-    await _loadRouterTool();
     if (mounted) {
       setState(() {
+        _showOptionalSettings = OptionalSettingsVisibility.read(prefs);
         _showBall = prefs.getBool('show_floating_ball') ?? false;
         _showConsoleButton = prefs.getBool('show_console_button') ?? false;
         _connectionsTabMode =
@@ -73,59 +69,6 @@ class _DeveloperOptionsPageState extends State<DeveloperOptionsPage> {
       });
     }
     _loadTrustedSshHosts();
-  }
-
-  Future<void> _loadRouterTool() async {
-    final generation = ++_toolGeneration;
-    try {
-      final tool = await ConnectionSettingsStore.instance.loadRouterTool();
-      if (mounted && generation == _toolGeneration) {
-        setState(() => _routerTool = tool);
-      }
-    } catch (_) {
-      // Optional identity display must not block the other settings.
-    }
-  }
-
-  Future<void> _chooseRouterTool() async {
-    if (_choosingRouterTool) return;
-    setState(() => _choosingRouterTool = true);
-    try {
-      final store = ConnectionSettingsStore.instance;
-      final identity = await store.loadRouterIdentity();
-      if (!mounted) return;
-      final selected = await AppPopup.sheet<RouterTool>(
-          context: context,
-          builder: (_) => AppOptionsSheet<RouterTool>(
-                title: tr('选择代理软件'),
-                description: tr('自动识别不准确时，可手动选择当前使用的软件。'),
-                selectedValue: identity.tool,
-                options: [
-                  for (final tool in RouterTool.values)
-                    AppSheetOption(
-                        value: tool,
-                        label: tr(tool.label),
-                        icon: Icons.hub_outlined,
-                        subtitle: tool == RouterTool.generic
-                            ? tr('仅使用通用控制器功能')
-                            : null)
-                ],
-              ));
-      if (!mounted || selected == null) return;
-      final saved = await store.selectRouterTool(selected,
-          expectedHost: identity.host, expectedRevision: identity.revision);
-      if (!saved && mounted) {
-        AppFeedback.showSnackBar(context, tr('连接已改变，请重新选择代理软件'),
-            tone: AppFeedbackTone.error);
-      }
-    } catch (_) {
-      if (mounted) {
-        AppFeedback.showSnackBar(context, tr('保存代理软件失败，请重试'),
-            tone: AppFeedbackTone.error);
-      }
-    } finally {
-      if (mounted) setState(() => _choosingRouterTool = false);
-    }
   }
 
   Future<void> _loadTrustedSshHosts() async {
@@ -277,7 +220,8 @@ class _DeveloperOptionsPageState extends State<DeveloperOptionsPage> {
       ),
       body: !_loaded
           ? const SizedBox.shrink()
-          : SingleChildScrollView(
+          : AdaptiveContent(
+              child: SingleChildScrollView(
               padding: const EdgeInsets.fromLTRB(16, 24, 16, 40),
               child: Material(
                 color: cardBg,
@@ -288,34 +232,19 @@ class _DeveloperOptionsPageState extends State<DeveloperOptionsPage> {
                 ),
                 child: Column(
                   children: [
-                    SwitchListTile(
-                      title: Text(
-                        tr('显示主题悬浮球'),
-                        style: TextStyle(fontSize: 13, color: textColor),
+                    if (_showOptionalSettings) ...[
+                      _PreferenceSwitch(
+                        title: tr('显示主题悬浮球'),
+                        subtitle: tr('点按切换主题，长按拖动'),
+                        value: _showBall,
+                        onChanged: _toggleShowBall,
                       ),
-                      subtitle: Text(
-                        tr('屏幕上显示可拖动的深浅色切换按钮，长按拖动，点击切换'),
-                        style: TextStyle(fontSize: 11, color: hintColor),
-                      ),
-                      value: _showBall,
-                      onChanged: _toggleShowBall,
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 4,
-                      ),
-                    ),
-                    Divider(height: 0, color: cardBorder),
-                    SwitchListTile(
-                      title: Text(tr('显示控制台按钮'),
-                          style: TextStyle(fontSize: 13, color: textColor)),
-                      subtitle: Text(tr('在首页左上角显示 Zashboard 控制台入口'),
-                          style: TextStyle(fontSize: 11, color: hintColor)),
+                      Divider(height: 0, color: cardBorder),
+                    ],
+                    _PreferenceSwitch(
+                      title: tr('显示控制台按钮'),
                       value: _showConsoleButton,
                       onChanged: _toggleShowConsoleButton,
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 4,
-                      ),
                     ),
                     Divider(height: 0, color: cardBorder),
                     ListTile(
@@ -345,66 +274,45 @@ class _DeveloperOptionsPageState extends State<DeveloperOptionsPage> {
                       padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
                       child: AppSettingPickerRow(
                         title: tr('应用语言'),
-                        description: tr('语言切换会立即应用，并同步内置 Zashboard 面板。'),
                         picker: const AppLanguagePicker(compact: true),
                       ),
                     ),
                     Divider(height: 0, color: cardBorder),
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
-                      child: AppSettingPickerRow(
-                        title: tr('代理软件'),
-                        description: tr('自动识别不准确时，可手动选择当前使用的软件。'),
-                        picker: AppSelectionPicker(
-                          key: const ValueKey('advanced_router_tool'),
-                          label: _routerTool == null
-                              ? '--'
-                              : tr(_routerTool!.label),
-                          tooltip: tr('选择代理软件'),
-                          icon: Icons.hub_outlined,
-                          compact: true,
-                          onTap: _choosingRouterTool ? null : _chooseRouterTool,
+                    if (_showOptionalSettings) ...[
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              tr('连接 Tab 内容'),
+                              style: TextStyle(fontSize: 13, color: textColor),
+                            ),
+                            const SizedBox(height: 12),
+                            AdaptiveOptionGroup(
+                              labels: [tr('原生列表'), tr('Zashboard 面板')],
+                              spacing: 10,
+                              children: [
+                                _OptionButton(
+                                  label: tr('原生列表'),
+                                  icon: Icons.list_alt_rounded,
+                                  selected: _connectionsTabMode == 'native',
+                                  onTap: () => _setConnectionsTabMode('native'),
+                                ),
+                                _OptionButton(
+                                  label: tr('Zashboard 面板'),
+                                  icon: Icons.language_rounded,
+                                  selected: _connectionsTabMode == 'webview',
+                                  onTap: () =>
+                                      _setConnectionsTabMode('webview'),
+                                ),
+                              ],
+                            ),
+                          ],
                         ),
                       ),
-                    ),
-                    Divider(height: 0, color: cardBorder),
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            tr('连接 Tab 内容'),
-                            style: TextStyle(fontSize: 13, color: textColor),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            tr('选择底部「连接」Tab 的显示内容'),
-                            style: TextStyle(fontSize: 11, color: hintColor),
-                          ),
-                          const SizedBox(height: 12),
-                          AdaptiveOptionGroup(
-                            labels: [tr('原生列表'), tr('Zashboard 面板')],
-                            spacing: 10,
-                            children: [
-                              _OptionButton(
-                                label: tr('原生列表'),
-                                icon: Icons.list_alt_rounded,
-                                selected: _connectionsTabMode == 'native',
-                                onTap: () => _setConnectionsTabMode('native'),
-                              ),
-                              _OptionButton(
-                                label: tr('Zashboard 面板'),
-                                icon: Icons.language_rounded,
-                                selected: _connectionsTabMode == 'webview',
-                                onTap: () => _setConnectionsTabMode('webview'),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                    Divider(height: 0, color: cardBorder),
+                      Divider(height: 0, color: cardBorder),
+                    ],
                     Padding(
                       padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
                       child: Column(
@@ -412,14 +320,16 @@ class _DeveloperOptionsPageState extends State<DeveloperOptionsPage> {
                         children: [
                           Row(
                             children: [
-                              Text(
-                                tr('Zashboard 面板更新'),
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  color: textColor,
+                              Expanded(
+                                child: Text(
+                                  tr('Zashboard 面板更新'),
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    color: textColor,
+                                  ),
                                 ),
                               ),
-                              const Spacer(),
+                              const SizedBox(width: 8),
                               Text(
                                 _webPanelVersion,
                                 style: TextStyle(
@@ -428,11 +338,6 @@ class _DeveloperOptionsPageState extends State<DeveloperOptionsPage> {
                                 ),
                               ),
                             ],
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            tr('更新内置 Web 控制面板。新版可能需要重新适配代理页和连接页。'),
-                            style: TextStyle(fontSize: 11, color: hintColor),
                           ),
                           if (_panelUpdate.phase ==
                                   WebPanelUpdatePhase.downloading ||
@@ -488,10 +393,15 @@ class _DeveloperOptionsPageState extends State<DeveloperOptionsPage> {
                                       ),
                                     )
                                   else
-                                    const Icon(
-                                      Icons.system_update_alt_rounded,
-                                      size: 17,
-                                      color: Colors.white,
+                                    SvgPicture.asset(
+                                      'assets/icons/panel-update.svg',
+                                      width: 18,
+                                      height: 18,
+                                      colorFilter: const ColorFilter.mode(
+                                        Colors.white,
+                                        BlendMode.srcIn,
+                                      ),
+                                      excludeFromSemantics: true,
                                     ),
                                   const SizedBox(width: 8),
                                   Flexible(
@@ -521,7 +431,43 @@ class _DeveloperOptionsPageState extends State<DeveloperOptionsPage> {
                   ],
                 ),
               ),
-            ),
+            )),
+    );
+  }
+}
+
+class _PreferenceSwitch extends StatelessWidget {
+  const _PreferenceSwitch({
+    required this.title,
+    required this.value,
+    required this.onChanged,
+    this.subtitle,
+  });
+
+  final String title;
+  final String? subtitle;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = AppPalette.of(context);
+    final details = subtitle;
+    return MergeSemantics(
+      child: ListTile(
+        title: Text(
+          title,
+          style: TextStyle(fontSize: 13, color: palette.textPrimary),
+        ),
+        subtitle: details == null
+            ? null
+            : Text(
+                details,
+                style: TextStyle(fontSize: 11, color: palette.textSecondary),
+              ),
+        trailing: Switch(value: value, onChanged: onChanged),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      ),
     );
   }
 }

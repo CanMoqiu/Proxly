@@ -75,6 +75,28 @@ void main() {
     expect(prefs.getString(ConnectionPanelPreferences.tabletKey), isNull);
   });
 
+  test('each router has its own content and retired writes are dropped',
+      () async {
+    final store = ConnectionPanelPreferences();
+    const key = 'config/connection-card-lines';
+    await store.save({key: '[["host"]]'}, tablet: false, deviceId: 'legacy');
+    await store.save({key: '[["rule"]]'}, tablet: false, deviceId: 'office');
+
+    final rejected = store.save(
+      {key: '[["outbound"]]'},
+      tablet: false,
+      deviceId: 'legacy',
+      isCurrent: () => false,
+    );
+    await rejected;
+    expect((await store.load(tablet: false, deviceId: 'legacy'))[key],
+        '[["host"]]');
+    expect((await store.load(tablet: false, deviceId: 'office'))[key],
+        '[["rule"]]');
+    expect(await store.load(tablet: true, deviceId: 'office'),
+        ConnectionPanelPreferences.defaults(tablet: true));
+  });
+
   test('invalid content cannot poison a valid stored layout', () async {
     final store = ConnectionPanelPreferences();
     await store

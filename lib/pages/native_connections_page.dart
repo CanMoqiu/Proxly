@@ -341,7 +341,7 @@ class _NativeConnectionsPageState extends State<NativeConnectionsPage>
           ),
           IconButton(
             tooltip: tr('排序'),
-            icon: Icon(Icons.sort_rounded, color: textSecondary, size: 20),
+            icon: const Icon(Icons.sort_rounded),
             onPressed: () async {
               final value = await AppPopup.sheet<String>(
                   context: context,
@@ -371,15 +371,17 @@ class _NativeConnectionsPageState extends State<NativeConnectionsPage>
           child: Container(height: 0.5, color: dividerColor),
         ),
       ),
-      body: _buildBody(
-        isDark: isDark,
-        bgColor: bgColor,
-        cardBg: cardBg,
-        cardBorder: cardBorder,
-        textPrimary: textPrimary,
-        textSecondary: textSecondary,
-        chainColor: chainColor,
-      ),
+      body: AdaptiveContent(
+          maxWidth: 880,
+          child: _buildBody(
+            isDark: isDark,
+            bgColor: bgColor,
+            cardBg: cardBg,
+            cardBorder: cardBorder,
+            textPrimary: textPrimary,
+            textSecondary: textSecondary,
+            chainColor: chainColor,
+          )),
     );
   }
 
@@ -483,77 +485,81 @@ class _NativeConnectionsPageState extends State<NativeConnectionsPage>
               children: [
                 Row(
                   children: [
-                    GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onTap: () => setState(
-                        () => _filterIp =
-                            _filterIp == c.sourceIp ? '' : c.sourceIp,
-                      ),
+                    Expanded(
                       child: Text(
-                        c.sourceIp,
-                        style: TextStyle(fontSize: 11, color: textSecondary),
+                        c.host,
+                        style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: textPrimary),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                    const Spacer(),
-                    Text(
-                      tr(_formatElapsed(c.startTime)),
-                      style: TextStyle(fontSize: 10, color: textSecondary),
-                    ),
-                    const SizedBox(width: 8),
                     GestureDetector(
                       behavior: HitTestBehavior.opaque,
-                      key: ValueKey('close_connection_${c.id}'),
-                      onTap: _closingConnections.contains(c.id)
-                          ? () {}
-                          : () => _closeConnection(c.id),
-                      child: Padding(
-                        padding: const EdgeInsets.all(4),
-                        child: _closingConnections.contains(c.id)
-                            ? const SizedBox(
-                                width: 14,
-                                height: 14,
+                      excludeFromSemantics: true,
+                      onTap: () {},
+                      child: IconButton(
+                        tooltip: tr('关闭连接'),
+                        key: ValueKey('close_connection_${c.id}'),
+                        onPressed: _closingConnections.contains(c.id)
+                            ? null
+                            : () => _closeConnection(c.id),
+                        icon: _closingConnections.contains(c.id)
+                            ? const SizedBox.square(
+                                dimension: 14,
                                 child:
-                                    CircularProgressIndicator(strokeWidth: 2))
-                            : Icon(
-                                Icons.close,
-                                size: 14,
-                                color: textSecondary,
-                              ),
+                                    CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : Icon(Icons.close, size: 16, color: textSecondary),
                       ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  c.host,
-                  style: TextStyle(fontSize: 12, color: textPrimary),
-                  overflow: TextOverflow.ellipsis,
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 4,
+                  children: [
+                    Text(
+                        '↓${_formatSpeed(downSpeed.toDouble())} ↑${_formatSpeed(upSpeed.toDouble())}',
+                        style: TextStyle(fontSize: 12, color: textPrimary)),
+                    Text(
+                        '↓${_formatBytes(c.download)} ↑${_formatBytes(c.upload)}',
+                        style: TextStyle(fontSize: 11, color: textSecondary)),
+                    Text(tr(_formatElapsed(c.startTime)),
+                        style: TextStyle(fontSize: 11, color: textSecondary)),
+                  ],
                 ),
-                const SizedBox(height: 2),
+                const SizedBox(height: 6),
                 Text(
                   () {
                     if (_chainFullDisplay) return c.chain;
                     final parts = c.chain.split(' → ');
-                    if (parts.length <= 2) return c.chain;
-                    return '${parts.first} → ${parts.last}';
+                    return parts.length <= 2
+                        ? c.chain
+                        : '${parts.first} → ${parts.last}';
                   }(),
-                  style: TextStyle(fontSize: 10, color: chainColor),
+                  style: TextStyle(fontSize: 11, color: chainColor),
+                  maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
-                const SizedBox(height: 2),
-                Row(
+                Wrap(
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 8,
                   children: [
-                    Expanded(
-                      child: Text(
-                        c.rule,
-                        style: TextStyle(fontSize: 10, color: textSecondary),
-                        overflow: TextOverflow.ellipsis,
+                    InkWell(
+                      onTap: () => setState(() => _filterIp =
+                          _filterIp == c.sourceIp ? '' : c.sourceIp),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 6),
+                        child: Text(c.sourceIp,
+                            style:
+                                TextStyle(fontSize: 11, color: textSecondary)),
                       ),
                     ),
-                    Text(
-                      '↓${_formatSpeed(downSpeed.toDouble())} ↑${_formatSpeed(upSpeed.toDouble())}  ↓${_formatBytes(c.download)} ↑${_formatBytes(c.upload)}',
-                      style: TextStyle(fontSize: 10, color: textSecondary),
-                    ),
+                    Text(c.rule,
+                        style: TextStyle(fontSize: 11, color: textSecondary)),
                   ],
                 ),
               ],

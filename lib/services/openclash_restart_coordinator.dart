@@ -132,11 +132,22 @@ class OpenClashRestartCoordinator extends ChangeNotifier {
     _error = null;
     _changesPersisted = request.changesAlreadyPersisted;
     _reason = request.reason;
-    final future = _run(request);
-    _inFlight = future;
-    future.whenComplete(() {
+    final store = ConnectionSettingsStore.instance;
+    late final Future<OpenClashRestartResult> future;
+    future = store
+        .runRemoteOperation(() => _run(request))
+        .then(
+          (result) => result,
+          onError: (Object error) => OpenClashRestartResult(
+            success: false,
+            changesPersisted: request.changesAlreadyPersisted,
+            error: error,
+          ),
+        )
+        .whenComplete(() {
       if (identical(_inFlight, future)) _inFlight = null;
     });
+    _inFlight = future;
     return future;
   }
 

@@ -117,7 +117,17 @@ class ZashboardSettingsImportService {
     );
   }
 
-  Future<ZashboardSettingsImportResult?> importSnapshot(String raw) async {
+  static String storageKeyFor(String? deviceId) =>
+      deviceId == null || deviceId == 'legacy'
+          ? preferenceKey
+          : '$preferenceKey-$deviceId';
+
+  Future<ZashboardSettingsImportResult?> importSnapshot(String raw,
+      {String? deviceId, int? expectedGeneration}) async {
+    final store = ConnectionSettingsStore.instance;
+    final generation = expectedGeneration ?? store.deviceGeneration;
+    final storageKey = storageKeyFor(deviceId ?? store.activeDevice?.id);
+    store.requireDeviceGeneration(generation);
     if (utf8.encode(raw).length > ZashboardConfigValidator.maxBytes) {
       throw const FormatException('配置文件超过 5 MB，无法导入');
     }
@@ -134,7 +144,7 @@ class ZashboardSettingsImportService {
 
     final prefs = await SharedPreferences.getInstance();
     Map<String, dynamic>? currentSafe;
-    final currentRaw = prefs.getString(preferenceKey);
+    final currentRaw = prefs.getString(storageKey);
     if (currentRaw != null && currentRaw.isNotEmpty) {
       try {
         final current = await sanitizeEntries(currentRaw);
@@ -151,7 +161,8 @@ class ZashboardSettingsImportService {
 
     final result = await sanitizeEntries(normalizedRaw, base: currentSafe);
     if (result != null && result.acceptedCount > 0) {
-      await prefs.setString(preferenceKey, result.json);
+      store.requireDeviceGeneration(generation);
+      await prefs.setString(storageKey, result.json);
     }
     return result;
   }

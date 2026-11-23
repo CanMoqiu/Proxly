@@ -91,14 +91,9 @@ class ClashStatusCard extends StatelessWidget {
               ])),
             ],
           ),
-          if (error != null && !restartBusy && !restartFailed) ...[
-            const SizedBox(height: 8),
-            Text(tr(error!),
-                style: TextStyle(fontSize: 12, color: textSecondary)),
-            TextButton(
-                style: DashboardButtonStyle.action,
-                onPressed: onRetry,
-                child: Text(tr('重试'))),
+          if (!restartBusy && !restartFailed && error != null) ...[
+            const SizedBox(height: 12),
+            _StatusError(message: tr(error!), onRetry: onRetry),
           ],
           const SizedBox(height: 16),
           _StatusDetailRow(
@@ -107,6 +102,56 @@ class ClashStatusCard extends StatelessWidget {
           const SizedBox(height: 12),
           _StatusDetailRow(label: tr('内核版本'), value: coreVersion),
         ],
+      ),
+    );
+  }
+}
+
+class _StatusError extends StatelessWidget {
+  const _StatusError({required this.message, required this.onRetry});
+
+  final String message;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = AppPalette.of(context);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: palette.inputBackground,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(10),
+        child: LayoutBuilder(
+          builder: (context, constraints) => Row(
+            children: [
+              Expanded(
+                child: Semantics(
+                  liveRegion: true,
+                  child: Text(
+                    message,
+                    style: TextStyle(
+                      fontSize: 12,
+                      height: 1.4,
+                      color: palette.textPrimary,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: DashboardButtonStyle.spacing),
+              ConstrainedBox(
+                constraints:
+                    BoxConstraints(maxWidth: constraints.maxWidth * .45),
+                child: FilledButton(
+                  style: DashboardButtonStyle.action,
+                  onPressed: onRetry,
+                  child: Text(tr('重试'), textAlign: TextAlign.center),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

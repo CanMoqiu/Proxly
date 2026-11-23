@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../l10n/app_locale.dart';
 import '../main.dart';
 import '../services/app_secure_storage.dart';
 import '../services/clash_service.dart';
+import '../services/connection_settings_store.dart';
 import '../services/startup_cache_maintenance.dart';
 import '../theme/app_theme.dart';
 
@@ -23,10 +23,11 @@ class _AppStartupState extends State<AppStartup> {
 
   Future<bool> _initialize() async {
     await AppLocaleController.instance.load();
+    final store = ConnectionSettingsStore.instance;
+    await store.initializeProfiles();
     await ClashService.instance.loadConfig();
     await StartupCacheMaintenance.run();
-    final prefs = await SharedPreferences.getInstance();
-    return (prefs.getString('clash_host') ?? '').isEmpty;
+    return store.activeDevice == null;
   }
 
   @override

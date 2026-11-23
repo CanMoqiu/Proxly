@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import '../app_navigator.dart';
 import '../l10n/app_locale.dart';
 import 'app_secure_storage.dart';
+import 'connection_settings_store.dart';
 
 class SshHostTrustService extends ChangeNotifier {
   SshHostTrustService._();
@@ -23,7 +24,8 @@ class SshHostTrustService extends ChangeNotifier {
 
   Future<void> _loadRejections() async {
     try {
-      final raw = await AppSecureStorage.read(_rejectedKey);
+      final raw =
+          await AppSecureStorage.read(_rejectedKey, preserveOnError: true);
       if (raw != null) {
         _rejected.addAll((jsonDecode(raw) as List).cast<String>());
       }
@@ -41,8 +43,15 @@ class SshHostTrustService extends ChangeNotifier {
         : '$normalized:$port';
   }
 
-  bool isRejected(String host, [int port = 22]) =>
-      _rejected.contains(_endpoint(host, port));
+  static String _profileEndpoint(String endpoint, String? deviceId) =>
+      deviceId == null || deviceId == 'legacy'
+          ? endpoint
+          : '$deviceId|$endpoint';
+
+  bool isRejected(String host, [int port = 22]) => _rejected.contains(
+        _profileEndpoint(_endpoint(host, port),
+            ConnectionSettingsStore.instance.activeDevice?.id),
+      );
 
   final Map<String, Future<bool>> _pendingPrompts = {};
 
@@ -52,26 +61,36 @@ class SshHostTrustService extends ChangeNotifier {
     String algorithm,
     Uint8List fingerprintBytes, {
     bool requestTrust = false,
+    String? deviceId,
+    int? expectedGeneration,
   }) async {
     final fingerprint = _standardSha256Fingerprint(fingerprintBytes);
     final endpoint = _endpoint(host, port);
+    final key = _profileEndpoint(endpoint,
+        deviceId ?? ConnectionSettingsStore.instance.activeDevice?.id);
     await loadRejections();
-    if (_rejected.contains(endpoint) && !requestTrust) return false;
+    if (_rejected.contains(key) && !requestTrust) return false;
     final trusted = await _readTrusted();
-    final previous = trusted[endpoint];
+    if (expectedGeneration != null) {
+      ConnectionSettingsStore.instance
+          .requireDeviceGeneration(expectedGeneration);
+    }
+    final previous = trusted[key];
     if (previous != null &&
         previous['algorithm'] == algorithm &&
         previous['fingerprint'] == fingerprint &&
-        !_rejected.contains(endpoint)) {
+        !_rejected.contains(key)) {
       return true;
     }
 
-    final promptKey = '$endpoint|$algorithm|$fingerprint';
+    final promptKey = '$key|$algorithm|$fingerprint';
     final existing = _pendingPrompts[promptKey];
     if (existing != null) return existing;
 
     final prompt = _promptAndStore(
       endpoint: endpoint,
+      key: key,
+      expectedGeneration: expectedGeneration,
       algorithm: algorithm,
       fingerprint: fingerprint,
       previous: previous,
@@ -87,8 +106,8 @@ class SshHostTrustService extends ChangeNotifier {
   Future<int> trustedHostCount() async => (await _readTrusted()).length;
 
   Future<void> clearAll() async {
-    await AppSecureStorage.delete(_storageKey);
-    await AppSecureStorage.delete(_rejectedKey);
+    await AppSecureStorage.delete(_storageKey, preserveOnError: true);
+    await AppSecureStorage.delete(_rejectedKey, preserveOnError: true);
     _rejected.clear();
     _rejectionsLoaded = null;
     notifyListeners();
@@ -96,6 +115,8 @@ class SshHostTrustService extends ChangeNotifier {
 
   Future<bool> _promptAndStore({
     required String endpoint,
+    required String key,
+    required int? expectedGeneration,
     required String algorithm,
     required String fingerprint,
     required Map<String, dynamic>? previous,
@@ -149,30 +170,36 @@ class SshHostTrustService extends ChangeNotifier {
     );
     // A suppressed or unavailable route is not an explicit refusal.
     if (accepted == null) return false;
+    if (expectedGeneration != null) {
+      ConnectionSettingsStore.instance
+          .requireDeviceGeneration(expectedGeneration);
+    }
     if (!accepted) {
       // A refusal survives polling and app restarts; only an explicit review
       // may prompt again. It never replaces an already trusted fingerprint.
-      _rejected.add(endpoint);
+      _rejected.add(key);
       notifyListeners();
-      await AppSecureStorage.write(
-          _rejectedKey, jsonEncode(_rejected.toList()));
+      await AppSecureStorage.write(_rejectedKey, jsonEncode(_rejected.toList()),
+          preserveOnError: true);
       return false;
     }
 
     final trusted = await _readTrusted();
-    trusted[endpoint] = {
+    trusted[key] = {
       'algorithm': algorithm,
       'fingerprint': fingerprint,
     };
-    await AppSecureStorage.write(_storageKey, jsonEncode(trusted));
-    _rejected.remove(endpoint);
-    await AppSecureStorage.write(_rejectedKey, jsonEncode(_rejected.toList()));
+    await AppSecureStorage.write(_storageKey, jsonEncode(trusted),
+        preserveOnError: true);
+    _rejected.remove(key);
+    await AppSecureStorage.write(_rejectedKey, jsonEncode(_rejected.toList()),
+        preserveOnError: true);
     notifyListeners();
     return true;
   }
 
   Future<Map<String, Map<String, dynamic>>> _readTrusted() async {
-    final raw = await AppSecureStorage.read(_storageKey);
+    final raw = await AppSecureStorage.read(_storageKey, preserveOnError: true);
     if (raw == null || raw.isEmpty) return {};
     try {
       final decoded = jsonDecode(raw);

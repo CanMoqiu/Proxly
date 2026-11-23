@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../services/optional_settings_visibility.dart';
 import '../services/update_service.dart';
 import '../services/app_platform.dart';
 import '../services/app_licenses.dart';
@@ -54,6 +55,8 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
   UpdateInfo? _latestInfo;
   bool? _automaticCheckEnabled;
   bool _changingAutomaticCheck = false;
+  int _appIconTaps = 0;
+  bool _changingOptionalSettingsVisibility = false;
 
   @override
   void initState() {
@@ -79,6 +82,30 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
     UpdateService.instance.availableUpdate
         .removeListener(_handleAvailableUpdate);
     super.dispose();
+  }
+
+  Future<void> _onAppIconTap() async {
+    if (_changingOptionalSettingsVisibility || ++_appIconTaps < 5) return;
+    _appIconTaps = 0;
+    _changingOptionalSettingsVisibility = true;
+    try {
+      final visible = await OptionalSettingsVisibility.toggle();
+      if (!mounted) return;
+      AppFeedback.showSnackBar(
+        context,
+        tr(visible ? '开启成功' : '隐藏成功'),
+        tone: AppFeedbackTone.success,
+      );
+    } catch (_) {
+      if (!mounted) return;
+      AppFeedback.showSnackBar(
+        context,
+        tr('保存设置失败，请重试'),
+        tone: AppFeedbackTone.error,
+      );
+    } finally {
+      _changingOptionalSettingsVisibility = false;
+    }
   }
 
   Future<void> _loadVersion() async {
@@ -332,7 +359,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
         title: Text(
           tr('关于'),
           style: TextStyle(
-            fontSize: 16,
+            fontSize: 17,
             fontWeight: FontWeight.w600,
             color: textColor,
           ),
@@ -343,23 +370,28 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
           child: Container(height: 0.5, color: dividerColor),
         ),
       ),
-      body: ListView(
+      body: AdaptiveContent(
+          child: ListView(
         padding: const EdgeInsets.fromLTRB(16, 24, 16, 48),
         children: [
           Center(
             child: Column(
               children: [
-                Container(
-                  width: 72,
-                  height: 72,
-                  decoration: BoxDecoration(
-                    color: Colors.transparent,
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  clipBehavior: Clip.antiAlias,
-                  child: Image.asset(
-                    'assets/app_icon.png',
-                    fit: BoxFit.cover,
+                GestureDetector(
+                  key: const ValueKey('about_app_icon'),
+                  onTap: _onAppIconTap,
+                  child: Container(
+                    width: 72,
+                    height: 72,
+                    decoration: BoxDecoration(
+                      color: Colors.transparent,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    clipBehavior: Clip.antiAlias,
+                    child: Image.asset(
+                      'assets/app_icon.png',
+                      fit: BoxFit.cover,
+                    ),
                   ),
                 ),
                 const SizedBox(height: 14),
@@ -436,21 +468,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
                       ),
                     ],
                   ),
-                  ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 320),
-                    child: Text(
-                      tr('关闭后不再自动检测新版本，仍可在关于页手动检查更新。'),
-                      textAlign: TextAlign.center,
-                      style: TextStyle(fontSize: 11, color: hintColor),
-                    ),
-                  ),
                 ],
-                if (AppPlatform.isIOS)
-                  Text(
-                    tr('前往 GitHub 发布页下载 IPA，自签后手动安装。'),
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 12, color: hintColor),
-                  ),
                 const SizedBox(height: 16),
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -484,7 +502,6 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
                   _LinkRow(
                     icon: Icons.menu_book_outlined,
                     title: tr('功能介绍'),
-                    subtitle: tr('在 GitHub 查看完整功能说明'),
                     textColor: textColor,
                     hintColor: hintColor,
                     dividerColor: dividerColor,
@@ -496,7 +513,6 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
                   _LinkRow(
                     icon: Icons.history_rounded,
                     title: tr('更新日志'),
-                    subtitle: tr('在 GitHub Releases 查看所有版本'),
                     textColor: textColor,
                     hintColor: hintColor,
                     dividerColor: dividerColor,
@@ -509,7 +525,6 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
                     _LinkRow(
                       icon: Icons.install_mobile_rounded,
                       title: tr('iOS 安装与更新'),
-                      subtitle: tr('下载 IPA、自签安装和覆盖更新说明'),
                       textColor: textColor,
                       hintColor: hintColor,
                       dividerColor: dividerColor,
@@ -521,7 +536,6 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
                   _LinkRow(
                     icon: Icons.bug_report_outlined,
                     title: tr('问题反馈'),
-                    subtitle: tr('请附版本信息、复现步骤和已脱敏的截图'),
                     textColor: textColor,
                     hintColor: hintColor,
                     dividerColor: dividerColor,
@@ -533,7 +547,6 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
                   _LinkRow(
                     icon: Icons.code_rounded,
                     title: tr('项目源码'),
-                    subtitle: _githubRepo,
                     textColor: textColor,
                     hintColor: hintColor,
                     dividerColor: dividerColor,
@@ -565,8 +578,6 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
                 key: const ValueKey('about_mit_license'),
                 title: Text('MIT License',
                     style: TextStyle(fontSize: 13, color: textColor)),
-                subtitle: Text(tr('Proxly 的使用与分发许可'),
-                    style: TextStyle(fontSize: 11, color: hintColor)),
                 shape: const Border(),
                 collapsedShape: const Border(),
                 childrenPadding: const EdgeInsets.all(16),
@@ -642,7 +653,6 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
                 _LinkRow(
                   icon: Icons.article_outlined,
                   title: tr('第三方许可证'),
-                  subtitle: tr('Flutter、依赖库、JetBrains Mono 与旗帜字体'),
                   textColor: textColor,
                   hintColor: hintColor,
                   dividerColor: dividerColor,
@@ -662,7 +672,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
             ),
           ),
         ],
-      ),
+      )),
     );
   }
 }
@@ -683,7 +693,7 @@ class _SectionTitle extends StatelessWidget {
 class _LinkRow extends StatelessWidget {
   final IconData icon;
   final String title;
-  final String subtitle;
+  final String? subtitle;
   final Color textColor;
   final Color hintColor;
   final Color dividerColor;
@@ -693,7 +703,7 @@ class _LinkRow extends StatelessWidget {
   const _LinkRow({
     required this.icon,
     required this.title,
-    required this.subtitle,
+    this.subtitle,
     required this.textColor,
     required this.hintColor,
     required this.dividerColor,
@@ -740,11 +750,13 @@ class _LinkRow extends StatelessWidget {
                           color: textColor,
                         ),
                       ),
-                      const SizedBox(height: 1),
-                      Text(
-                        tr(subtitle),
-                        style: TextStyle(fontSize: 11, color: hintColor),
-                      ),
+                      if (subtitle case final details?) ...[
+                        const SizedBox(height: 1),
+                        Text(
+                          tr(details),
+                          style: TextStyle(fontSize: 11, color: hintColor),
+                        ),
+                      ],
                     ],
                   ),
                 ),

@@ -26,26 +26,41 @@ class AppSecureStorage {
       synchronizable: false,
     ),
   );
+  static const _profileStorage = FlutterSecureStorage(
+    aOptions: AndroidOptions(resetOnError: false),
+    iOptions: IOSOptions(
+      accessibility: KeychainAccessibility.unlocked_this_device,
+      synchronizable: false,
+    ),
+  );
 
-  static Future<String?> read(String key) async {
-    final value = await instance.read(key: key);
+  static Future<String?> read(String key,
+      {bool preserveOnError = false}) async {
+    final storage = preserveOnError ? _profileStorage : instance;
+    final value = await storage.read(key: key);
     if (value == _resetResponse) throw const SecureStorageResetException();
     return value;
   }
 
-  static Future<void> write(String key, String value) async {
-    await instance.write(key: key, value: value);
-    var saved = await instance.read(key: key);
+  static Future<void> write(
+    String key,
+    String value, {
+    bool preserveOnError = false,
+  }) async {
+    final storage = preserveOnError ? _profileStorage : instance;
+    await storage.write(key: key, value: value);
+    var saved = await storage.read(key: key);
     if (saved == _resetResponse || saved != value) {
-      await instance.write(key: key, value: value);
-      saved = await instance.read(key: key);
+      await storage.write(key: key, value: value);
+      saved = await storage.read(key: key);
     }
     if (saved == _resetResponse || saved != value) {
       throw const SecureStorageResetException();
     }
   }
 
-  static Future<void> delete(String key) => instance.delete(key: key);
+  static Future<void> delete(String key, {bool preserveOnError = false}) =>
+      (preserveOnError ? _profileStorage : instance).delete(key: key);
 
   static Future<void> deleteAll() => instance.deleteAll();
 }

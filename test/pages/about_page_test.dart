@@ -5,6 +5,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:proxly/l10n/app_locale.dart';
 import 'package:proxly/pages/about_page.dart';
+import 'package:proxly/pages/developer_options_page.dart';
+import 'package:proxly/services/optional_settings_visibility.dart';
 import 'package:proxly/services/update_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -50,14 +52,20 @@ void main() {
     UpdateService.instance.availableUpdate.value = null;
   });
 
-  testWidgets('iOS shows update controls and manual installation guidance',
+  testWidgets('iOS keeps update controls and a dedicated installation guide',
       (tester) async {
     UpdateService.instance.availableUpdate.value = const UpdateInfo(
       tag: 'v26.6',
       apkUrl: 'https://example.invalid/app.apk',
     );
     await _pumpAboutPage(tester, 'zh_CN');
-    expect(find.text('前往 GitHub 发布页下载 IPA，自签后手动安装。'), findsOneWidget);
+    expect(find.text('前往 GitHub 发布页下载 IPA，自签后手动安装。'), findsNothing);
+    await tester.ensureVisible(find.text('iOS 安装与更新'));
+    expect(find.text('iOS 安装与更新'), findsOneWidget);
+    expect(find.text('下载 IPA、自签安装和覆盖更新说明'), findsNothing);
+    expect(find.text('请附版本信息、复现步骤和已脱敏的截图'), findsNothing);
+    expect(find.text('CanMoqiu/proxly'), findsNothing);
+    expect(tester.widget<Text>(find.text('关于')).style!.fontSize, 17);
     expect(find.text('检测版本'), findsNothing);
     expect(find.text('更新'), findsOneWidget);
     expect(find.byKey(const ValueKey('about_automatic_update_switch')),
@@ -182,6 +190,61 @@ void main() {
       find.byKey(const ValueKey('about_automatic_update_switch')),
     );
     expect(toggle.value, isFalse);
+  });
+
+  testWidgets('five app icon taps toggle only optional settings visibility',
+      (tester) async {
+    await _pumpAboutPage(tester, 'zh_CN');
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('show_floating_ball', true);
+    await prefs.setString('connections_tab_mode', 'native');
+    expect(OptionalSettingsVisibility.read(prefs), isFalse);
+    final icon = find.byKey(const ValueKey('about_app_icon'));
+    final navigator = Navigator.of(tester.element(icon));
+    final banner = find.byKey(const ValueKey('app_feedback_banner'));
+
+    Future<void> tapIcon(int times) async {
+      for (var i = 0; i < times; i++) {
+        await tester.tap(icon);
+        await tester.pump();
+      }
+      await tester.pumpAndSettle();
+    }
+
+    Future<void> checkOptionalRows({required bool visible}) async {
+      navigator.push(MaterialPageRoute<void>(
+        builder: (_) => const DeveloperOptionsPage(),
+      ));
+      await tester.pumpAndSettle();
+      expect(find.text('显示主题悬浮球'), visible ? findsOneWidget : findsNothing);
+      expect(find.text('连接 Tab 内容'), visible ? findsOneWidget : findsNothing);
+      expect(find.text('显示控制台按钮'), findsOneWidget);
+      navigator.pop();
+      await tester.pumpAndSettle();
+    }
+
+    await checkOptionalRows(visible: false);
+    await tapIcon(4);
+    expect(OptionalSettingsVisibility.read(prefs), isFalse);
+    expect(banner, findsNothing);
+
+    await tapIcon(1);
+    expect(find.descendant(of: banner, matching: find.text('开启成功')),
+        findsOneWidget);
+    await prefs.reload();
+    expect(OptionalSettingsVisibility.read(prefs), isTrue);
+    await checkOptionalRows(visible: true);
+
+    await tapIcon(5);
+    expect(find.descendant(of: banner, matching: find.text('隐藏成功')),
+        findsOneWidget);
+    await prefs.reload();
+    expect(OptionalSettingsVisibility.read(prefs), isFalse);
+    expect(prefs.getBool('show_floating_ball'), isTrue);
+    expect(prefs.getString('connections_tab_mode'), 'native');
+    await checkOptionalRows(visible: false);
+    await tester.pump(const Duration(seconds: 4));
+    await tester.pumpAndSettle();
   });
 
   testWidgets('changing update checks succeeds without a feedback banner',

@@ -68,7 +68,14 @@ class ControllerConnectionState extends ChangeNotifier {
 
   Future<void> probe(Future<void> Function() load) {
     if (phase == ControllerConnectionPhase.restarting) return Future.value();
-    return _probe ??= _runProbe(load).whenComplete(() => _probe = null);
+    final active = _probe;
+    if (active != null) return active;
+    late final Future<void> next;
+    next = _runProbe(load).whenComplete(() {
+      if (identical(_probe, next)) _probe = null;
+    });
+    _probe = next;
+    return next;
   }
 
   Future<void> _runProbe(Future<void> Function() load) async {
@@ -79,6 +86,7 @@ class ControllerConnectionState extends ChangeNotifier {
 
   void reset() {
     _generation++;
+    _probe = null;
     _set(ControllerConnectionPhase.unknown, null);
   }
 

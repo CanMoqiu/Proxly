@@ -13,6 +13,8 @@ import 'native_connections_page.dart';
 import '../services/update_service.dart';
 import '../services/app_platform.dart';
 import '../services/controller_connection_state.dart';
+import '../services/connection_settings_store.dart';
+import '../services/clash_data_hub.dart';
 import '../services/router_detection_session.dart';
 import '../services/web_panel_service.dart';
 import '../widgets/app_bottom_navigation_bar.dart';
@@ -38,6 +40,7 @@ class _MainShellState extends State<MainShell>
   int? _warmingTab;
   bool _foreground = true;
   bool _wasInBackground = false;
+  int _deviceViewEpoch = 0;
   RouterDetectionSession get _detection =>
       widget.detectionSession ?? RouterDetectionSession.instance;
 
@@ -67,8 +70,8 @@ class _MainShellState extends State<MainShell>
     });
   }
 
-  void _panelSettled(int index) {
-    if (_warmingTab != index) return;
+  void _panelSettled(int index, int epoch) {
+    if (epoch != _deviceViewEpoch || _warmingTab != index) return;
     _warmingTab = null;
     _scheduleWarmup();
   }
@@ -91,6 +94,7 @@ class _MainShellState extends State<MainShell>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     ControllerConnectionState.instance.addListener(_scheduleWarmup);
+    ConnectionSettingsStore.instance.addListener(_handleDeviceSettings);
     _loadPrefs();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) unawaited(_detection.refresh());
@@ -138,6 +142,7 @@ class _MainShellState extends State<MainShell>
     _warmupTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     ControllerConnectionState.instance.removeListener(_scheduleWarmup);
+    ConnectionSettingsStore.instance.removeListener(_handleDeviceSettings);
     super.dispose();
   }
 
@@ -145,6 +150,26 @@ class _MainShellState extends State<MainShell>
     WebPanelSync.instance.proxyTabActive = _currentIndex == 1;
     WebPanelSync.instance.connectionsTabActive =
         _currentIndex == 2 && _connectionsTabMode == 'webview';
+  }
+
+  void _handleDeviceSettings() {
+    final change = ConnectionSettingsStore.instance.lastChange;
+    if (change != ConnectionSettingsChange.device &&
+        change != ConnectionSettingsChange.controller) {
+      return;
+    }
+    _warmupTimer?.cancel();
+    _tabRevision++;
+    ClashDataHub.instance.resetBaseline(clearSnapshot: true);
+    setState(() {
+      _deviceViewEpoch++;
+      _warmingTab = null;
+      _visitedTabs
+        ..clear()
+        ..addAll([0, _currentIndex]);
+    });
+    _syncWebPanelTabState();
+    unawaited(_detection.refresh());
   }
 
   Future<void> _loadPrefs() async {
@@ -199,23 +224,35 @@ class _MainShellState extends State<MainShell>
   }
 
   List<Widget> get _pages {
+    final epoch = _deviceViewEpoch;
     return [
       HomePage(
+          key: ValueKey(('home', _deviceViewEpoch)),
           showConsoleButton: _showConsoleButton,
           active: _currentIndex == 0,
           detectionSession: _detection),
       if (!_visitedTabs.contains(1))
         const SizedBox.shrink()
       else
-        ProxyPage(asTab: true, onSettled: () => _panelSettled(1)),
+        ProxyPage(
+          key: ValueKey(('proxy', _deviceViewEpoch)),
+          asTab: true,
+          onSettled: () => _panelSettled(1, epoch),
+        ),
       if (!_visitedTabs.contains(2))
         const SizedBox.shrink()
       else if (_connectionsTabMode == 'native')
-        NativeConnectionsPage(active: _currentIndex == 2 && _routeVisible)
+        NativeConnectionsPage(
+          key: ValueKey(('native-connections', _deviceViewEpoch)),
+          active: _currentIndex == 2 && _routeVisible,
+        )
       else
-        ConnectionsPage(onSettled: () => _panelSettled(2)),
+        ConnectionsPage(
+          key: ValueKey(('connections', _deviceViewEpoch)),
+          onSettled: () => _panelSettled(2, epoch),
+        ),
       if (_visitedTabs.contains(3))
-        const SettingsPage()
+        SettingsPage(active: _currentIndex == 3)
       else
         const SizedBox.shrink(),
     ];

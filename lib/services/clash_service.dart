@@ -163,7 +163,10 @@ class ClashService {
   final bool _preserveInjectedConfig;
 
   Future<void> loadConfig() async {
+    final store = ConnectionSettingsStore.instance;
+    final generation = store.deviceGeneration;
     final settings = await _settingsLoader();
+    if (identical(this, _instance)) store.requireDeviceGeneration(generation);
     final host = ClashHostValidator.normalizeAddress(
       settings.host,
     );
@@ -179,23 +182,32 @@ class ClashService {
     await loadConfig();
   }
 
-  bool get isConfigured => _config != null;
+  bool get isConfigured =>
+      _config != null ||
+      (identical(this, _instance) &&
+          ConnectionSettingsStore.instance.activeDevice != null);
 
-  Future<void> flushDnsCache() async {
-    if (_config == null) throw Exception(tr('未配置 Clash 地址'));
-    final uri = Uri.parse('http://${_config!.host}/cache/dns/flush');
-    final response = await _client
-        .post(uri, headers: _config!.headers)
-        .timeout(const Duration(seconds: 5));
-    if (response.statusCode >= 200 && response.statusCode < 300) return;
-    if (response.statusCode == 401) {
-      throw Exception(tr('Token 错误'));
-    }
-    if (response.statusCode == 404) {
-      throw Exception(tr('当前 Clash 内核不支持清理 DNS 缓存'));
-    }
-    throw Exception(tr('请求失败 ${response.statusCode}'));
-  }
+  Future<T> _remote<T>(Future<T> Function() action) =>
+      identical(this, _instance)
+          ? ConnectionSettingsStore.instance.runRemoteOperation(action)
+          : action();
+
+  Future<void> flushDnsCache() => _remote(() async {
+        if (identical(this, _instance)) await ensureConfigLoaded();
+        if (_config == null) throw Exception(tr('未配置 Clash 地址'));
+        final uri = Uri.parse('http://${_config!.host}/cache/dns/flush');
+        final response = await _client
+            .post(uri, headers: _config!.headers)
+            .timeout(const Duration(seconds: 5));
+        if (response.statusCode >= 200 && response.statusCode < 300) return;
+        if (response.statusCode == 401) {
+          throw Exception(tr('Token 错误'));
+        }
+        if (response.statusCode == 404) {
+          throw Exception(tr('当前 Clash 内核不支持清理 DNS 缓存'));
+        }
+        throw Exception(tr('请求失败 ${response.statusCode}'));
+      });
 
   Future<String> getProxyMode() async {
     final data = await _get('/configs', (value) => value);
@@ -228,35 +240,35 @@ class ClashService {
     await _reloadConfig({'path': normalized});
   }
 
-  Future<void> _updateConfig(Map<String, dynamic> body) async {
-    await ensureConfigLoaded();
-    final config = _requireControllerConfig();
-    final uri = Uri.parse('http://${config.host}/configs');
-    final response = await _sendControllerRequest(
-      () => _client.patch(
-        uri,
-        headers: config.headers,
-        body: jsonEncode(body),
-      ),
-    );
-    _ensureControllerSuccess(response);
-  }
+  Future<void> _updateConfig(Map<String, dynamic> body) => _remote(() async {
+        await ensureConfigLoaded();
+        final config = _requireControllerConfig();
+        final uri = Uri.parse('http://${config.host}/configs');
+        final response = await _sendControllerRequest(
+          () => _client.patch(
+            uri,
+            headers: config.headers,
+            body: jsonEncode(body),
+          ),
+        );
+        _ensureControllerSuccess(response);
+      });
 
-  Future<void> _reloadConfig(Map<String, dynamic> body) async {
-    await ensureConfigLoaded();
-    final config = _requireControllerConfig();
-    final uri = Uri.parse('http://${config.host}/configs').replace(
-      queryParameters: const {'force': 'true'},
-    );
-    final response = await _sendControllerRequest(
-      () => _client.put(
-        uri,
-        headers: config.headers,
-        body: jsonEncode(body),
-      ),
-    );
-    _ensureControllerSuccess(response);
-  }
+  Future<void> _reloadConfig(Map<String, dynamic> body) => _remote(() async {
+        await ensureConfigLoaded();
+        final config = _requireControllerConfig();
+        final uri = Uri.parse('http://${config.host}/configs').replace(
+          queryParameters: const {'force': 'true'},
+        );
+        final response = await _sendControllerRequest(
+          () => _client.put(
+            uri,
+            headers: config.headers,
+            body: jsonEncode(body),
+          ),
+        );
+        _ensureControllerSuccess(response);
+      });
 
   Future<T> _get<T>(
       String path, T Function(Map<String, dynamic>) parser) async {
@@ -288,8 +300,11 @@ class ClashService {
     final connection =
         identical(this, _instance) ? ControllerConnectionState.instance : null;
     final observation = connection?.observe();
+    final store = ConnectionSettingsStore.instance;
+    final generation = store.deviceGeneration;
     try {
       final response = await request().timeout(timeout);
+      if (connection != null) store.requireDeviceGeneration(generation);
       if (observation != null) {
         connection!.reportStatus(observation, response.statusCode);
       }
@@ -449,33 +464,34 @@ class ClashService {
     });
   }
 
-  Future<void> closeConnection(String id) async {
-    await ensureConfigLoaded();
-    final config = _requireControllerConfig();
-    final uri = Uri.parse(
-        'http://${config.host}/connections/${Uri.encodeComponent(id)}');
-    final response = await _sendControllerRequest(
-      () => _client.delete(uri, headers: config.headers),
-      timeout: const Duration(seconds: 5),
-    );
-    _ensureControllerSuccess(response);
-  }
+  Future<void> closeConnection(String id) => _remote(() async {
+        await ensureConfigLoaded();
+        final config = _requireControllerConfig();
+        final uri = Uri.parse(
+            'http://${config.host}/connections/${Uri.encodeComponent(id)}');
+        final response = await _sendControllerRequest(
+          () => _client.delete(uri, headers: config.headers),
+          timeout: const Duration(seconds: 5),
+        );
+        _ensureControllerSuccess(response);
+      });
 
-  Future<void> closeAllConnections() async {
-    if (_config == null) throw Exception(tr('未配置 Clash 地址'));
-    final uri = Uri.parse('http://${_config!.host}/connections');
-    final response = await _client
-        .delete(uri, headers: _config!.headers)
-        .timeout(const Duration(seconds: 5));
-    if (response.statusCode >= 200 && response.statusCode < 300) return;
-    if (response.statusCode == 401) {
-      throw Exception(tr('Token 错误'));
-    }
-    if (response.statusCode == 404) {
-      throw Exception(tr('当前 Clash 内核不支持关闭所有连接'));
-    }
-    throw Exception(tr('请求失败 ${response.statusCode}'));
-  }
+  Future<void> closeAllConnections() => _remote(() async {
+        if (identical(this, _instance)) await ensureConfigLoaded();
+        if (_config == null) throw Exception(tr('未配置 Clash 地址'));
+        final uri = Uri.parse('http://${_config!.host}/connections');
+        final response = await _client
+            .delete(uri, headers: _config!.headers)
+            .timeout(const Duration(seconds: 5));
+        if (response.statusCode >= 200 && response.statusCode < 300) return;
+        if (response.statusCode == 401) {
+          throw Exception(tr('Token 错误'));
+        }
+        if (response.statusCode == 404) {
+          throw Exception(tr('当前 Clash 内核不支持关闭所有连接'));
+        }
+        throw Exception(tr('请求失败 ${response.statusCode}'));
+      });
 
   Future<Map<String, String>> getVersionInfo() async {
     final data = await _get('/version', (d) => d);

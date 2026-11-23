@@ -73,85 +73,89 @@ class _DashboardCardListState extends State<DashboardCardList> {
             editing || widget.sshTrustNotice == null || !sshCards.contains(id))
         .toList();
     final palette = AppPalette.of(context);
-    return DashboardReorderableList(
-      editing: editing,
-      controller: _scrollController,
-      padding: AdaptiveScrollPadding.page(context, top: 16),
-      onReorder: (oldIndex, newIndex) {
-        if (editing) {
-          widget.onSave(layout.reorder(oldIndex, newIndex,
-              unavailable: widget.unavailable));
-        }
-      },
-      footer: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        child: Column(children: [
-          if (widget.sshTrustNotice != null) ...[
-            widget.sshTrustNotice!,
-            const SizedBox(height: 12),
-          ],
-          if (editing) ...[
-            Text(tr('长按卡片拖动排序，关闭开关隐藏卡片'),
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 12, color: palette.textSecondary)),
-            const SizedBox(height: DashboardButtonStyle.spacing),
-            TextButton(
+    return AdaptiveContent(
+        maxWidth: 1152,
+        child: DashboardReorderableList(
+          editing: editing,
+          controller: _scrollController,
+          padding: AdaptiveScrollPadding.page(context, top: 24),
+          onReorder: (oldIndex, newIndex) {
+            if (editing) {
+              widget.onSave(layout.reorder(oldIndex, newIndex,
+                  unavailable: widget.unavailable));
+            }
+          },
+          footer: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Column(children: [
+              if (widget.sshTrustNotice != null) ...[
+                widget.sshTrustNotice!,
+                const SizedBox(height: 12),
+              ],
+              if (editing) ...[
+                Text(tr('长按卡片拖动排序，关闭开关隐藏卡片'),
+                    textAlign: TextAlign.center,
+                    style:
+                        TextStyle(fontSize: 12, color: palette.textSecondary)),
+                const SizedBox(height: DashboardButtonStyle.spacing),
+                TextButton(
+                    style: DashboardButtonStyle.action,
+                    onPressed: () {
+                      widget.onSave(layout.reset());
+                      _revealFooter();
+                    },
+                    child: Text(tr('恢复默认'))),
+                const SizedBox(height: DashboardButtonStyle.spacing),
+              ],
+              if (ids.isEmpty)
+                Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Text(tr('卡片已隐藏，点击下方自定义首页以恢复。'),
+                        textAlign: TextAlign.center)),
+              TextButton.icon(
+                key: const ValueKey('home_customize_button'),
+                onPressed: widget.onEditPressed,
                 style: DashboardButtonStyle.action,
-                onPressed: () {
-                  widget.onSave(layout.reset());
-                  _revealFooter();
-                },
-                child: Text(tr('恢复默认'))),
-            const SizedBox(height: DashboardButtonStyle.spacing),
-          ],
-          if (ids.isEmpty)
-            Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: Text(tr('卡片已隐藏，点击下方自定义首页以恢复。'),
-                    textAlign: TextAlign.center)),
-          TextButton.icon(
-            key: const ValueKey('home_customize_button'),
-            onPressed: widget.onEditPressed,
-            style: DashboardButtonStyle.action,
-            icon: Icon(
-                editing
-                    ? Icons.check_rounded
-                    : Icons.dashboard_customize_outlined,
-                size: DashboardButtonStyle.iconSize),
-            label: Text(tr(editing ? '完成' : '自定义首页')),
+                icon: Icon(
+                    editing
+                        ? Icons.check_rounded
+                        : Icons.dashboard_customize_outlined,
+                    size: DashboardButtonStyle.iconSize),
+                label: Text(tr(editing ? '完成' : '自定义首页')),
+              ),
+            ]),
           ),
-        ]),
-      ),
-      children: [
-        for (var index = 0; index < ids.length; index++)
-          Padding(
-              key: ValueKey('dashboard_${ids[index].name}'),
-              padding: const EdgeInsets.only(bottom: 12),
-              child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    if (editing)
-                      Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
-                          child: Row(children: [
-                            Expanded(
-                                child: Text(dashboardCardTitle(ids[index]),
-                                    style: const TextStyle(fontSize: 13))),
-                            Switch(
-                                key: ValueKey('visible_${ids[index].name}'),
-                                value: layout.isVisible(ids[index]),
-                                onChanged: (value) => widget.onSave(
-                                    layout.setVisible(ids[index], value))),
-                          ])),
-                    if (layout.isVisible(ids[index]) &&
-                        !(widget.sshTrustNotice != null &&
-                            sshCards.contains(ids[index])))
-                      if (!editing)
-                        widget.cards[ids[index]]!
-                      else
-                        AbsorbPointer(child: widget.cards[ids[index]]!),
-                  ])),
-      ],
-    );
+          children: [
+            for (var index = 0; index < ids.length; index++)
+              Padding(
+                  key: ValueKey('dashboard_${ids[index].name}'),
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        if (editing)
+                          Padding(
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 16),
+                              child: Row(children: [
+                                Expanded(
+                                    child: Text(dashboardCardTitle(ids[index]),
+                                        style: const TextStyle(fontSize: 13))),
+                                Switch(
+                                    key: ValueKey('visible_${ids[index].name}'),
+                                    value: layout.isVisible(ids[index]),
+                                    onChanged: (value) => widget.onSave(
+                                        layout.setVisible(ids[index], value))),
+                              ])),
+                        if (layout.isVisible(ids[index]) &&
+                            !(widget.sshTrustNotice != null &&
+                                sshCards.contains(ids[index])))
+                          if (!editing)
+                            widget.cards[ids[index]]!
+                          else
+                            AbsorbPointer(child: widget.cards[ids[index]]!),
+                      ])),
+          ],
+        ));
   }
 }

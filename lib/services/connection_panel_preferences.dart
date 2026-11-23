@@ -87,11 +87,19 @@ class ConnectionPanelPreferences {
     return result;
   }
 
-  Future<Map<String, String>> load({required bool tablet}) async {
+  static String _storageKey(bool tablet, String? deviceId) {
+    final key = tablet ? tabletKey : phoneKey;
+    return deviceId == null || deviceId == 'legacy' ? key : '$key-$deviceId';
+  }
+
+  Future<Map<String, String>> load({
+    required bool tablet,
+    String? deviceId,
+  }) async {
     final pending = _pending;
     if (pending != null) await pending;
     final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(tablet ? tabletKey : phoneKey);
+    final raw = prefs.getString(_storageKey(tablet, deviceId));
     final result = defaults(tablet: tablet);
     if (raw != null) {
       try {
@@ -104,12 +112,18 @@ class ConnectionPanelPreferences {
     return result;
   }
 
-  Future<void> save(Map<dynamic, dynamic> patch, {required bool tablet}) {
+  Future<void> save(
+    Map<dynamic, dynamic> patch, {
+    required bool tablet,
+    String? deviceId,
+    bool Function()? isCurrent,
+  }) {
     final safe = sanitize(patch);
     if (safe.isEmpty) return Future<void>.value();
     final next = (_pending ?? Future<void>.value()).then((_) async {
       final prefs = await SharedPreferences.getInstance();
-      final key = tablet ? tabletKey : phoneKey;
+      if (isCurrent?.call() == false) return;
+      final key = _storageKey(tablet, deviceId);
       final values = <String, String>{};
       try {
         final old = jsonDecode(prefs.getString(key) ?? '{}');
@@ -135,6 +149,7 @@ class ConnectionPanelPreferences {
     required bool tablet,
     required int port,
     required bool Function() isCurrent,
+    String? deviceId,
   }) {
     controller.addJavaScriptHandler(
       handlerName: handlerName,
@@ -149,8 +164,13 @@ class ConnectionPanelPreferences {
             url?.port != port) {
           return false;
         }
-        await save(arguments.first as Map, tablet: tablet);
-        return true;
+        await save(
+          arguments.first as Map,
+          tablet: tablet,
+          deviceId: deviceId,
+          isCurrent: isCurrent,
+        );
+        return isCurrent();
       },
     );
   }

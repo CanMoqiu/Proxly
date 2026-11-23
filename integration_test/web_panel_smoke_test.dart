@@ -18,6 +18,7 @@ import 'package:proxly/services/web_panel_service.dart';
 import 'package:proxly/services/web_panel_scroll.dart';
 import 'package:proxly/services/web_panel_flag_font.dart';
 import 'package:proxly/services/web_panel_page_probe.dart';
+import 'package:proxly/widgets/app_bottom_navigation_bar.dart';
 import 'package:proxly/widgets/panel_error_view.dart';
 import 'package:proxly/widgets/app_popup.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -65,37 +66,56 @@ void main() {
     addTearDown(() => server.close(force: true));
     InAppWebViewController? controller;
     InAppWebViewController? loadController;
-    var loaded = false;
-    await tester.pumpWidget(MaterialApp(
-        home: Scaffold(
-            body: InAppWebView(
-      initialUrlRequest:
-          URLRequest(url: WebUri('http://127.0.0.1:${server.port}/')),
-      onWebViewCreated: (value) => controller = value,
-      onLoadStop: (value, url) async {
-        loadController = value;
-        loaded = true;
-      },
-      onReceivedError: (_, request, error) =>
-          errors.add('${error.type}: ${error.description}'),
-    ))));
-    for (var i = 0; i < 80 && !loaded && errors.isEmpty; i++) {
-      await tester.pump(const Duration(milliseconds: 250));
+    var navigationStarted = false;
+    final startup = Stopwatch()..start();
+    try {
+      await tester.pumpWidget(MaterialApp(
+          home: Scaffold(
+              body: InAppWebView(
+        initialUrlRequest:
+            URLRequest(url: WebUri('http://127.0.0.1:${server.port}/')),
+        onWebViewCreated: (value) => controller = value,
+        onLoadStart: (_, __) => navigationStarted = true,
+        onLoadStop: (value, _) => loadController = value,
+        onReceivedError: (_, request, error) {
+          if (request.isForMainFrame != false) {
+            errors.add('${error.type}: ${error.description}');
+          }
+        },
+        onWebContentProcessDidTerminate: (_) =>
+            errors.add('Web content process terminated'),
+      ))));
+      // Wait for actual navigation on a cold simulator, where WebKit may
+      // recover its GPU process before the first loopback request starts.
+      while (loadController == null &&
+          errors.isEmpty &&
+          startup.elapsed < const Duration(minutes: 1)) {
+        await tester.pump(const Duration(milliseconds: 250));
+      }
+      expect(errors, isEmpty);
+      expect(loadController, isNotNull,
+          reason: 'created=${controller != null}; '
+              'navigationStarted=$navigationStarted; requests=$requests; '
+              'elapsed=${startup.elapsed}');
+      expect(requests, contains('/'));
+      expect(identical(controller!.platform, loadController!.platform), isTrue);
+      expect(
+          await controller!
+              .evaluateJavascript(
+                  source: 'document.querySelector("#probe").textContent')
+              .timeout(const Duration(seconds: 5)),
+          'ready');
+    } finally {
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump(const Duration(seconds: 1));
     }
-    expect(loaded, isTrue, reason: 'requests=$requests; errors=$errors');
-    expect(identical(controller!.platform, loadController!.platform), isTrue);
-    expect(
-        await controller!
-            .evaluateJavascript(
-                source: 'document.querySelector("#probe").textContent')
-            .timeout(const Duration(seconds: 5)),
-        'ready');
-    await tester.pumpWidget(const SizedBox.shrink());
-    await tester.pump(const Duration(seconds: 1));
   });
 
   testWidgets('native WKWebViews load and navigation survives a stalled page',
       (tester) async {
+    AppBottomNavigationBar navigationBar() => tester
+        .widget<AppBottomNavigationBar>(find.byType(AppBottomNavigationBar));
+
     final requests = <String>[];
     final sockets = <WebSocket>[];
     var controllerOnline = false;
@@ -241,9 +261,7 @@ void main() {
 
     // These checks exercise the native WebView, Keychain, ATS and localhost
     // bridge together. Unit tests cannot observe their integration failures.
-    tester
-        .widget<BottomNavigationBar>(find.byType(BottomNavigationBar))
-        .onTap!(1);
+    navigationBar().onTap(1);
     for (var i = 0; i < 120; i++) {
       await tester.pump(const Duration(milliseconds: 250));
       if (find
@@ -261,9 +279,7 @@ void main() {
     expect(find.byType(PanelErrorView), findsNothing);
     expect(find.byType(ProxyPage), findsOneWidget);
 
-    tester
-        .widget<BottomNavigationBar>(find.byType(BottomNavigationBar))
-        .onTap!(2);
+    navigationBar().onTap(2);
     for (var i = 0; i < 120; i++) {
       await tester.pump(const Duration(milliseconds: 250));
       if (find
@@ -290,31 +306,19 @@ void main() {
     expect(activation?.succeeded, isTrue,
         reason:
             'errors=${tester.widgetList<PanelErrorView>(find.byType(PanelErrorView, skipOffstage: false)).map((error) => error.message).toList()}');
-    tester
-        .widget<BottomNavigationBar>(find.byType(BottomNavigationBar))
-        .onTap!(1);
+    navigationBar().onTap(1);
     await tester.pump();
 
     // A hidden WebView may never finish evaluating JS on iOS. Reproduce that
     // condition without freezing the native engine and verify tab navigation.
     WebPanelSync.instance
         .register(save: () => Completer<void>().future, reload: () async {});
-    tester
-        .widget<BottomNavigationBar>(find.byType(BottomNavigationBar))
-        .onTap!(2);
+    navigationBar().onTap(2);
     await tester.pump();
-    tester
-        .widget<BottomNavigationBar>(find.byType(BottomNavigationBar))
-        .onTap!(3);
+    navigationBar().onTap(3);
     await tester.pump();
-    expect(
-        tester
-            .widget<BottomNavigationBar>(find.byType(BottomNavigationBar))
-            .currentIndex,
-        3);
-    tester
-        .widget<BottomNavigationBar>(find.byType(BottomNavigationBar))
-        .onTap!(2);
+    expect(navigationBar().currentIndex, 3);
+    navigationBar().onTap(2);
     await tester.pump(const Duration(seconds: 3));
     expect(find.byType(ConnectionsPage), findsOneWidget);
     expect(find.byType(PanelErrorView), findsNothing);

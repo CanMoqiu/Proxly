@@ -163,14 +163,18 @@ class ClashConfigFileService {
     return (await ConnectionSettingsStore.instance.load()).sshPassword;
   }
 
-  static Future<void> savePassword(String password) async {
-    await ConnectionSettingsStore.instance.saveSshPassword(password);
-  }
+  static Future<void> savePassword(String password,
+          {int? expectedGeneration}) =>
+      ConnectionSettingsStore.instance
+          .saveSshPassword(password, expectedGeneration: expectedGeneration);
 
   static Future<ClashConfigSshSettings> loadSettings({
     String? passwordOverride,
   }) async {
-    final stored = await ConnectionSettingsStore.instance.load();
+    final store = ConnectionSettingsStore.instance;
+    final generation = store.deviceGeneration;
+    final stored = await store.load();
+    store.requireDeviceGeneration(generation);
     final host = _routerHostFromClashHost(stored.host);
     if (!stored.routerTool.supportsSshManagement) {
       throw UnsupportedError(tr('当前代理软件尚不支持 SSH 配置管理'));
@@ -203,22 +207,23 @@ class ClashConfigFileService {
     }, username: settings.username, port: settings.port);
   }
 
-  static Future<void> installSftpSupport(SftpSupportIssue issue) async {
-    if (_installingSftp) throw StateError(tr('正在安装 SFTP 组件，请稍候。'));
-    _installingSftp = true;
-    try {
-      final settings = await _settingsForSftpIssue(issue);
-      await SshService.withClient(
-          settings.host,
-          settings.password,
-          (client) => SftpSupportService.forClient(client, settings.target)
-              .install(issue),
-          username: settings.username,
-          port: settings.port);
-    } finally {
-      _installingSftp = false;
-    }
-  }
+  static Future<void> installSftpSupport(SftpSupportIssue issue) =>
+      ConnectionSettingsStore.instance.runRemoteOperation(() async {
+        if (_installingSftp) throw StateError(tr('正在安装 SFTP 组件，请稍候。'));
+        _installingSftp = true;
+        try {
+          final settings = await _settingsForSftpIssue(issue);
+          await SshService.withClient(
+              settings.host,
+              settings.password,
+              (client) => SftpSupportService.forClient(client, settings.target)
+                  .install(issue),
+              username: settings.username,
+              port: settings.port);
+        } finally {
+          _installingSftp = false;
+        }
+      });
 
   static Future<ClashConfigSshSettings> _settingsForSftpIssue(
       SftpSupportIssue issue) async {
@@ -259,11 +264,15 @@ class ClashConfigFileService {
     String? password,
     Future<String> Function(String)? readRunner,
   }) async {
-    final tool = await ConnectionSettingsStore.instance.loadRouterTool();
+    final store = ConnectionSettingsStore.instance;
+    final generation = store.deviceGeneration;
+    final tool = await store.loadRouterTool();
+    store.requireDeviceGeneration(generation);
     if (!tool.supportsSshManagement) return const ClashActiveConfig(file: null);
     if (readRunner != null) {
-      return parseActiveConfigOutput(
-          await readRunner(_activeConfigCommand(tool)));
+      final output = await readRunner(_activeConfigCommand(tool));
+      store.requireDeviceGeneration(generation);
+      return parseActiveConfigOutput(output);
     }
     final settings = await loadSettings(passwordOverride: password);
     final output = await SshService.runText(
@@ -272,6 +281,7 @@ class ClashConfigFileService {
       _activeConfigCommand(settings.routerTool),
       username: settings.username,
       port: settings.port,
+      expectedGeneration: generation,
       operationTimeout: const Duration(seconds: 20),
     );
 
@@ -402,16 +412,17 @@ class ClashConfigFileService {
   static Future<void> setActiveConfigFile(
     String path, {
     String? password,
-  }) async {
-    final safePath = normalizeConfigFilePath(path);
-    final settings = await loadSettings(passwordOverride: password);
-    await SshService.execute(
-      settings.host,
-      settings.password,
-      _setActiveConfigCommand(safePath, settings.routerTool),
-      port: settings.port,
-    );
-  }
+  }) =>
+      ConnectionSettingsStore.instance.runRemoteOperation(() async {
+        final safePath = normalizeConfigFilePath(path);
+        final settings = await loadSettings(passwordOverride: password);
+        await SshService.execute(
+          settings.host,
+          settings.password,
+          _setActiveConfigCommand(safePath, settings.routerTool),
+          port: settings.port,
+        );
+      });
 
   static bool _belongsTo(String path, RouterTool tool) =>
       tool.configDirectories.any((root) => path.startsWith('$root/'));
@@ -597,134 +608,139 @@ class ClashConfigFileService {
     String path,
     Uint8List bytes, {
     String? password,
-  }) async {
-    final safePath = normalizeConfigFilePath(path);
-    if (bytes.length > maxConfigBytes) {
-      throw Exception(
-        'File is too large (${(bytes.length / 1048576).toStringAsFixed(1)} MB), max 5 MB',
-      );
-    }
-
-    final settings = await loadSettings(passwordOverride: password);
-    _requireToolPath(safePath, settings.routerTool, writing: true);
-    await SshService.withClient(
-      settings.host,
-      settings.password,
-      (client) async {
-        final directory = _directoryOf(safePath);
-        if (directory != '/') {
-          await SshService.runCommandOnClient(
-            client,
-            'mkdir -p ${_shellQuote(directory)}',
-          ).timeout(_sftpTimeout);
-        }
-        final sftp = await SftpSupportService.open(client, settings.target);
-        final tmpPath =
-            '$safePath.proxly_tmp_${DateTime.now().microsecondsSinceEpoch}';
-        try {
-          final file = await _withTimeout(
-            sftp.open(
-              tmpPath,
-              mode: SftpFileOpenMode.create |
-                  SftpFileOpenMode.write |
-                  SftpFileOpenMode.truncate,
-            ),
-            'SFTP open',
+  }) =>
+      ConnectionSettingsStore.instance.runRemoteOperation(() async {
+        final safePath = normalizeConfigFilePath(path);
+        if (bytes.length > maxConfigBytes) {
+          throw Exception(
+            'File is too large (${(bytes.length / 1048576).toStringAsFixed(1)} MB), max 5 MB',
           );
-          try {
-            await _withTimeout(file.writeBytes(bytes), 'SFTP write');
-          } finally {
-            await _withTimeout(file.close(), 'SFTP close').catchError((_) {});
-          }
-
-          try {
-            await _withTimeout(sftp.rename(tmpPath, safePath), 'SFTP rename');
-          } catch (_) {
-            await SshService.runCommandOnClient(
-              client,
-              'mv -f ${_shellQuote(tmpPath)} ${_shellQuote(safePath)}',
-            ).timeout(_sftpTimeout);
-          }
-        } catch (_) {
-          await _withTimeout(sftp.remove(tmpPath), 'SFTP cleanup')
-              .catchError((_) {});
-          rethrow;
-        } finally {
-          sftp.close();
         }
-      },
-      username: settings.username,
-      port: settings.port,
-    );
-  }
+
+        final settings = await loadSettings(passwordOverride: password);
+        _requireToolPath(safePath, settings.routerTool, writing: true);
+        await SshService.withClient(
+          settings.host,
+          settings.password,
+          (client) async {
+            final directory = _directoryOf(safePath);
+            if (directory != '/') {
+              await SshService.runCommandOnClient(
+                client,
+                'mkdir -p ${_shellQuote(directory)}',
+              ).timeout(_sftpTimeout);
+            }
+            final sftp = await SftpSupportService.open(client, settings.target);
+            final tmpPath =
+                '$safePath.proxly_tmp_${DateTime.now().microsecondsSinceEpoch}';
+            try {
+              final file = await _withTimeout(
+                sftp.open(
+                  tmpPath,
+                  mode: SftpFileOpenMode.create |
+                      SftpFileOpenMode.write |
+                      SftpFileOpenMode.truncate,
+                ),
+                'SFTP open',
+              );
+              try {
+                await _withTimeout(file.writeBytes(bytes), 'SFTP write');
+              } finally {
+                await _withTimeout(file.close(), 'SFTP close')
+                    .catchError((_) {});
+              }
+
+              try {
+                await _withTimeout(
+                    sftp.rename(tmpPath, safePath), 'SFTP rename');
+              } catch (_) {
+                await SshService.runCommandOnClient(
+                  client,
+                  'mv -f ${_shellQuote(tmpPath)} ${_shellQuote(safePath)}',
+                ).timeout(_sftpTimeout);
+              }
+            } catch (_) {
+              await _withTimeout(sftp.remove(tmpPath), 'SFTP cleanup')
+                  .catchError((_) {});
+              rethrow;
+            } finally {
+              sftp.close();
+            }
+          },
+          username: settings.username,
+          port: settings.port,
+        );
+      });
 
   static Future<ClashConfigFile> renameFile(
     String sourcePath,
     String fileName, {
     String? password,
-  }) async {
-    final safeSource = normalizeConfigFilePath(sourcePath);
-    final safeTarget = renamePathForFileName(safeSource, fileName);
-    if (safeSource == safeTarget) return ClashConfigFile(path: safeSource);
+  }) =>
+      ConnectionSettingsStore.instance.runRemoteOperation(() async {
+        final safeSource = normalizeConfigFilePath(sourcePath);
+        final safeTarget = renamePathForFileName(safeSource, fileName);
+        if (safeSource == safeTarget) return ClashConfigFile(path: safeSource);
 
-    final settings = await loadSettings(passwordOverride: password);
-    _requireToolPath(safeSource, settings.routerTool, writing: true);
-    try {
-      return await SshService.withClient(
-        settings.host,
-        settings.password,
-        (client) async {
-          final sftp = await SftpSupportService.open(client, settings.target);
-          try {
-            final attrs = await _withTimeout(
-                sftp.stat(safeSource, followLink: false), 'SFTP stat');
-            if (!attrs.isFile) {
-              throw FormatException(tr('只能重命名配置目录中的普通 YAML 文件'));
-            }
-            return await renameWithActiveConfig(
-              sourcePath: safeSource,
-              fileName: fileName,
-              resolvePath: (path) =>
-                  _withTimeout(sftp.absolute(path), 'SFTP realpath'),
-              loadActiveConfig: () async {
-                final result = await _withTimeout(
-                    SshService.runCommandOnClient(
-                        client, _activeConfigCommand(settings.routerTool)),
-                    'Read active configuration');
-                return parseActiveConfigOutput(result.stdout);
-              },
-              rename: (source, target, updateActiveReference) async {
-                await _withTimeout(
-                    SshService.runCommandOnClient(
-                        client,
-                        _renameConfigCommand(source, target,
-                            updateActiveReference: updateActiveReference,
-                            tool: settings.routerTool)),
-                    'Rename configuration');
-              },
-            );
-          } finally {
-            sftp.close();
+        final settings = await loadSettings(passwordOverride: password);
+        _requireToolPath(safeSource, settings.routerTool, writing: true);
+        try {
+          return await SshService.withClient(
+            settings.host,
+            settings.password,
+            (client) async {
+              final sftp =
+                  await SftpSupportService.open(client, settings.target);
+              try {
+                final attrs = await _withTimeout(
+                    sftp.stat(safeSource, followLink: false), 'SFTP stat');
+                if (!attrs.isFile) {
+                  throw FormatException(tr('只能重命名配置目录中的普通 YAML 文件'));
+                }
+                return await renameWithActiveConfig(
+                  sourcePath: safeSource,
+                  fileName: fileName,
+                  resolvePath: (path) =>
+                      _withTimeout(sftp.absolute(path), 'SFTP realpath'),
+                  loadActiveConfig: () async {
+                    final result = await _withTimeout(
+                        SshService.runCommandOnClient(
+                            client, _activeConfigCommand(settings.routerTool)),
+                        'Read active configuration');
+                    return parseActiveConfigOutput(result.stdout);
+                  },
+                  rename: (source, target, updateActiveReference) async {
+                    await _withTimeout(
+                        SshService.runCommandOnClient(
+                            client,
+                            _renameConfigCommand(source, target,
+                                updateActiveReference: updateActiveReference,
+                                tool: settings.routerTool)),
+                        'Rename configuration');
+                  },
+                );
+              } finally {
+                sftp.close();
+              }
+            },
+            username: settings.username,
+            port: settings.port,
+            operationTimeout: const Duration(seconds: 30),
+          );
+        } on SshCommandException catch (error) {
+          final detail = '${error.stdout}\n${error.stderr}';
+          if (detail.contains('PROXLY_TARGET_EXISTS')) {
+            throw const ClashConfigNameConflictException();
           }
-        },
-        username: settings.username,
-        port: settings.port,
-        operationTimeout: const Duration(seconds: 30),
-      );
-    } on SshCommandException catch (error) {
-      final detail = '${error.stdout}\n${error.stderr}';
-      if (detail.contains('PROXLY_TARGET_EXISTS')) {
-        throw const ClashConfigNameConflictException();
-      }
-      if (detail.contains('PROXLY_ROLLBACK_FAILED')) {
-        throw const ClashConfigRenameRollbackException();
-      }
-      if (detail.contains('PROXLY_ACTIVE_UPDATE_FAILED')) {
-        throw const ClashConfigActiveReferenceException();
-      }
-      rethrow;
-    }
-  }
+          if (detail.contains('PROXLY_ROLLBACK_FAILED')) {
+            throw const ClashConfigRenameRollbackException();
+          }
+          if (detail.contains('PROXLY_ACTIVE_UPDATE_FAILED')) {
+            throw const ClashConfigActiveReferenceException();
+          }
+          rethrow;
+        }
+      });
 
   /// Mutation checks use remote identities on the same SSH connection, rather
   /// than the display-only path aliases or a filename match from the picker.
@@ -755,44 +771,45 @@ class ClashConfigFileService {
     return ClashConfigFile(path: target);
   }
 
-  static Future<void> deleteFile(String path, {String? password}) async {
-    final safePath = normalizeConfigFilePath(path);
-    final settings = await loadSettings(passwordOverride: password);
-    _requireToolPath(safePath, settings.routerTool, writing: true);
-    await SshService.withClient(settings.host, settings.password,
-        (client) async {
-      final sftp = await SftpSupportService.open(client, settings.target);
-      try {
-        final sourceAttrs = await _withTimeout(
-            sftp.stat(safePath, followLink: false), 'SFTP stat');
-        if (!sourceAttrs.isFile) {
-          throw FormatException(tr('只能删除配置目录中的普通 YAML 文件'));
-        }
-        await deleteInactiveConfigFile(
-          path: safePath,
-          loadActiveConfig: () async {
-            final result = await _withTimeout(
-                SshService.runCommandOnClient(
-                    client, _activeConfigCommand(settings.routerTool)),
-                'Read active configuration');
-            return parseActiveConfigOutput(result.stdout);
-          },
-          resolvePath: (path) =>
-              _withTimeout(sftp.absolute(path), 'SFTP realpath'),
-          removeFile: (path) async {
-            final attrs = await _withTimeout(
-                sftp.stat(path, followLink: false), 'SFTP stat');
-            if (!attrs.isFile) {
+  static Future<void> deleteFile(String path, {String? password}) =>
+      ConnectionSettingsStore.instance.runRemoteOperation(() async {
+        final safePath = normalizeConfigFilePath(path);
+        final settings = await loadSettings(passwordOverride: password);
+        _requireToolPath(safePath, settings.routerTool, writing: true);
+        await SshService.withClient(settings.host, settings.password,
+            (client) async {
+          final sftp = await SftpSupportService.open(client, settings.target);
+          try {
+            final sourceAttrs = await _withTimeout(
+                sftp.stat(safePath, followLink: false), 'SFTP stat');
+            if (!sourceAttrs.isFile) {
               throw FormatException(tr('只能删除配置目录中的普通 YAML 文件'));
             }
-            await _withTimeout(sftp.remove(path), 'SFTP remove');
-          },
-        );
-      } finally {
-        sftp.close();
-      }
-    }, username: settings.username, port: settings.port);
-  }
+            await deleteInactiveConfigFile(
+              path: safePath,
+              loadActiveConfig: () async {
+                final result = await _withTimeout(
+                    SshService.runCommandOnClient(
+                        client, _activeConfigCommand(settings.routerTool)),
+                    'Read active configuration');
+                return parseActiveConfigOutput(result.stdout);
+              },
+              resolvePath: (path) =>
+                  _withTimeout(sftp.absolute(path), 'SFTP realpath'),
+              removeFile: (path) async {
+                final attrs = await _withTimeout(
+                    sftp.stat(path, followLink: false), 'SFTP stat');
+                if (!attrs.isFile) {
+                  throw FormatException(tr('只能删除配置目录中的普通 YAML 文件'));
+                }
+                await _withTimeout(sftp.remove(path), 'SFTP remove');
+              },
+            );
+          } finally {
+            sftp.close();
+          }
+        }, username: settings.username, port: settings.port);
+      });
 
   /// Resolves both identities before deleting one inactive YAML. Callers supply
   /// operations bound to the same remote connection; lookup failures fail closed.
@@ -848,15 +865,16 @@ class ClashConfigFileService {
     );
   }
 
-  static Future<void> restartOpenClash({String? password}) async {
-    final settings = await loadSettings(passwordOverride: password);
-    await SshService.execute(
-      settings.host,
-      settings.password,
-      settings.routerTool.restartCommand,
-      port: settings.port,
-    );
-  }
+  static Future<void> restartOpenClash({String? password}) =>
+      ConnectionSettingsStore.instance.runRemoteOperation(() async {
+        final settings = await loadSettings(passwordOverride: password);
+        await SshService.execute(
+          settings.host,
+          settings.password,
+          settings.routerTool.restartCommand,
+          port: settings.port,
+        );
+      });
 
   static String _listCommand(RouterTool tool) {
     final roots = tool.configDirectories.map(_shellQuote).join(' ');

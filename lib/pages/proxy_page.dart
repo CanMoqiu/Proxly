@@ -94,6 +94,7 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
   // Plugin callbacks can wrap the same native controller in different Dart
   // objects. Compare their shared platform controller to reject stale views.
   bool _isCurrentController(InAppWebViewController controller) =>
+      _currentDevice &&
       identical(controller.platform, _webViewController?.platform);
   bool _isDark = false;
   String _panelLanguage = '';
@@ -108,7 +109,13 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
   String _updateMessage = '';
   bool _updateFailed = false;
 
-  static const _prefLocalStorage = ZashboardSettingsImportService.preferenceKey;
+  late final int _deviceGeneration;
+  late final String? _deviceId;
+  bool get _currentDevice =>
+      _deviceId == null ||
+      _deviceGeneration == ConnectionSettingsStore.instance.deviceGeneration;
+  String get _prefLocalStorage =>
+      ZashboardSettingsImportService.storageKeyFor(_deviceId);
 
   // Restore storage before Vue initializes.
   UserScript? _restoreUserScript;
@@ -119,10 +126,14 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    final store = ConnectionSettingsStore.instance;
+    _deviceId = store.activeDevice?.id;
+    _deviceGeneration = store.deviceGeneration;
     _panelLoad.addListener(_handlePanelLoad);
     WidgetsBinding.instance.addObserver(this);
     if (widget.asTab) {
       WebPanelSync.instance.register(
+        owner: this,
         save: _saveLocalStorage,
         reload: _reloadFromPrefs,
         syncAppearance: _syncAppearanceFromApp,
@@ -359,8 +370,10 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
   /// Base64 keeps JSON characters from changing the injected JavaScript.
   Future<void> _buildRestoreScript() async {
     final prefs = await SharedPreferences.getInstance();
-    final content =
-        await ConnectionPanelPreferences.instance.load(tablet: _tablet);
+    final content = await ConnectionPanelPreferences.instance.load(
+      tablet: _tablet,
+      deviceId: _deviceId,
+    );
     _connectionViewScript = UserScript(
       source: ConnectionPanelPreferences.script(content, tablet: _tablet),
       injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
@@ -380,7 +393,9 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
       }
       if (sanitized != raw) {
         if (prefs.getString(_prefLocalStorage) != sanitized) {
-          await prefs.setString(_prefLocalStorage, sanitized);
+          if (_currentDevice) {
+            await prefs.setString(_prefLocalStorage, sanitized);
+          }
         }
         raw = sanitized;
       }
@@ -425,6 +440,7 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
   }
 
   Future<void> _startLocalServerImpl() async {
+    if (!_currentDevice) return;
     final generation = ++_serverGeneration;
     // Prepare the restore script before creating the WebView.
     await _buildRestoreScript();
@@ -434,6 +450,7 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
     _themeUserScript = _buildThemeUserScript(_isDark);
 
     final settings = await ConnectionSettingsStore.instance.load();
+    if (!_currentDevice) return;
     final endpoint = ClashHostValidator.parseEndpoint(settings.host);
     if (!mounted || generation != _serverGeneration) return;
     if (endpoint == null) {
@@ -445,6 +462,7 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
       port: endpoint.port,
       token: settings.token,
       connectionState: ControllerConnectionState.instance,
+      deviceGeneration: _deviceId == null ? null : _deviceGeneration,
     );
     AssetHttpServer? assetServer;
     FileHttpServer? fileServer;
@@ -524,7 +542,7 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
     _panelLoad.removeListener(_handlePanelLoad);
     _panelLoad.dispose();
     WidgetsBinding.instance.removeObserver(this);
-    if (widget.asTab) WebPanelSync.instance.unregister();
+    if (widget.asTab) WebPanelSync.instance.unregister(owner: this);
     WebPanelSync.instance.unregisterWebView(this);
     ConnectionSettingsStore.instance
         .removeListener(_handleConnectionSettingsChanged);
@@ -535,6 +553,13 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
   }
 
   void _handleConnectionSettingsChanged() {
+    if (!_currentDevice) {
+      _serverGeneration++;
+      _webViewController = null;
+      _assetServer?.close();
+      _fileServer?.close();
+      return;
+    }
     final change = ConnectionSettingsStore.instance.lastChange;
     if (change == ConnectionSettingsChange.controller ||
         change == ConnectionSettingsChange.reset) {
@@ -616,8 +641,10 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
 
       ZashboardSettingsImportResult? imported;
       try {
-        imported =
-            await ZashboardSettingsImportService.instance.importSnapshot(raw);
+        imported = await ZashboardSettingsImportService.instance.importSnapshot(
+            raw,
+            deviceId: _deviceId,
+            expectedGeneration: _deviceId == null ? null : _deviceGeneration);
       } catch (error) {
         debugPrint('[ProxyPage] 核心设置导入失败: $error');
       }
@@ -720,7 +747,7 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
       if (sanitized == null) return;
       final prefs = await SharedPreferences.getInstance();
       if (prefs.getString(_prefLocalStorage) != sanitized) {
-        await prefs.setString(_prefLocalStorage, sanitized);
+        if (_currentDevice) await prefs.setString(_prefLocalStorage, sanitized);
       }
     } catch (e) {
       debugPrint('[ProxyPage] 保存 localStorage 失败: $e');
@@ -803,8 +830,10 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
       }catch(e){}})();
       """,
       );
-      final content =
-          await ConnectionPanelPreferences.instance.load(tablet: _tablet);
+      final content = await ConnectionPanelPreferences.instance.load(
+        tablet: _tablet,
+        deviceId: _deviceId,
+      );
       await _webViewController!.evaluateJavascript(
         source: ConnectionPanelPreferences.script(content, tablet: _tablet),
       );
@@ -981,8 +1010,10 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
 
   Future<void> _applyImportedSettings(String raw) async {
     // Both sources share the same secret filtering and managed preferences.
-    final sanitized =
-        await ZashboardSettingsImportService.instance.importSnapshot(raw);
+    final sanitized = await ZashboardSettingsImportService.instance
+        .importSnapshot(raw,
+            deviceId: _deviceId,
+            expectedGeneration: _deviceId == null ? null : _deviceGeneration);
     if (sanitized == null) {
       _showImportSnack('格式错误：不是有效的配置文件', success: false);
       return;
@@ -1240,12 +1271,15 @@ class _ProxyPageState extends State<ProxyPage> with WidgetsBindingObserver {
                   ConnectionPanelPreferences.instance.bind(
                     c,
                     tablet: _tablet,
+                    deviceId: _deviceId,
                     port: _serverPort,
                     isCurrent: () => mounted && _isCurrentController(c),
                   );
                   c.addJavaScriptHandler(
                     handlerName: 'nativeUpdatePanel',
-                    callback: (_) => _performNativeUpdate(),
+                    callback: (_) async => _isCurrentController(c)
+                        ? _performNativeUpdate()
+                        : {'ok': false, 'reason': 'retired'},
                   );
                 },
                 // Hash navigation and WebKit back gestures do not necessarily

@@ -1,6 +1,33 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 
+import '../services/tablet_layout.dart';
 import '../theme/app_theme.dart';
+
+class AdaptiveContent extends StatelessWidget {
+  const AdaptiveContent({super.key, required this.child, this.maxWidth = 640});
+
+  final Widget child;
+  final double maxWidth;
+
+  @override
+  Widget build(BuildContext context) {
+    final size = MediaQuery.sizeOf(context);
+    final stretch = size.width >= 900 &&
+        size.width > size.height &&
+        TabletLayout.isTablet(View.of(context));
+
+    return Align(
+      alignment: Alignment.topCenter,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: stretch ? double.infinity : maxWidth,
+        ),
+        child: child,
+      ),
+    );
+  }
+}
 
 class AdaptiveScrollPadding {
   AdaptiveScrollPadding._();
@@ -48,6 +75,22 @@ class AdaptiveSingleLineText extends StatelessWidget {
   }
 }
 
+class AppPickerChevron extends StatelessWidget {
+  const AppPickerChevron({super.key, required this.color, this.size = 18});
+
+  final Color color;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) => SvgPicture.asset(
+        'assets/icons/chevron-right-rounded.svg',
+        width: size,
+        height: size,
+        colorFilter: ColorFilter.mode(color, BlendMode.srcIn),
+        excludeFromSemantics: true,
+      );
+}
+
 class AppSelectionPicker extends StatelessWidget {
   const AppSelectionPicker(
       {super.key,
@@ -56,10 +99,11 @@ class AppSelectionPicker extends StatelessWidget {
       required this.tooltip,
       required this.onTap,
       this.compact = false,
-      this.arrow = Icons.play_arrow_rounded});
+      this.borderColor});
   final String label, tooltip;
-  final IconData icon, arrow;
+  final IconData icon;
   final VoidCallback? onTap;
+  final Color? borderColor;
   final bool compact;
 
   @override
@@ -76,7 +120,8 @@ class AppSelectionPicker extends StatelessWidget {
               padding: EdgeInsets.symmetric(
                   horizontal: compact ? 10 : 12, vertical: compact ? 8 : 10),
               decoration: BoxDecoration(
-                  border: Border.all(color: foreground.withValues(alpha: 0.18)),
+                  border: Border.all(
+                      color: borderColor ?? foreground.withValues(alpha: 0.18)),
                   borderRadius: BorderRadius.circular(12)),
               child: Row(mainAxisSize: MainAxisSize.min, children: [
                 Icon(icon, size: 18, color: foreground),
@@ -88,7 +133,7 @@ class AppSelectionPicker extends StatelessWidget {
                         alignment: Alignment.centerLeft,
                         textAlign: TextAlign.left)),
                 const SizedBox(width: 4),
-                Icon(arrow, size: 18, color: foreground),
+                AppPickerChevron(color: foreground),
               ]),
             ),
           ),
@@ -97,34 +142,34 @@ class AppSelectionPicker extends StatelessWidget {
 }
 
 class AppSettingPickerRow extends StatelessWidget {
-  const AppSettingPickerRow(
-      {super.key,
-      required this.title,
-      required this.description,
-      required this.picker});
-  final String title, description;
+  const AppSettingPickerRow({
+    super.key,
+    required this.title,
+    required this.picker,
+  });
+
+  final String title;
   final Widget picker;
 
   @override
   Widget build(BuildContext context) {
     final palette = AppPalette.of(context);
-    return Row(children: [
-      Expanded(
-          child:
-              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(title,
+    return Row(
+      children: [
+        Expanded(
+          child: Text(
+            title,
             style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w500,
-                color: palette.textPrimary)),
-        const SizedBox(height: 4),
-        Text(description,
-            style: TextStyle(
-                fontSize: 11, color: palette.textSecondary, height: 1.4)),
-      ])),
-      const SizedBox(width: 12),
-      Expanded(child: Align(alignment: Alignment.centerRight, child: picker)),
-    ]);
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+              color: palette.textPrimary,
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(child: Align(alignment: Alignment.centerRight, child: picker)),
+      ],
+    );
   }
 }
 
@@ -510,11 +555,12 @@ class ThemeModeSelector extends StatelessWidget {
         const SizedBox(height: 14),
         Row(
           children: [
-            Text(
-              followSystemLabel,
-              style: TextStyle(fontSize: 13, color: textColor),
+            Expanded(
+              child: Text(
+                followSystemLabel,
+                style: TextStyle(fontSize: 13, color: textColor),
+              ),
             ),
-            const Spacer(),
             Switch(
               key: const ValueKey('theme_mode_system_switch'),
               value: followsSystem,

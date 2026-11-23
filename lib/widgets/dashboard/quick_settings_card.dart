@@ -65,16 +65,16 @@ class OpenClashQuickSettingsCard extends StatelessWidget {
     final runModeSupported = current?.baseMode != OpenClashBaseMode.unknown &&
         current?.runVariant != null;
 
-    var streamDescription = tr('自动为常见流媒体服务选择可解锁节点');
+    String? streamNotice;
     if (current != null && !current.streamUnlockSupported) {
-      streamDescription = tr(current.routerTool == RouterTool.openClash
+      streamNotice = tr(current.routerTool == RouterTool.openClash
           ? '当前 OpenClash 未提供流媒体解锁组件'
           : '当前代理软件尚不支持此功能');
     } else if (current != null && !current.routerSelfProxyEnabled) {
-      streamDescription = tr('需要先在 OpenClash 中启用路由器本机代理');
+      streamNotice = tr('需要先在 OpenClash 中启用路由器本机代理');
     } else if (current != null &&
         current.proxyMode != OpenClashProxyMode.rule) {
-      streamDescription = tr('仅支持规则代理模式');
+      streamNotice = tr('仅支持规则代理模式');
     }
 
     return Container(
@@ -127,9 +127,7 @@ class OpenClashQuickSettingsCard extends StatelessWidget {
             if (supports(OpenClashQuickSettingKey.runVariant))
               _QuickSettingsSection(
                 title: tr('运行模式'),
-                description: tr('选择当前基础模式对应的运行方式'),
                 textColor: textColor,
-                hintColor: hintColor,
                 child: _QuickChoiceGroup<OpenClashRunVariant>(
                   labels: [compatibilityLabel, 'TUN', tr('混合')],
                   values: OpenClashRunVariant.values,
@@ -147,9 +145,7 @@ class OpenClashQuickSettingsCard extends StatelessWidget {
           if (supports(OpenClashQuickSettingKey.proxyMode)) ...[
             _QuickSettingsSection(
               title: tr('代理模式'),
-              description: tr('切换 Mihomo 处理连接时使用的规则范围'),
               textColor: textColor,
-              hintColor: hintColor,
               child: _QuickChoiceGroup<OpenClashProxyMode>(
                 labels: [tr('规则'), tr('全局'), tr('直连')],
                 values: OpenClashProxyMode.values,
@@ -166,13 +162,12 @@ class OpenClashQuickSettingsCard extends StatelessWidget {
           if (supports(OpenClashQuickSettingKey.areaBypass)) ...[
             _QuickSettingsSection(
               title: tr('区域绕过'),
-              description: tr(effectiveTool == RouterTool.nikki
-                  ? current != null && current.areaBypass == null
-                      ? '当前 IPv4/IPv6 绕过设置不同，选择后将统一设置'
-                      : '同时设置大陆 IPv4/IPv6 流量绕过内核'
-                  : '指定区域流量不经过内核'),
+              notice: effectiveTool == RouterTool.nikki &&
+                      current != null &&
+                      current.areaBypass == null
+                  ? tr('当前 IPv4/IPv6 绕过设置不同，选择后将统一设置')
+                  : null,
               textColor: textColor,
-              hintColor: hintColor,
               child: _QuickChoiceGroup<OpenClashAreaBypass>(
                 labels: [
                   tr('大陆'),
@@ -199,11 +194,9 @@ class OpenClashQuickSettingsCard extends StatelessWidget {
             _QuickSwitchRow(
               key: const ValueKey('quick_setting_sniffer'),
               title: tr('域名嗅探'),
-              description: tr('识别连接中的域名，降低按域名分流失效的概率'),
               value: current?.snifferEnabled ?? false,
               enabled: enabled && supports(OpenClashQuickSettingKey.sniffer),
               textColor: textColor,
-              hintColor: hintColor,
               onChanged: onSnifferChanged,
             ),
             if (hasFollowing(OpenClashQuickSettingKey.sniffer))
@@ -214,11 +207,9 @@ class OpenClashQuickSettingsCard extends StatelessWidget {
               key: const ValueKey('quick_setting_dns_proxy'),
               title:
                   tr(effectiveTool == RouterTool.nikki ? 'DNS 遵循规则' : 'DNS 代理'),
-              description: tr('让 DNS 查询遵循代理规则，减少解析与访问不一致'),
               value: current?.dnsProxyEnabled ?? false,
               enabled: enabled && supports(OpenClashQuickSettingKey.dnsProxy),
               textColor: textColor,
-              hintColor: hintColor,
               onChanged: onDnsProxyChanged,
             ),
             if (hasFollowing(OpenClashQuickSettingKey.dnsProxy))
@@ -228,12 +219,11 @@ class OpenClashQuickSettingsCard extends StatelessWidget {
             _QuickSwitchRow(
               key: const ValueKey('quick_setting_stream_unlock'),
               title: tr('流媒体解锁'),
-              description: streamDescription,
+              notice: streamNotice,
               value: current?.streamUnlockEnabled ?? false,
               enabled:
                   enabled && supports(OpenClashQuickSettingKey.streamUnlock),
               textColor: textColor,
-              hintColor: hintColor,
               onChanged: onStreamUnlockChanged,
             ),
           ],
@@ -245,16 +235,14 @@ class OpenClashQuickSettingsCard extends StatelessWidget {
 
 class _QuickSettingsSection extends StatelessWidget {
   final String title;
-  final String description;
+  final String? notice;
   final Color textColor;
-  final Color hintColor;
   final Widget child;
 
   const _QuickSettingsSection({
     required this.title,
-    required this.description,
+    this.notice,
     required this.textColor,
-    required this.hintColor,
     required this.child,
   });
 
@@ -263,31 +251,8 @@ class _QuickSettingsSection extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: textColor,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    description,
-                    style: TextStyle(fontSize: 11, color: hintColor),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
+        _QuickSettingHeading(
+            title: title, notice: notice, textColor: textColor),
         const SizedBox(height: 12),
         child,
       ],
@@ -374,21 +339,19 @@ class _QuickChoiceButton extends StatelessWidget {
 
 class _QuickSwitchRow extends StatelessWidget {
   final String title;
-  final String description;
+  final String? notice;
   final bool value;
   final bool enabled;
   final Color textColor;
-  final Color hintColor;
   final ValueChanged<bool> onChanged;
 
   const _QuickSwitchRow({
     super.key,
     required this.title,
-    required this.description,
+    this.notice,
     required this.value,
     required this.enabled,
     required this.textColor,
-    required this.hintColor,
     required this.onChanged,
   });
 
@@ -397,30 +360,55 @@ class _QuickSwitchRow extends StatelessWidget {
     return Row(
       children: [
         Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                title,
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: textColor,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                description,
-                style: TextStyle(fontSize: 11, color: hintColor),
-              ),
-            ],
-          ),
+          child: _QuickSettingHeading(
+              title: title, notice: notice, textColor: textColor),
         ),
         const SizedBox(width: 12),
         Switch(
           value: value,
           onChanged: enabled ? onChanged : null,
           materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        ),
+      ],
+    );
+  }
+}
+
+class _QuickSettingHeading extends StatelessWidget {
+  const _QuickSettingHeading({
+    required this.title,
+    required this.notice,
+    required this.textColor,
+  });
+
+  final String title;
+  final String? notice;
+  final Color textColor;
+
+  @override
+  Widget build(BuildContext context) {
+    final titleText = Text(
+      title,
+      style: TextStyle(
+        fontSize: 13,
+        fontWeight: FontWeight.w600,
+        color: textColor,
+      ),
+    );
+    final message = notice;
+    if (message == null) return titleText;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        titleText,
+        const SizedBox(height: 4),
+        Text(
+          message,
+          style: TextStyle(
+            fontSize: 11,
+            color: AppPalette.of(context).textSecondary,
+          ),
         ),
       ],
     );

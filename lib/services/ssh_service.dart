@@ -6,6 +6,7 @@ import 'package:dartssh2/dartssh2.dart';
 
 import 'ssh_host_trust_service.dart';
 import 'ssh_authentication_deadline.dart';
+import 'connection_settings_store.dart';
 
 class SshCommandResult {
   final String stdout;
@@ -61,7 +62,12 @@ class SshService {
     Duration authTimeout = const Duration(seconds: 15),
     Duration? operationTimeout,
     SSHHostkeyVerifyHandler? onVerifyHostKey,
+    int? expectedGeneration,
   }) async {
+    final store = ConnectionSettingsStore.instance;
+    final generation = expectedGeneration ?? store.deviceGeneration;
+    store.requireDeviceGeneration(generation);
+    final deviceId = store.activeDevice?.id;
     final socket = await SSHSocket.connect(
       host,
       port,
@@ -78,17 +84,27 @@ class SshService {
             port,
             type,
             fingerprint,
+            deviceId: deviceId,
+            expectedGeneration: generation,
           )),
-      onPasswordRequest: () => password,
+      onPasswordRequest: () {
+        store.requireDeviceGeneration(generation);
+        return password;
+      },
     );
     try {
       await deadline.waitFor(client.authenticated);
+      store.requireDeviceGeneration(generation);
       final result = action(client);
-      if (operationTimeout == null) return await result;
-      return await result.timeout(
-        operationTimeout,
-        onTimeout: () => throw TimeoutException('SSH operation timed out'),
-      );
+      final value = operationTimeout == null
+          ? await result
+          : await result.timeout(
+              operationTimeout,
+              onTimeout: () =>
+                  throw TimeoutException('SSH operation timed out'),
+            );
+      store.requireDeviceGeneration(generation);
+      return value;
     } finally {
       client.close();
       await client.done.catchError((_) {});
@@ -168,6 +184,7 @@ class SshService {
     int port = 22,
     bool stderr = false,
     Duration? operationTimeout,
+    int? expectedGeneration,
   }) async {
     final result = await withClient(
       host,
@@ -176,6 +193,7 @@ class SshService {
       username: username,
       port: port,
       operationTimeout: operationTimeout,
+      expectedGeneration: expectedGeneration,
     );
     return stderr ? result.stdout + result.stderr : result.stdout;
   }

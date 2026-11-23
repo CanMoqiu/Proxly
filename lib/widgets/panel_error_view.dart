@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../l10n/app_locale.dart';
-import '../services/app_platform.dart';
 import '../services/clash_service.dart';
 import '../services/connection_feedback.dart';
 import '../services/controller_connection_state.dart';
@@ -105,13 +104,6 @@ class _PanelErrorViewState extends State<PanelErrorView>
                     color: Theme.of(context).colorScheme.onSurfaceVariant),
                 const SizedBox(height: 16),
                 Text(tr(widget.message), textAlign: TextAlign.center),
-                if (AppPlatform.isIOS && _offline) ...[
-                  const SizedBox(height: 12),
-                  Text(
-                    tr('若已连接正确网络，请检查系统设置中的 Proxly 局域网权限。'),
-                    textAlign: TextAlign.center,
-                  ),
-                ],
                 const SizedBox(height: 16),
                 FilledButton(
                     onPressed: _retrying ? null : _retry,

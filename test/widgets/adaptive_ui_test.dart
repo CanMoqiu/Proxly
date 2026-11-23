@@ -20,6 +20,37 @@ Widget _testApp(Widget child) {
 }
 
 void main() {
+  testWidgets('adaptive content stretches only on wide landscape tablets',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.display.devicePixelRatio = 1;
+    tester.view.display.size = const Size(1366, 900);
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+      tester.view.display.resetSize();
+      tester.view.display.resetDevicePixelRatio();
+    });
+
+    const contentKey = Key('adaptive-content');
+    const app = AdaptiveContent(child: SizedBox.expand(key: contentKey));
+    final content = find.byKey(contentKey);
+
+    tester.view.physicalSize = const Size(1366, 900);
+    await tester.pumpWidget(_testApp(app));
+    expect(tester.getSize(content).width, 1366);
+
+    tester.view.physicalSize = const Size(900, 1366);
+    await tester.pumpAndSettle();
+    expect(tester.getSize(content).width, 640);
+    expect(tester.getTopLeft(content).dx, 130);
+
+    tester.view.physicalSize = const Size(840, 720);
+    await tester.pumpAndSettle();
+    expect(tester.getSize(content).width, 640);
+    expect(tester.getTopLeft(content).dx, 100);
+  });
+
   testWidgets('option group stacks labels when horizontal space is too small',
       (tester) async {
     const firstKey = Key('first-option');

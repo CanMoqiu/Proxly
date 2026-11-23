@@ -242,6 +242,14 @@ void main() {
         findsOneWidget);
     expect(find.byKey(const ValueKey('quick_setting_sniffer')), findsOneWidget);
     expect(find.text('DNS respect rules'), findsOneWidget);
+    expect(
+      find.text(tr('同时设置大陆 IPv4/IPv6 流量绕过内核')),
+      findsNothing,
+    );
+    expect(
+      find.text(tr('让 DNS 查询遵循代理规则，减少解析与访问不一致')),
+      findsNothing,
+    );
     expect(find.byType(Divider), findsNWidgets(4));
     await tester.pumpWidget(const SizedBox());
   });

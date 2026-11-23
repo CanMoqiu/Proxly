@@ -157,225 +157,228 @@ class OpenClashQuickSettingsService {
     required OpenClashQuickSettings original,
     required OpenClashQuickSettings desired,
     required OpenClashQuickSettingKey key,
-  }) async {
-    _validateSingleChange(original: original, desired: desired, key: key);
-    final tool = await _selectedTool();
-    if (original.routerTool != tool || desired.routerTool != tool) {
-      throw StateError('Router tool changed; refresh before applying settings');
-    }
-    if (!original.supports(key)) {
-      return OpenClashQuickSettingApplyResult.failure(
-          settings: original,
-          errorCode: 'unsupported_feature',
-          rollbackAttempted: false,
-          rollbackSucceeded: false);
-    }
-    if (tool == RouterTool.generic) {
-      await _clashService.setProxyMode(desired.proxyMode.name);
-      final current = await _loadGeneric();
-      if (current.proxyMode != desired.proxyMode) {
-        return OpenClashQuickSettingApplyResult.failure(
-            settings: current,
-            errorCode: 'verification_failed',
-            rollbackAttempted: false,
-            rollbackSucceeded: false,
-            stateUncertain: true);
-      }
-      return OpenClashQuickSettingApplyResult.success(current);
-    }
-    if (tool == RouterTool.nikki) {
-      return _nikki.applyChange(original: original, desired: desired, key: key);
-    }
-    if (_matches(key, original, desired)) {
-      return OpenClashQuickSettingApplyResult.success(original);
-    }
-    if (_requiresRestart(key)) {
-      return _applyRunModeWithRestart(
-        original: original,
-        desired: desired,
-        key: key,
-      );
-    }
-
-    final transaction = OpenClashScriptSafety.transactionPath(
-      'quick',
-      _transactionIdFactory(),
-    );
-    var prepared = false;
-    var rollbackAttempted = false;
-    var rollbackSucceeded = false;
-    var errorCode = 'unknown';
-    String? errorDetail;
-    var liveProxyModeChanged = false;
-    var applyStarted = false;
-    var persistenceCompleted = false;
-    String? runtimePath;
-    var failureStage = '准备设置';
-
-    try {
-      failureStage = '检查 OpenClash 环境';
-      final capabilities = await _probeCapabilities();
-      _validateCapabilities(capabilities, key);
-      _trace(
-        transaction.split('_').last,
-        key,
-        'capabilities',
-        'version=${capabilities.version.isEmpty ? 'unknown' : capabilities.version}, '
-            'yaml=${capabilities.hasYamlCompatibility ? 'openclash' : 'system'}',
-      );
-      if (_requiresController(key)) {
-        failureStage = '检查 Clash 控制器';
-        _trace(transaction.split('_').last, key, 'controller-preflight');
-        await _ensureControllerReady();
-      }
-      if (key == OpenClashQuickSettingKey.proxyMode) {
-        failureStage = '更新代理模式运行态';
-        _trace(transaction.split('_').last, key, 'live-update');
-        await _setLiveProxyMode(desired.proxyMode);
-        liveProxyModeChanged = true;
-      }
-
-      failureStage = '写入 OpenClash 设置';
-      _trace(transaction.split('_').last, key, 'prepare');
-      applyStarted = true;
-      final output = await _run(
-        _buildApplyCommand(
-          transaction: transaction,
-          original: original,
-          desired: desired,
-          key: key,
-        ),
-        operationTimeout: _operationTimeoutFor(key),
-      );
-      runtimePath = _marker(output, 'PROXLY_RUNTIME_PATH') ?? runtimePath;
-      prepared = output.contains('PROXLY_TX_READY=1');
-      if (!prepared) {
-        throw const _QuickApplyException('incomplete_response');
-      }
-      persistenceCompleted = !_usesRuntime(key);
-      if (_usesRuntime(key)) {
-        final path = runtimePath;
-        if (path == null || path.isEmpty) {
-          throw const _QuickApplyException('runtime_config_missing');
+  }) =>
+      ConnectionSettingsStore.instance.runRemoteOperation(() async {
+        _validateSingleChange(original: original, desired: desired, key: key);
+        final tool = await _selectedTool();
+        if (original.routerTool != tool || desired.routerTool != tool) {
+          throw StateError(
+              'Router tool changed; refresh before applying settings');
         }
-        failureStage = '热重载 Mihomo 配置';
-        _trace(transaction.split('_').last, key, 'hot-reload');
-        await _reloadRuntimeConfig(path);
-        failureStage = '保存 OpenClash 设置';
-        final persistOutput = await _run(
-          _runtimePersistCommand(
-            transaction: transaction,
+        if (!original.supports(key)) {
+          return OpenClashQuickSettingApplyResult.failure(
+              settings: original,
+              errorCode: 'unsupported_feature',
+              rollbackAttempted: false,
+              rollbackSucceeded: false);
+        }
+        if (tool == RouterTool.generic) {
+          await _clashService.setProxyMode(desired.proxyMode.name);
+          final current = await _loadGeneric();
+          if (current.proxyMode != desired.proxyMode) {
+            return OpenClashQuickSettingApplyResult.failure(
+                settings: current,
+                errorCode: 'verification_failed',
+                rollbackAttempted: false,
+                rollbackSucceeded: false,
+                stateUncertain: true);
+          }
+          return OpenClashQuickSettingApplyResult.success(current);
+        }
+        if (tool == RouterTool.nikki) {
+          return _nikki.applyChange(
+              original: original, desired: desired, key: key);
+        }
+        if (_matches(key, original, desired)) {
+          return OpenClashQuickSettingApplyResult.success(original);
+        }
+        if (_requiresRestart(key)) {
+          return _applyRunModeWithRestart(
+            original: original,
             desired: desired,
             key: key,
-          ),
-          operationTimeout: _operationTimeoutFor(key),
-        );
-        if (_marker(persistOutput, 'PROXLY_PERSISTED') != '1') {
-          throw const _QuickApplyException('incomplete_response');
+          );
         }
-        persistenceCompleted = true;
-      }
 
-      failureStage = '验证设置结果';
-      _trace(transaction.split('_').last, key, 'verify');
-      final actual = await load();
-      if (!_matches(key, actual, desired)) {
-        throw const _QuickApplyException('verification_failed');
-      }
-      failureStage = '检查 Mihomo 进程';
-      final pidBefore = _marker(output, 'PROXLY_PID_BEFORE');
-      final pidAfter = await _readClashPid();
-      if (pidBefore == null || pidBefore.isEmpty || pidBefore != pidAfter) {
-        throw const _QuickApplyException('pid_changed');
-      }
-      failureStage = '检查 Mihomo 健康状态';
-      await _verifyCoreHealth();
+        final transaction = OpenClashScriptSafety.transactionPath(
+          'quick',
+          _transactionIdFactory(),
+        );
+        var prepared = false;
+        var rollbackAttempted = false;
+        var rollbackSucceeded = false;
+        var errorCode = 'unknown';
+        String? errorDetail;
+        var liveProxyModeChanged = false;
+        var applyStarted = false;
+        var persistenceCompleted = false;
+        String? runtimePath;
+        var failureStage = '准备设置';
 
-      try {
-        await _run(_cleanupCommand(transaction));
-      } catch (_) {
-        // Temporary files live under /tmp and do not affect the applied state.
-      }
-      _trace(transaction.split('_').last, key, 'success');
-      return OpenClashQuickSettingApplyResult.success(actual);
-    } catch (error) {
-      errorCode = _errorCode(error);
-      errorDetail = _stageDetail(failureStage, _errorDetail(error));
-      runtimePath ??= _runtimePathMarker(error);
-      final rollbackMarker = _rollbackMarker(error);
-      rollbackSucceeded = rollbackMarker == 'success';
-      rollbackAttempted =
-          rollbackSucceeded || rollbackMarker == 'failed' || prepared;
-      // A timeout or transport failure can lose the completion marker even
-      // after the router has written settings. Reconcile all unconfirmed runs.
-      final unconfirmedTransaction = applyStarted && rollbackMarker == null;
-
-      if ((prepared || unconfirmedTransaction) && !rollbackSucceeded) {
-        rollbackAttempted = true;
         try {
-          final rollbackOutput = await _run(
-            _rollbackCommand(transaction: transaction, key: key),
+          failureStage = '检查 OpenClash 环境';
+          final capabilities = await _probeCapabilities();
+          _validateCapabilities(capabilities, key);
+          _trace(
+            transaction.split('_').last,
+            key,
+            'capabilities',
+            'version=${capabilities.version.isEmpty ? 'unknown' : capabilities.version}, '
+                'yaml=${capabilities.hasYamlCompatibility ? 'openclash' : 'system'}',
+          );
+          if (_requiresController(key)) {
+            failureStage = '检查 Clash 控制器';
+            _trace(transaction.split('_').last, key, 'controller-preflight');
+            await _ensureControllerReady();
+          }
+          if (key == OpenClashQuickSettingKey.proxyMode) {
+            failureStage = '更新代理模式运行态';
+            _trace(transaction.split('_').last, key, 'live-update');
+            await _setLiveProxyMode(desired.proxyMode);
+            liveProxyModeChanged = true;
+          }
+
+          failureStage = '写入 OpenClash 设置';
+          _trace(transaction.split('_').last, key, 'prepare');
+          applyStarted = true;
+          final output = await _run(
+            _buildApplyCommand(
+              transaction: transaction,
+              original: original,
+              desired: desired,
+              key: key,
+            ),
             operationTimeout: _operationTimeoutFor(key),
           );
-          runtimePath ??= _marker(rollbackOutput, 'PROXLY_RUNTIME_PATH');
-          rollbackSucceeded =
-              _marker(rollbackOutput, 'PROXLY_ROLLBACK') == 'success';
-        } catch (rollbackError) {
-          runtimePath ??= _runtimePathMarker(rollbackError);
-          rollbackSucceeded = _rollbackMarker(rollbackError) == 'success';
-        }
-      }
-
-      if (liveProxyModeChanged) {
-        try {
-          await _setLiveProxyMode(original.proxyMode);
-        } catch (_) {
-          rollbackAttempted = true;
-          rollbackSucceeded = false;
-        }
-      }
-
-      if (rollbackSucceeded) {
-        try {
-          final path = runtimePath;
-          if (_usesRuntime(key) && path != null && path.isNotEmpty) {
-            await _reloadRuntimeConfig(path);
+          runtimePath = _marker(output, 'PROXLY_RUNTIME_PATH') ?? runtimePath;
+          prepared = output.contains('PROXLY_TX_READY=1');
+          if (!prepared) {
+            throw const _QuickApplyException('incomplete_response');
           }
-          await _verifyCoreHealth();
-          final restored = await load();
-          rollbackSucceeded = _matches(key, restored, original);
-        } catch (_) {
-          rollbackSucceeded = false;
-        }
-      }
+          persistenceCompleted = !_usesRuntime(key);
+          if (_usesRuntime(key)) {
+            final path = runtimePath;
+            if (path == null || path.isEmpty) {
+              throw const _QuickApplyException('runtime_config_missing');
+            }
+            failureStage = '热重载 Mihomo 配置';
+            _trace(transaction.split('_').last, key, 'hot-reload');
+            await _reloadRuntimeConfig(path);
+            failureStage = '保存 OpenClash 设置';
+            final persistOutput = await _run(
+              _runtimePersistCommand(
+                transaction: transaction,
+                desired: desired,
+                key: key,
+              ),
+              operationTimeout: _operationTimeoutFor(key),
+            );
+            if (_marker(persistOutput, 'PROXLY_PERSISTED') != '1') {
+              throw const _QuickApplyException('incomplete_response');
+            }
+            persistenceCompleted = true;
+          }
 
-      OpenClashQuickSettings actual;
-      try {
-        actual = await load();
-      } catch (_) {
-        actual = original;
-      }
-      if (rollbackAttempted && !rollbackSucceeded) {
-        errorCode = 'rollback_failed';
-      }
-      _trace(
-        transaction.split('_').last,
-        key,
-        'failure',
-        '$errorCode $errorDetail',
-      );
-      return OpenClashQuickSettingApplyResult.failure(
-        settings: actual,
-        errorCode: errorCode,
-        errorDetail: errorDetail,
-        failureStage: failureStage,
-        rollbackAttempted: rollbackAttempted,
-        rollbackSucceeded: rollbackSucceeded,
-        changesPersisted: persistenceCompleted && !rollbackSucceeded,
-        stateUncertain: unconfirmedTransaction && !rollbackSucceeded,
-      );
-    }
-  }
+          failureStage = '验证设置结果';
+          _trace(transaction.split('_').last, key, 'verify');
+          final actual = await load();
+          if (!_matches(key, actual, desired)) {
+            throw const _QuickApplyException('verification_failed');
+          }
+          failureStage = '检查 Mihomo 进程';
+          final pidBefore = _marker(output, 'PROXLY_PID_BEFORE');
+          final pidAfter = await _readClashPid();
+          if (pidBefore == null || pidBefore.isEmpty || pidBefore != pidAfter) {
+            throw const _QuickApplyException('pid_changed');
+          }
+          failureStage = '检查 Mihomo 健康状态';
+          await _verifyCoreHealth();
+
+          try {
+            await _run(_cleanupCommand(transaction));
+          } catch (_) {
+            // Temporary files live under /tmp and do not affect the applied state.
+          }
+          _trace(transaction.split('_').last, key, 'success');
+          return OpenClashQuickSettingApplyResult.success(actual);
+        } catch (error) {
+          errorCode = _errorCode(error);
+          errorDetail = _stageDetail(failureStage, _errorDetail(error));
+          runtimePath ??= _runtimePathMarker(error);
+          final rollbackMarker = _rollbackMarker(error);
+          rollbackSucceeded = rollbackMarker == 'success';
+          rollbackAttempted =
+              rollbackSucceeded || rollbackMarker == 'failed' || prepared;
+          // A timeout or transport failure can lose the completion marker even
+          // after the router has written settings. Reconcile all unconfirmed runs.
+          final unconfirmedTransaction = applyStarted && rollbackMarker == null;
+
+          if ((prepared || unconfirmedTransaction) && !rollbackSucceeded) {
+            rollbackAttempted = true;
+            try {
+              final rollbackOutput = await _run(
+                _rollbackCommand(transaction: transaction, key: key),
+                operationTimeout: _operationTimeoutFor(key),
+              );
+              runtimePath ??= _marker(rollbackOutput, 'PROXLY_RUNTIME_PATH');
+              rollbackSucceeded =
+                  _marker(rollbackOutput, 'PROXLY_ROLLBACK') == 'success';
+            } catch (rollbackError) {
+              runtimePath ??= _runtimePathMarker(rollbackError);
+              rollbackSucceeded = _rollbackMarker(rollbackError) == 'success';
+            }
+          }
+
+          if (liveProxyModeChanged) {
+            try {
+              await _setLiveProxyMode(original.proxyMode);
+            } catch (_) {
+              rollbackAttempted = true;
+              rollbackSucceeded = false;
+            }
+          }
+
+          if (rollbackSucceeded) {
+            try {
+              final path = runtimePath;
+              if (_usesRuntime(key) && path != null && path.isNotEmpty) {
+                await _reloadRuntimeConfig(path);
+              }
+              await _verifyCoreHealth();
+              final restored = await load();
+              rollbackSucceeded = _matches(key, restored, original);
+            } catch (_) {
+              rollbackSucceeded = false;
+            }
+          }
+
+          OpenClashQuickSettings actual;
+          try {
+            actual = await load();
+          } catch (_) {
+            actual = original;
+          }
+          if (rollbackAttempted && !rollbackSucceeded) {
+            errorCode = 'rollback_failed';
+          }
+          _trace(
+            transaction.split('_').last,
+            key,
+            'failure',
+            '$errorCode $errorDetail',
+          );
+          return OpenClashQuickSettingApplyResult.failure(
+            settings: actual,
+            errorCode: errorCode,
+            errorDetail: errorDetail,
+            failureStage: failureStage,
+            rollbackAttempted: rollbackAttempted,
+            rollbackSucceeded: rollbackSucceeded,
+            changesPersisted: persistenceCompleted && !rollbackSucceeded,
+            stateUncertain: unconfirmedTransaction && !rollbackSucceeded,
+          );
+        }
+      });
 
   Future<OpenClashQuickSettingApplyResult> _applyRunModeWithRestart({
     required OpenClashQuickSettings original,

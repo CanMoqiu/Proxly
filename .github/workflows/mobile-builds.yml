@@ -18,13 +18,14 @@ on:
           - ios
           - android
       android_build_type:
-        description: Android 签名正式构建或独立调试包 / Signed release or separate debug APK
+        description: Android 签名正式包、调试包或供本地签名的正式构建 / Signed release, debug, or release for local signing
         required: true
         default: release
         type: choice
         options:
           - release
           - debug
+          - unsigned
       draft_release_tag:
         description: 私有草稿标签（留空使用 Artifact）/ Private draft tag (blank for artifacts)
         required: false
@@ -155,16 +156,57 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: python3 scripts/prepare_android_signing.py
       - name: 构建 Android APK / Build Android APK
+        env:
+          DRAFT_RELEASE_TAG: ${{ inputs.draft_release_tag }}
         run: |
-          case "$ANDROID_BUILD_TYPE" in release|debug) ;; *) exit 1 ;; esac
-          flutter build apk "--$ANDROID_BUILD_TYPE" --target-platform android-arm64,android-x64 2>&1 | tee build-logs/android-build.txt
+          case "$ANDROID_BUILD_TYPE" in
+            release|debug) build_mode="$ANDROID_BUILD_TYPE" ;;
+            unsigned)
+              if [[ -n "$DRAFT_RELEASE_TAG" ]]; then
+                echo "Unsigned APKs can only be saved as workflow artifacts." >&2
+                exit 1
+              fi
+              export PROXLY_UNSIGNED_ANDROID_RELEASE=1
+              build_mode=release
+              ;;
+            *) exit 1 ;;
+          esac
+          log=build-logs/android-build.txt
+          retry_delays=(45 120)
+          rate_limit_pattern="Could not (GET|HEAD) 'https://repo[.]maven[.]apache[.]org/maven2/[^']+'.*Received status code 429 from server"
+          for attempt in 1 2 3; do
+            if flutter build apk "--$build_mode" --target-platform android-arm64,android-x64 2>&1 | tee "$log"; then
+              break
+            else
+              status=$?
+            fi
+            # Flutter can retry Gradle internally; inspect only its final attempt.
+            if (( attempt > ${#retry_delays[@]} )) ||
+              ! awk -v pattern="$rate_limit_pattern" '
+                /Retrying Gradle Build:/ { limited = 0 }
+                $0 ~ pattern { limited = 1 }
+                END { exit !limited }
+              ' "$log"; then
+              exit "$status"
+            fi
+            delay="${retry_delays[attempt - 1]}"
+            echo "Maven Central rate limited Gradle. Retrying Android build in $delay seconds."
+            sleep "$delay"
+          done
       - name: 核验并打包 Android / Verify and package Android
         env:
           ANDROID_CERT_SHA256: ${{ vars.ANDROID_CERT_SHA256 }}
         run: |
-          export APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -1)
-          export AAPT2="$(dirname "$APKSIGNER")/aapt2"
-          python3 scripts/package_android.py "$ANDROID_BUILD_TYPE"
+          if [[ "$ANDROID_BUILD_TYPE" == unsigned ]]; then
+            mkdir -p dist/android
+            cp build/app/outputs/flutter-apk/app-release.apk dist/android/app-release-unsigned.apk
+            cp build-logs/commit.txt dist/android/commit.txt
+            (cd dist/android && sha256sum app-release-unsigned.apk > app-release-unsigned.apk.sha256)
+          else
+            export APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -1)
+            export AAPT2="$(dirname "$APKSIGNER")/aapt2"
+            python3 scripts/package_android.py "$ANDROID_BUILD_TYPE"
+          fi
       - name: 清理签名材料 / Remove signing material
         if: always()
         run: rm -f -- android/key.properties "$RUNNER_TEMP/proxly-release.p12"
@@ -224,11 +266,27 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ env.FLUTTER_ROOT }}
-          key: flutter-${{ runner.os }}-${{ runner.arch }}-${{ env.FLUTTER_VERSION }}
+          key: flutter-${{ runner.os }}-${{ runner.arch }}-${{ env.FLUTTER_VERSION }}-c3ed85e
+          restore-keys: flutter-${{ runner.os }}-${{ runner.arch }}-${{ env.FLUTTER_VERSION }}
       - name: 安装 Flutter / Install Flutter
         run: |
           if [ ! -x "$FLUTTER_ROOT/bin/flutter" ]; then
             git clone --depth 1 --branch "$FLUTTER_VERSION" https://github.com/flutter/flutter.git "$FLUTTER_ROOT"
+          fi
+          # Backport Flutter #193142 to the pinned iOS toolchain.
+          simulator_source=packages/flutter_tools/lib/src/ios/simulators.dart
+          expected_source=e9c9193aea5c2439789017f486732391db9ff4bc
+          patched_source=8c4911f4adc931aee0390590b2929cdeb3aa70c9
+          actual_source=$(git -C "$FLUTTER_ROOT" hash-object "$simulator_source")
+          if [ "$actual_source" != "$patched_source" ]; then
+            test "$actual_source" = "$expected_source"
+            patch_path=$(mktemp "$RUNNER_TEMP/flutter-ios.XXXXXX")
+            curl --fail --silent --show-error --location --retry 3 --connect-timeout 15 --max-time 60 \
+              --output "$patch_path" https://github.com/flutter/flutter/commit/c3ed85ef987759ee54a6bce275490cde2a238dc1.diff
+            printf '%s  %s\n' 'a95b9493380fe6100ba12f3fe307721acf6048608f00c0de04e11973977eacb4' "$patch_path" | shasum -a 256 --check
+            git -C "$FLUTTER_ROOT" apply -C1 --include="$simulator_source" "$patch_path"
+            test "$(git -C "$FLUTTER_ROOT" hash-object "$simulator_source")" = "$patched_source"
+            rm -f -- "$patch_path" "$FLUTTER_ROOT/bin/cache/flutter_tools.stamp"
           fi
           echo "$FLUTTER_ROOT/bin" >> "$GITHUB_PATH"
           "$FLUTTER_ROOT/bin/flutter" --version | tee build-logs/flutter.txt
@@ -249,7 +307,7 @@ jobs:
           flutter analyze 2>&1 | tee build-logs/analyze.txt
           flutter test 2>&1 | tee build-logs/tests.txt
       - name: 验证 iPhone 模拟器 WebView / Validate simulator WebViews
-        timeout-minutes: 15
+        timeout-minutes: 25
         run: |
           xcrun simctl list devices available --json > build-logs/simulators.json
           SIMULATOR_ID=$(python3 -c 'import json; d=json.load(open("build-logs/simulators.json"))["devices"]; print(next(v["udid"] for k in sorted(d, reverse=True) if "iOS" in k for v in d[k] if v["name"].startswith("iPhone")))')

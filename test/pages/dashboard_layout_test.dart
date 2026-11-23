@@ -49,6 +49,49 @@ void main() {
     await tester.pump();
   }
 
+  testWidgets(
+      'landscape tablet dashboard fills the width and reorders vertically',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    tester.view.physicalSize = const Size(1366, 820);
+    tester.view.display.size = const Size(1366, 820);
+    tester.view.display.devicePixelRatio = 1;
+    tester.view.devicePixelRatio = 1;
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+      tester.view.display.resetSize();
+      tester.view.display.resetDevicePixelRatio();
+    });
+    await pumpHome(tester);
+    final status = find.byKey(const ValueKey('dashboard_status'));
+    final traffic = find.byKey(const ValueKey('dashboard_traffic'));
+    for (final card in [status, traffic]) {
+      expect(tester.getTopLeft(card).dx, 16);
+      expect(tester.getTopRight(card).dx, 1350);
+    }
+    expect(
+        tester.getTopLeft(status).dy, lessThan(tester.getTopLeft(traffic).dy));
+    await toggleEditing(tester);
+    await scrollToTop(tester);
+    final target = tester.getCenter(traffic) + const Offset(0, 20);
+    final gesture = await tester.startGesture(tester.getCenter(status));
+    await tester.pump(const Duration(milliseconds: 650));
+    await gesture.moveTo(target);
+    await tester.pump();
+    await gesture.up();
+    await tester.pumpAndSettle();
+    final layout =
+        tester.widget<DashboardCardList>(find.byType(DashboardCardList)).layout;
+    expect(layout.order.take(2),
+        [DashboardCardId.traffic, DashboardCardId.status]);
+    tester.view.physicalSize = const Size(640, 820);
+    await tester.pumpAndSettle();
+    expect(tester.getTopLeft(traffic).dx, tester.getTopLeft(status).dx);
+    expect(
+        tester.getTopLeft(traffic).dy, lessThan(tester.getTopLeft(status).dy));
+  });
+
   testWidgets('home aligns default cards and persists a drag and visibility',
       (tester) async {
     SharedPreferences.setMockInitialValues({});

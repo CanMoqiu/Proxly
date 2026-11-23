@@ -182,23 +182,12 @@ class AppOptionsSheet<T> extends StatelessWidget {
                     for (final option in options) ...[
                       if (option.destructive)
                         const Divider(indent: 20, endIndent: 20),
-                      ListTile(
-                        contentPadding:
-                            const EdgeInsets.symmetric(horizontal: 20),
-                        enabled: option.enabled,
-                        selected: selectedValue == option.value,
-                        textColor:
-                            option.destructive ? theme.colorScheme.error : null,
-                        iconColor:
-                            option.destructive ? theme.colorScheme.error : null,
+                      AppSheetOptionTile(
+                        label: option.label,
+                        subtitle: option.subtitle,
                         leading: option.icon == null ? null : Icon(option.icon),
-                        title: Text(option.label),
-                        subtitle: option.subtitle == null
-                            ? null
-                            : Text(option.subtitle!),
-                        trailing: selectedValue == option.value
-                            ? const Icon(Icons.check_rounded)
-                            : null,
+                        selected: selectedValue == option.value,
+                        destructive: option.destructive,
                         onTap: option.enabled
                             ? () => AppPopup.close(context, option.value)
                             : null,
@@ -208,5 +197,41 @@ class AppOptionsSheet<T> extends StatelessWidget {
                 )),
               ]),
         ));
+  }
+}
+
+class AppSheetOptionTile extends StatelessWidget {
+  const AppSheetOptionTile({
+    super.key,
+    required this.label,
+    this.subtitle,
+    this.leading,
+    this.selected = false,
+    this.destructive = false,
+    this.onTap,
+  });
+
+  final String label;
+  final String? subtitle;
+  final Widget? leading;
+  final bool selected;
+  final bool destructive;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = destructive ? Theme.of(context).colorScheme.error : null;
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 20),
+      enabled: onTap != null,
+      selected: selected,
+      textColor: color,
+      iconColor: color,
+      leading: leading,
+      title: Text(label),
+      subtitle: subtitle == null ? null : Text(subtitle!),
+      trailing: selected ? const Icon(Icons.check_rounded) : null,
+      onTap: onTap,
+    );
   }
 }

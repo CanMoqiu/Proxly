@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'connection_settings_store.dart';
+import 'controller_connection_state.dart';
 import 'router_detection_service.dart';
 import 'router_tool.dart';
 
@@ -46,9 +47,16 @@ class RouterDetectionSession extends ChangeNotifier {
     _selectionIdentity = null;
     final store = ConnectionSettingsStore.instance;
     try {
+      final generation = store.deviceGeneration;
       final settings = await store.load();
+      if (generation != store.deviceGeneration) {
+        _repeat = true;
+        return;
+      }
       if (settings.host.isEmpty) return;
       final revision = store.revision;
+      final connection = ControllerConnectionState.instance;
+      final observation = connection.observe();
       final RouterDetectionResult result;
       try {
         result = await _detector.detect(
@@ -56,10 +64,20 @@ class RouterDetectionSession extends ChangeNotifier {
             token: settings.token,
             sshPassword: settings.sshPassword,
             sshPort: settings.sshPort);
-      } catch (_) {
+      } catch (error) {
         // Connection failure does not identify a generic controller or request a choice.
+        if (generation == store.deviceGeneration) {
+          if (error is StateError && error.message == 'unauthorized') {
+            connection.reportStatus(observation, 401);
+          } else {
+            connection.reportOffline(observation);
+          }
+        }
         if (store.revision != revision) _repeat = true;
         return;
+      }
+      if (generation == store.deviceGeneration) {
+        connection.reportStatus(observation, 200);
       }
       final applied = await store.applyRouterDetection(
           expectedHost: settings.host,

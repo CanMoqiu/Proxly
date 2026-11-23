@@ -12,6 +12,7 @@ class AppLicenses {
       for (final entry in const {
         'Zashboard': 'assets/web_panel/LICENSE',
         'Zashboard assets': 'assets/web_panel/THIRD_PARTY_NOTICES.md',
+        'Google Material Symbols': 'assets/icons/Material-Symbols-LICENSE.txt',
         'JetBrains Mono': 'assets/fonts/JetBrainsMono-OFL.txt',
         'Twemoji / Mozilla': 'assets/fonts/Twemoji-LICENSE.md',
       }.entries) {

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:proxly/l10n/app_locale.dart';
+import 'package:proxly/widgets/adaptive_ui.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
@@ -14,7 +15,6 @@ void main() {
       '正在检查当前配置...',
       '运行操作',
       '快捷设置',
-      '选择当前基础模式对应的运行方式',
       '自定义首页',
       '完成',
       '长按卡片拖动排序，关闭开关隐藏卡片',
@@ -112,7 +112,7 @@ void main() {
     );
     expect(find.byType(AppLanguagePicker), findsOneWidget);
     expect(find.byIcon(Icons.language_rounded), findsOneWidget);
-    expect(find.byIcon(Icons.play_arrow_rounded), findsOneWidget);
+    expect(find.byType(AppPickerChevron), findsOneWidget);
 
     final closedContainer = tester.widget<Container>(
       find
@@ -126,7 +126,7 @@ void main() {
     expect(decoration.border, isA<Border>());
     expect(decoration.borderRadius, BorderRadius.circular(12));
 
-    await tester.tap(find.byIcon(Icons.play_arrow_rounded));
+    await tester.tap(find.byType(AppPickerChevron));
     await tester.pumpAndSettle();
 
     expect(find.byType(ListTile), findsNWidgets(2));

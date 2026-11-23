@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'clash_host_validator.dart';
+import 'connection_settings_store.dart';
 import 'router_tool.dart';
 import 'ssh_service.dart';
 
@@ -24,18 +25,16 @@ class RouterDetectionService {
       {http.Client? client,
       Future<String> Function(String, String, int, String)? ssh})
       : _client = client,
-        _ssh = ssh ??
-            ((host, password, port, command) => SshService.runText(
-                host, password, command,
-                port: port, operationTimeout: const Duration(seconds: 10)));
+        _ssh = ssh;
   final http.Client? _client;
-  final Future<String> Function(String, String, int, String) _ssh;
+  final Future<String> Function(String, String, int, String)? _ssh;
 
   Future<RouterDetectionResult> detect(
       {required String host,
       required String token,
       required String sshPassword,
       required int sshPort}) async {
+    final generation = ConnectionSettingsStore.instance.deviceGeneration;
     final normalized = ClashHostValidator.normalizeAddress(host);
     final error = ClashHostValidator.validationError(normalized);
     if (normalized.isEmpty || error != null) {
@@ -51,9 +50,10 @@ class RouterDetectionService {
       final response =
           await client.send(request).timeout(const Duration(seconds: 5));
       if (response.statusCode != 200) {
-        throw StateError(response.statusCode == 401
-            ? 'unauthorized'
-            : 'controller_unavailable');
+        throw StateError(
+            response.statusCode == 401 || response.statusCode == 403
+                ? 'unauthorized'
+                : 'controller_unavailable');
       }
       final bytes = <int>[];
       await for (final chunk
@@ -73,11 +73,15 @@ class RouterDetectionService {
       String? router;
       if (sshPassword.isNotEmpty) {
         try {
-          router = await _ssh(
-              Uri.parse('http://$normalized').host,
-              sshPassword,
-              sshPort,
-              probeCommandForPort(Uri.parse('http://$normalized').port));
+          final endpoint = Uri.parse('http://$normalized');
+          final command = probeCommandForPort(endpoint.port);
+          final ssh = _ssh;
+          router = ssh != null
+              ? await ssh(endpoint.host, sshPassword, sshPort, command)
+              : await SshService.runText(endpoint.host, sshPassword, command,
+                  port: sshPort,
+                  expectedGeneration: generation,
+                  operationTimeout: const Duration(seconds: 10));
         } catch (_) {
           // API-only access remains useful when SSH is unavailable or declined.
         }
