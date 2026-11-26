@@ -13,6 +13,7 @@ class ClashRealtimeSnapshot {
   final int activeConnections;
   final double downloadSpeed;
   final double uploadSpeed;
+  final bool hasConnectionDetails;
   final List<ConnectionEntry> connections;
   final List<ProviderTraffic> providers;
 
@@ -24,6 +25,7 @@ class ClashRealtimeSnapshot {
     required this.activeConnections,
     required this.downloadSpeed,
     required this.uploadSpeed,
+    this.hasConnectionDetails = true,
     required this.connections,
     required this.providers,
   });
@@ -47,6 +49,7 @@ class ClashRealtimeSnapshot {
       activeConnections: activeConnections ?? this.activeConnections,
       downloadSpeed: downloadSpeed ?? this.downloadSpeed,
       uploadSpeed: uploadSpeed ?? this.uploadSpeed,
+      hasConnectionDetails: hasConnectionDetails,
       connections: connections ?? this.connections,
       providers: providers ?? this.providers,
     );
@@ -109,8 +112,11 @@ class ClashDataHub extends ChangeNotifier {
     }
   }
 
-  Future<ClashRealtimeSnapshot> refresh(
-      {bool force = false, bool includeProviders = true}) async {
+  Future<ClashRealtimeSnapshot> refresh({
+    bool force = false,
+    bool includeProviders = true,
+    bool includeConnections = true,
+  }) async {
     if (!_service.isConfigured) {
       throw Exception(tr('请先在设置页填写 Clash 地址'));
     }
@@ -121,14 +127,20 @@ class ClashDataHub extends ChangeNotifier {
     if (!_baselineResetPending &&
         !force &&
         current != null &&
+        (!includeConnections || current.hasConnectionDetails) &&
         now.difference(current.updatedAt) < _cacheWindow) {
       return current;
     }
 
-    final existing = _inFlight;
-    if (existing != null) return existing;
+    // A list opened during a summary poll needs the next detailed snapshot.
+    while (true) {
+      final existing = _inFlight;
+      if (existing == null) break;
+      final result = await existing;
+      if (!includeConnections || result.hasConnectionDetails) return result;
+    }
 
-    final next = _load();
+    final next = _load(includeConnections: includeConnections);
     _inFlight = next;
     try {
       return await next;
@@ -137,10 +149,12 @@ class ClashDataHub extends ChangeNotifier {
     }
   }
 
-  Future<ClashRealtimeSnapshot> _load() async {
+  Future<ClashRealtimeSnapshot> _load(
+      {required bool includeConnections}) async {
     final epoch = _epoch;
     final generation = ControllerConnectionState.instance.generation;
-    final rawSnapshot = await _service.getTrafficSnapshot();
+    final rawSnapshot = await _service.getTrafficSnapshot(
+        includeConnections: includeConnections);
     if (_disposed ||
         epoch != _epoch ||
         generation != ControllerConnectionState.instance.generation) {
@@ -148,7 +162,7 @@ class ClashDataHub extends ChangeNotifier {
     }
 
     final connections =
-        List<ConnectionEntry>.from(rawSnapshot['connections'] as List? ?? []);
+        rawSnapshot['connections'] as List<ConnectionEntry>? ?? const [];
     final downloadTotal = rawSnapshot['downloadTotal'] as int? ?? 0;
     final uploadTotal = rawSnapshot['uploadTotal'] as int? ?? 0;
 
@@ -181,6 +195,7 @@ class ClashDataHub extends ChangeNotifier {
       activeConnections: rawSnapshot['count'] as int? ?? connections.length,
       downloadSpeed: downloadSpeed,
       uploadSpeed: uploadSpeed,
+      hasConnectionDetails: includeConnections,
       connections: connections,
       providers: _providers,
     );

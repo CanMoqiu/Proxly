@@ -59,6 +59,13 @@ class ConnectionSettingsStore extends ChangeNotifier {
   int deviceGeneration = 0;
   int _remoteOperations = 0;
   bool _transitioning = false;
+  final Set<String> _temporaryBackendSelections = {};
+
+  bool hasTemporaryBackendSelection(String? deviceId) =>
+      _temporaryBackendSelections.contains(deviceId ?? 'legacy');
+
+  void expireTemporaryBackendSelections() =>
+      _temporaryBackendSelections.clear();
 
   bool get canSwitchDevice => !_transitioning && _remoteOperations == 0;
 
@@ -110,6 +117,8 @@ class ConnectionSettingsStore extends ChangeNotifier {
 
   static String _newId() => List.generate(
       16, (_) => _random.nextInt(256).toRadixString(16).padLeft(2, '0')).join();
+
+  static String reserveInitialDeviceId() => _newId();
 
   Future<void> initializeProfiles() => _serializeControllerWrite(() async {
         final prefs = await SharedPreferences.getInstance();
@@ -335,6 +344,7 @@ class ConnectionSettingsStore extends ChangeNotifier {
           catalog.devices.where((other) => other.id != id).toList(),
           catalog.activeId,
         ).write(prefs);
+        _temporaryBackendSelections.remove(id);
         await _discardCredential(device.credentialsKey);
         profilesChanged.value++;
       });
@@ -462,7 +472,8 @@ class ConnectionSettingsStore extends ChangeNotifier {
               device.host != expectedHost) {
             return false;
           }
-          final preserve = tool == RouterTool.generic && device.toolConfirmed;
+          final preserve = hasTemporaryBackendSelection(device.id) ||
+              tool == RouterTool.generic && device.toolConfirmed;
           final resolvedTool = preserve ? device.routerTool : tool;
           final resolvedCore =
               preserve && core == ProxyCore.unknown ? device.core : core;
@@ -482,8 +493,9 @@ class ConnectionSettingsStore extends ChangeNotifier {
             prefs.getString('clash_host') != expectedHost) {
           return false;
         }
-        final preserveChoice = tool == RouterTool.generic &&
-            prefs.getBool('router_tool_confirmed') == true;
+        final preserveChoice = hasTemporaryBackendSelection(null) ||
+            tool == RouterTool.generic &&
+                prefs.getBool('router_tool_confirmed') == true;
         final resolvedTool = preserveChoice
             ? RouterTool.parse(prefs.getString('router_tool'))
             : tool;
@@ -566,69 +578,93 @@ class ConnectionSettingsStore extends ChangeNotifier {
     required String token,
     required String sshPassword,
     String? deviceName,
+    String? initialDeviceId,
     int sshPort = 22,
     RouterTool routerTool = RouterTool.openClash,
     ProxyCore core = ProxyCore.unknown,
     bool routerSelectionPending = false,
     bool routerToolConfirmed = false,
+    bool temporaryBackendSelection = false,
   }) =>
       _serializeControllerWrite(() async {
         if (sshPort < 1 || sshPort > 65535) {
           throw RangeError.range(sshPort, 1, 65535, 'sshPort');
         }
         final prefs = await SharedPreferences.getInstance();
-        final catalog = deviceName == null
+        final catalog = deviceName == null && initialDeviceId == null
             ? _DeviceCatalog.read(prefs)
             : await _initializeProfiles(prefs);
+        final device = catalog?.active;
+        final keepBackend = !temporaryBackendSelection &&
+            hasTemporaryBackendSelection(device?.id);
+        final selectedTool = keepBackend
+            ? device?.routerTool ??
+                RouterTool.parse(prefs.getString('router_tool'))
+            : routerTool;
+        final pinBackend = temporaryBackendSelection || keepBackend;
+        final pending = routerSelectionPending && !pinBackend;
         if (catalog != null) {
-          final device = catalog.active;
+          if (initialDeviceId != null &&
+              device != null &&
+              device.id != initialDeviceId) {
+            throw StateError('An active device already exists');
+          }
           final inputName = deviceName?.trim();
           final name = inputName == null
               ? device?.name ?? host
               : _validatedDeviceName(
                   catalog, inputName.isEmpty ? host : inputName, device?.id);
           await _changeConnection(() async {
-            await _storeProfile(prefs, catalog,
-                id: device?.id,
+            final saved = await _storeProfile(prefs, catalog,
+                id: device?.id ?? initialDeviceId,
                 name: name,
                 host: host,
                 token: token,
                 password: sshPassword,
                 port: sshPort,
-                tool: routerTool,
+                tool: selectedTool,
                 core: core,
-                pending: routerSelectionPending,
-                confirmed: !routerSelectionPending &&
-                    (routerToolConfirmed ||
+                pending: pending,
+                confirmed: !pending &&
+                    (pinBackend ||
+                        routerToolConfirmed ||
                         (device?.host == host &&
-                            device?.routerTool == routerTool &&
+                            device?.routerTool == selectedTool &&
                             device!.toolConfirmed)));
+            if (temporaryBackendSelection) {
+              _temporaryBackendSelections.add(saved.id);
+            }
             _notify(ConnectionSettingsChange.controller);
           });
           return;
         }
-        final keepConfirmation = !routerSelectionPending &&
-            (routerToolConfirmed ||
+        final keepConfirmation = !pending &&
+            (pinBackend ||
+                routerToolConfirmed ||
                 (prefs.getString('clash_host') == host &&
-                    prefs.getString('router_tool') == routerTool.name &&
+                    prefs.getString('router_tool') == selectedTool.name &&
                     prefs.getBool('router_tool_confirmed') == true));
         await AppSecureStorage.write('clash_token', token);
         await AppSecureStorage.write('ssh_password', sshPassword);
         if (!await prefs.setInt('ssh_port', sshPort)) {
           throw StateError('Could not save SSH port');
         }
-        if (!await prefs.setString('router_tool', routerTool.name)) {
+        if (!await prefs.setString('router_tool', selectedTool.name)) {
           throw StateError('Could not save router tool');
         }
         if (!await prefs.setString('proxy_core', core.name)) {
           throw StateError('Could not save proxy core');
         }
         if (!await prefs.setBool('router_tool_confirmed', keepConfirmation) ||
-            !await prefs.setBool(
-                'router_tool_selection_pending', routerSelectionPending)) {
+            !await prefs.setBool('router_tool_selection_pending', pending)) {
           throw StateError('Could not save router selection state');
         }
-        await prefs.setString('clash_host', host);
+        if (!await prefs.setString('clash_host', host)) {
+          throw StateError('Could not save controller address');
+        }
+        if (temporaryBackendSelection) {
+          _temporaryBackendSelections.add('legacy');
+        }
         _notify(ConnectionSettingsChange.controller);
       });
 
@@ -667,6 +703,7 @@ class ConnectionSettingsStore extends ChangeNotifier {
           await _changeConnection(() async {
             await const _DeviceCatalog([], null).write(prefs);
             activeDevice = null;
+            expireTemporaryBackendSelections();
             for (final device in catalog.devices) {
               await _discardCredential(device.credentialsKey);
             }
@@ -682,6 +719,7 @@ class ConnectionSettingsStore extends ChangeNotifier {
         await prefs.remove('router_tool_confirmed');
         await prefs.remove('proxy_core');
         await AppSecureStorage.deleteAll();
+        expireTemporaryBackendSelections();
         lastChange = ConnectionSettingsChange.reset;
         revision++;
         notifyListeners();
@@ -701,6 +739,7 @@ class ConnectionSettingsStore extends ChangeNotifier {
     } catch (_) {
       // resetOnError recreates the Android storage on the next operation.
     }
+    expireTemporaryBackendSelections();
     lastChange = ConnectionSettingsChange.reset;
     revision++;
     notifyListeners();

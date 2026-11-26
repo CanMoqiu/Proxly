@@ -46,12 +46,11 @@ void main() {
       () async {
     debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
     var calls = 0;
-    Future<void> run(DateTime date) => StartupCacheMaintenance.run(
+    Future<void> run(DateTime date) => StartupCacheMaintenance(
         now: date,
-        cleanupPanel: () async {},
         clearHttpCache: () async {
           calls++;
-        });
+        }).prepareWebView();
     await run(DateTime(2026, 11, 1));
     await run(DateTime(2026, 11, 2));
     expect(calls, 1);
@@ -72,16 +71,14 @@ void main() {
     debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('webpanel_localstorage', '{"theme":"dark"}');
-    await StartupCacheMaintenance.run(
-        cleanupPanel: () async {},
-        clearHttpCache: () async => throw StateError('unavailable'));
+    await StartupCacheMaintenance(
+            clearHttpCache: () async => throw StateError('unavailable'))
+        .prepareWebView();
     expect(prefs.getInt('http_cache_cleaned_at'), isNull);
     var retried = false;
-    await StartupCacheMaintenance.run(
-        cleanupPanel: () async {},
-        clearHttpCache: () async {
-          retried = true;
-        });
+    await StartupCacheMaintenance(clearHttpCache: () async {
+      retried = true;
+    }).prepareWebView();
     expect(retried, isTrue);
     expect(prefs.getString('webpanel_localstorage'), '{"theme":"dark"}');
   });
@@ -95,9 +92,13 @@ void main() {
       addTearDown(() => InAppWebViewPlatform.instance = previous);
     }
     var apkCalls = 0;
-    await StartupCacheMaintenance.run(cleanupApk: () async {
-      apkCalls++;
-    });
+    final maintenance = StartupCacheMaintenance(
+        cleanupApk: () async {
+          apkCalls++;
+        },
+        cleanupPanel: () async {});
+    await maintenance.cleanFiles();
+    await maintenance.prepareWebView();
     expect(apkCalls, 0);
     expect(platform.storage.removed, {
       WebsiteDataType.WKWebsiteDataTypeMemoryCache,
@@ -109,13 +110,35 @@ void main() {
   test('one Android cleanup failure does not skip the other cleanup', () async {
     debugDefaultTargetPlatformOverride = TargetPlatform.android;
     var cacheCalls = 0;
-    await StartupCacheMaintenance.run(
+    final maintenance = StartupCacheMaintenance(
       cleanupApk: () async => throw StateError('unavailable'),
+      cleanupPanel: () async {},
       clearHttpCache: () async {
         cacheCalls++;
       },
     );
+    await maintenance.cleanFiles();
+    expect(cacheCalls, 0);
+    await maintenance.prepareWebView();
     expect(cacheCalls, 1);
+  });
+
+  test('both WebViews await the same cache check for the current launch',
+      () async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+    final pending = Completer<void>();
+    var cleared = 0;
+    final maintenance = StartupCacheMaintenance(clearHttpCache: () {
+      cleared++;
+      return pending.future;
+    });
+    final proxy = maintenance.prepareWebView();
+    final connections = maintenance.prepareWebView();
+    expect(connections, same(proxy));
+    pending.complete();
+    await Future.wait([proxy, connections]);
+    await maintenance.prepareWebView();
+    expect(cleared, 1);
   });
 
   for (final platform in [TargetPlatform.android, TargetPlatform.iOS]) {
@@ -124,9 +147,9 @@ void main() {
       debugDefaultTargetPlatformOverride = platform;
       final pending = Completer<void>();
       var finished = false;
-      final run = StartupCacheMaintenance.run(
-          cleanupApk: () async {},
-          clearHttpCache: () => pending.future).then((_) => finished = true);
+      final run = StartupCacheMaintenance(clearHttpCache: () => pending.future)
+          .prepareWebView()
+          .then((_) => finished = true);
       await tester.pump();
       await tester.pump(const Duration(seconds: 2));
       expect(finished, isTrue);

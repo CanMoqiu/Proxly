@@ -31,6 +31,8 @@ class _SetupWizardPageState extends State<SetupWizardPage>
   static const int _setupPageCount = 3;
 
   final PageController _pageController = PageController();
+  late final _initialDeviceId =
+      ConnectionSettingsStore.reserveInitialDeviceId();
   int _currentStep = 0;
 
   final _hostController = TextEditingController();
@@ -198,6 +200,7 @@ class _SetupWizardPageState extends State<SetupWizardPage>
               host: endpoint.address,
               token: _tokenController.text.trim(),
               sshPassword: _sshPasswordController.text,
+              sshDeviceId: _initialDeviceId,
               sshPort:
                   ConnectionSettings.parseSshPort(_sshPortController.text) ??
                       22);
@@ -289,6 +292,7 @@ class _SetupWizardPageState extends State<SetupWizardPage>
       await ConnectionSettingsStore.instance.saveController(
         host: endpoint.address,
         deviceName: deviceName,
+        initialDeviceId: _initialDeviceId,
         token: _tokenController.text.trim(),
         sshPassword: _sshPasswordController.text,
         sshPort: sshPort,

@@ -1,10 +1,13 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:proxly/app_navigator.dart';
 import 'package:proxly/services/connection_settings_store.dart';
 import 'package:proxly/services/optional_settings_visibility.dart';
 import 'package:proxly/services/router_detection_service.dart';
 import 'package:proxly/services/router_tool.dart';
+import 'package:proxly/services/ssh_host_trust_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:proxly/l10n/app_locale.dart';
 import 'package:proxly/pages/setup_wizard_page.dart';
@@ -162,14 +165,28 @@ void main() {
       addTearDown(() => tester.binding.defaultBinaryMessenger
           .setMockMethodCallHandler(channel, null));
       await AppLocaleController.instance.load();
-      final detector = _Detection(() async {
+      final trust = SshHostTrustService.forTesting();
+      addTearDown(trust.dispose);
+      final fingerprint =
+          Uint8List.fromList(utf8.encode('SHA256:initialRouter'));
+      late final _Detection detector;
+      detector = _Detection(() async {
         if (choice == null) throw StateError('offline');
+        if (choice == RouterTool.nikki) {
+          expect(detector.lastSshDeviceId, isNotNull);
+          expect(
+            await trust.verify('192.168.1.42', 2222, 'ssh-ed25519', fingerprint,
+                deviceId: detector.lastSshDeviceId),
+            isTrue,
+          );
+        }
         return RouterDetectionResult(
             tool: choice, core: ProxyCore.mihomo, version: 'test');
       });
       await tester.pumpWidget(AppLocaleScope(
           controller: AppLocaleController.instance,
           child: MaterialApp(
+              navigatorKey: rootNavigatorKey,
               theme: AppTheme.light(),
               home: SetupWizardPage(detectionService: detector))));
       await tester.tap(find.text('Get started'));
@@ -222,6 +239,12 @@ void main() {
         }
       }
       await tester.tap(find.text('Continue'));
+      if (choice == RouterTool.nikki) {
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 350));
+        expect(find.text('Verify SSH device identity'), findsOneWidget);
+        await tester.tap(find.text('Trust and continue'));
+      }
       await tester.pumpAndSettle();
       expect(find.text('Connections page display'), findsNothing);
       await tester.tap(find.text('Finish setup'));
@@ -242,6 +265,14 @@ void main() {
           choice == RouterTool.nikki ? 'Home Lab' : '192.168.1.42:9090');
       expect(store.activeDevice?.toolConfirmed, isTrue);
       expect(store.activeDevice?.selectionPending, isFalse);
+      expect(saved.deviceId, detector.lastSshDeviceId);
+      if (choice == RouterTool.nikki) {
+        final verified =
+            trust.verify('192.168.1.42', 2222, 'ssh-ed25519', fingerprint);
+        await tester.pump();
+        expect(find.text('Verify SSH device identity'), findsNothing);
+        expect(await verified, isTrue);
+      }
       await tester.pumpWidget(const SizedBox());
       await tester.pump(const Duration(seconds: 4));
       expect(tester.takeException(), isNull);
@@ -630,15 +661,17 @@ void main() {
 class _Detection extends RouterDetectionService {
   _Detection(this.result);
   final Future<RouterDetectionResult> Function() result;
-  String? lastHost, lastPassword;
+  String? lastHost, lastPassword, lastSshDeviceId;
   int? lastPort;
   @override
   Future<RouterDetectionResult> detect(
       {required String host,
       required String token,
       required String sshPassword,
-      required int sshPort}) {
+      required int sshPort,
+      String? sshDeviceId}) {
     lastHost = host;
+    lastSshDeviceId = sshDeviceId;
     lastPassword = sshPassword;
     lastPort = sshPort;
     return result();

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../l10n/app_locale.dart';
@@ -10,9 +12,10 @@ import '../theme/app_theme.dart';
 
 /// Keep a retryable UI alive if iOS temporarily denies access to the Keychain.
 class AppStartup extends StatefulWidget {
-  const AppStartup({super.key, this.initialize});
+  const AppStartup({super.key, this.initialize, this.cacheMaintenance});
 
   final Future<bool> Function()? initialize;
+  final StartupCacheMaintenance? cacheMaintenance;
 
   @override
   State<AppStartup> createState() => _AppStartupState();
@@ -20,13 +23,13 @@ class AppStartup extends StatefulWidget {
 
 class _AppStartupState extends State<AppStartup> {
   late Future<bool> _startup = (widget.initialize ?? _initialize)();
+  bool _cleanupScheduled = false;
 
   Future<bool> _initialize() async {
     await AppLocaleController.instance.load();
     final store = ConnectionSettingsStore.instance;
     await store.initializeProfiles();
     await ClashService.instance.loadConfig();
-    await StartupCacheMaintenance.run();
     return store.activeDevice == null;
   }
 
@@ -35,6 +38,15 @@ class _AppStartupState extends State<AppStartup> {
         future: _startup,
         builder: (context, snapshot) {
           if (snapshot.hasData) {
+            if (!_cleanupScheduled) {
+              _cleanupScheduled = true;
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (!mounted) return;
+                final maintenance =
+                    widget.cacheMaintenance ?? StartupCacheMaintenance.instance;
+                unawaited(maintenance.cleanFiles());
+              });
+            }
             return ProxlyApp(showSetupWizard: snapshot.data!);
           }
           return MaterialApp(

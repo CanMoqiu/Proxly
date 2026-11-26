@@ -6,7 +6,9 @@ class AppPlatform {
 
   static bool get isIOS =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
-  static bool get supportsApkUpdates =>
+  static bool get isAndroid =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
-  static bool get supportsUpdateChecks => isIOS || supportsApkUpdates;
+  static bool get isMobile => isIOS || isAndroid;
+  static bool get supportsApkUpdates => isAndroid;
+  static bool get supportsUpdateChecks => isMobile;
 }

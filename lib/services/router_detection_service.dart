@@ -33,7 +33,8 @@ class RouterDetectionService {
       {required String host,
       required String token,
       required String sshPassword,
-      required int sshPort}) async {
+      required int sshPort,
+      String? sshDeviceId}) async {
     final generation = ConnectionSettingsStore.instance.deviceGeneration;
     final normalized = ClashHostValidator.normalizeAddress(host);
     final error = ClashHostValidator.validationError(normalized);
@@ -80,6 +81,7 @@ class RouterDetectionService {
               ? await ssh(endpoint.host, sshPassword, sshPort, command)
               : await SshService.runText(endpoint.host, sshPassword, command,
                   port: sshPort,
+                  deviceId: sshDeviceId,
                   expectedGeneration: generation,
                   operationTimeout: const Duration(seconds: 10));
         } catch (_) {

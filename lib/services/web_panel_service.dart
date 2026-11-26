@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:convert';
 import 'dart:math';
 import 'dart:isolate';
+import 'dart:typed_data';
 import 'package:archive/archive_io.dart' show InputFileStream;
 import 'package:crypto/crypto.dart';
 import 'package:flutter/services.dart' show rootBundle;
@@ -38,6 +39,7 @@ class WebPanelArchiveEntry {
 
 class WebPanelService {
   static const builtinVersion = 'v3.30.0';
+  static const builtinAssetPath = 'assets/web_panel';
   static const maxArchiveBytes = 50 * 1024 * 1024;
   static const maxArchiveEntries = 2000;
   static const maxArchiveFileBytes = 20 * 1024 * 1024;
@@ -966,6 +968,14 @@ class FileHttpServer {
 
 /// Serves bundled Flutter assets from an isolated random localhost port.
 class AssetHttpServer {
+  static const _entryAssetBudget = 4 * 1024 * 1024;
+  static final _entryAssetLink = RegExp(
+    r'''(?:src|href)\s*=\s*["'](?:\./)?(assets/[\w.-]+\.(?:m?js|css))["']''',
+  );
+  static Map<String, ByteData>? _bundledEntryAssets;
+  static Future<void>? _entryPreload;
+
+  Map<String, ByteData> _entryAssets = const {};
   HttpServer? _server;
   final String rootPath;
   final WebPanelControllerBridge? controllerBridge;
@@ -976,9 +986,51 @@ class AssetHttpServer {
   int get port => _port;
 
   Future<void> start() async {
+    if (rootPath == WebPanelService.builtinAssetPath) {
+      if (_bundledEntryAssets == null) {
+        await (_entryPreload ??= _preloadBundledAssets().then((assets) {
+          _bundledEntryAssets = assets;
+          _entryPreload = null;
+        }));
+      }
+      _entryAssets = _bundledEntryAssets!;
+    }
     _server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     _port = _server!.port;
     _server!.listen(_handle);
+  }
+
+  static Future<Map<String, ByteData>> _preloadBundledAssets() async {
+    final assets = <String, ByteData>{};
+    const root = WebPanelService.builtinAssetPath;
+    const indexPath = '$root/index.html';
+    final String html;
+    try {
+      final index = await rootBundle.load(indexPath);
+      if (index.lengthInBytes > _entryAssetBudget) return assets;
+      html = utf8.decode(index.buffer.asUint8List(
+        index.offsetInBytes,
+        index.lengthInBytes,
+      ));
+      assets[indexPath] = index;
+    } catch (_) {
+      // The normal asset handler can retry a failed preload.
+      return assets;
+    }
+    var remaining = _entryAssetBudget - assets[indexPath]!.lengthInBytes;
+    final paths = _entryAssetLink.allMatches(html).map((m) => m[1]!).toSet();
+    for (final relativePath in paths.take(8)) {
+      final path = '$root/$relativePath';
+      try {
+        final data = await rootBundle.load(path);
+        if (data.lengthInBytes > remaining) continue;
+        assets[path] = data;
+        remaining -= data.lengthInBytes;
+      } catch (_) {
+        // Resources outside the preload are served normally when requested.
+      }
+    }
+    return assets;
   }
 
   Future<void> close() async {
@@ -1028,7 +1080,7 @@ class AssetHttpServer {
     String relativePath,
   ) async {
     try {
-      final data = await rootBundle.load(assetPath);
+      final data = _entryAssets[assetPath] ?? await rootBundle.load(assetPath);
       request.response.headers
           .set(HttpHeaders.contentTypeHeader, _contentType(relativePath));
       request.response.headers.set('Access-Control-Allow-Origin', '*');

@@ -5,8 +5,11 @@ import 'package:proxly/app_route_observer.dart';
 import 'package:proxly/l10n/app_locale.dart';
 import 'package:proxly/pages/connections_page.dart';
 import 'package:proxly/pages/main_shell.dart';
+import 'package:proxly/services/clash_service.dart';
 import 'package:proxly/services/connection_settings_store.dart';
+import 'package:proxly/services/controller_connection_state.dart';
 import 'package:proxly/services/router_detection_session.dart';
+import 'package:proxly/services/router_tool.dart';
 import 'package:proxly/pages/native_connections_page.dart';
 import 'package:proxly/pages/proxy_page.dart';
 import 'package:proxly/pages/settings_page.dart';
@@ -67,6 +70,80 @@ void main() {
     await tester.pumpWidget(const SizedBox());
     await tester.pump(const Duration(seconds: 4));
   });
+
+  testWidgets('cold start and five-minute resume expire manual backend choices',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({
+      'app_language': 'en',
+      'automatic_update_check_enabled': false,
+    });
+    await AppLocaleController.instance.load();
+    final store = ConnectionSettingsStore.instance;
+    await store.initializeProfiles();
+    Future<void> selectBackend() => store.saveController(
+          host: 'router.local:9090',
+          token: '',
+          sshPassword: '',
+          routerTool: RouterTool.openClash,
+          temporaryBackendSelection: true,
+        );
+
+    await selectBackend();
+    final id = store.activeDevice!.id;
+    expect(store.hasTemporaryBackendSelection(id), isTrue);
+
+    var now = DateTime(2026);
+    final session = _CountingSession();
+    addTearDown(session.dispose);
+    await tester.pumpWidget(AppLocaleScope(
+      controller: AppLocaleController.instance,
+      child: MaterialApp(
+        navigatorObservers: [shellRouteObserver],
+        home: MainShell(
+          detectionSession: session,
+          backgroundClock: () => now,
+        ),
+      ),
+    ));
+    await tester.pump();
+    expect(session.calls, 1);
+    expect(store.hasTemporaryBackendSelection(id), isFalse);
+    tester
+        .widget<BottomNavigationBar>(find.byType(BottomNavigationBar))
+        .onTap!(3);
+    await tester.pump();
+
+    await selectBackend();
+    await tester.pump();
+    expect(store.hasTemporaryBackendSelection(id), isTrue);
+    final beforeResume = session.calls;
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+    now = now.add(const Duration(minutes: 4, seconds: 59));
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    expect(session.calls, beforeResume + 1);
+    expect(store.hasTemporaryBackendSelection(id), isTrue);
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+    now = now.add(const Duration(minutes: 4));
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    now = now.add(const Duration(minutes: 1));
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    expect(session.calls, beforeResume + 2);
+    expect(store.hasTemporaryBackendSelection(id), isFalse);
+    expect((await store.load()).routerTool, RouterTool.openClash);
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 4));
+  },
+      variant:
+          TargetPlatformVariant({TargetPlatform.android, TargetPlatform.iOS}));
 
   testWidgets(
       'saving clears edited borders and leaving settings discards drafts',
@@ -132,6 +209,16 @@ void main() {
     expect(editOutline(address), isNull);
     expect(backendButton().label, 'Nikki');
     expect(backendButton().borderColor, isNull);
+    expect(
+        find.text(
+            'Proxy backend switched temporarily. Detection resumes on the next cold start or after 5 minutes in the background.'),
+        findsOneWidget);
+    expect(find.text('Settings saved'), findsNothing);
+    expect(store.hasTemporaryBackendSelection(store.activeDevice!.id), isTrue);
+
+    await tester.tap(save);
+    await tester.pumpAndSettle();
+    expect(find.text('Settings saved'), findsOneWidget);
 
     await chooseBackend('OpenClash');
     expect(backendButton().borderColor, orange);
@@ -154,6 +241,48 @@ void main() {
     expect((await store.load()).host, 'saved-router.local:9090');
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(seconds: 7));
+  });
+
+  testWidgets('proxy warmup starts the web connections warmup immediately',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({
+      'automatic_update_check_enabled': false,
+      'connections_tab_mode': 'webview',
+    });
+    await ConnectionSettingsStore.instance.initializeProfiles();
+    await ClashService.instance.loadConfig();
+    final connection = ControllerConnectionState.instance;
+    final session = _CountingSession();
+    addTearDown(session.dispose);
+    addTearDown(connection.reset);
+    await tester.pumpWidget(AppLocaleScope(
+      controller: AppLocaleController.instance,
+      child: MaterialApp(
+        navigatorObservers: [shellRouteObserver],
+        home: MainShell(detectionSession: session),
+      ),
+    ));
+    await tester.pump();
+
+    final proxy = find.byType(ProxyPage, skipOffstage: false);
+    final connections = find.byType(ConnectionsPage, skipOffstage: false);
+    connection.reportStatus(connection.observe(), 200);
+    await tester.pump(const Duration(milliseconds: 799));
+    expect(proxy, findsNothing);
+    expect(connections, findsNothing);
+    await tester.pump(const Duration(milliseconds: 1));
+    expect(proxy, findsOneWidget);
+    expect(connections, findsNothing);
+
+    await tester.pump(const Duration(milliseconds: 1));
+    await tester.pump();
+    expect(connections, findsOneWidget);
+    final bar =
+        tester.widget<BottomNavigationBar>(find.byType(BottomNavigationBar));
+    expect(bar.currentIndex, 0);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(seconds: 4));
   });
 
   testWidgets('tabs mount on first visit and retain state while hidden',

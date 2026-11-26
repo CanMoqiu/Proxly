@@ -55,6 +55,7 @@ class RouterDetectionSession extends ChangeNotifier {
       }
       if (settings.host.isEmpty) return;
       final revision = store.revision;
+      final keepBackend = store.hasTemporaryBackendSelection(settings.deviceId);
       final connection = ControllerConnectionState.instance;
       final observation = connection.observe();
       final RouterDetectionResult result;
@@ -62,7 +63,7 @@ class RouterDetectionSession extends ChangeNotifier {
         result = await _detector.detect(
             host: settings.host,
             token: settings.token,
-            sshPassword: settings.sshPassword,
+            sshPassword: keepBackend ? '' : settings.sshPassword,
             sshPort: settings.sshPort);
       } catch (error) {
         // Connection failure does not identify a generic controller or request a choice.
@@ -86,7 +87,7 @@ class RouterDetectionSession extends ChangeNotifier {
           core: result.core);
       if (!applied) {
         _repeat = true;
-      } else if (result.tool == RouterTool.generic) {
+      } else if (!keepBackend && result.tool == RouterTool.generic) {
         _selectionIdentity = (host: settings.host, revision: store.revision);
       }
     } catch (_) {

@@ -61,6 +61,43 @@ void main() {
     }
   });
 
+  test('both localhost origins serve the bundled entry script and stylesheet',
+      () async {
+    final proxy = AssetHttpServer(WebPanelService.builtinAssetPath);
+    final connections = AssetHttpServer(WebPanelService.builtinAssetPath);
+    final client = HttpClient();
+    addTearDown(() async {
+      client.close(force: true);
+      await proxy.close();
+      await connections.close();
+    });
+    await Future.wait([proxy.start(), connections.start()]);
+    expect(proxy.port, isNot(connections.port));
+
+    Future<HttpClientResponse> get(int port, String path) async =>
+        (await client.getUrl(Uri.parse('http://127.0.0.1:$port$path'))).close();
+
+    final index = await utf8.decoder.bind(await get(proxy.port, '/')).join();
+    final assets = RegExp(r'"\./(assets/[^"]+\.(?:js|css))"')
+        .allMatches(index)
+        .map((match) => match[1]!);
+    expect(assets, isNotEmpty);
+    expect(assets.any((path) => path.endsWith('.js')), isTrue);
+    expect(assets.any((path) => path.endsWith('.css')), isTrue);
+    for (final path in assets) {
+      final bundled =
+          await rootBundle.load('${WebPanelService.builtinAssetPath}/$path');
+      for (final server in [proxy, connections]) {
+        final response = await get(server.port, '/$path');
+        expect(response.statusCode, HttpStatus.ok);
+        expect(
+            response.headers.value(HttpHeaders.cacheControlHeader), 'no-store');
+        expect(await response.fold<int>(0, (sum, bytes) => sum + bytes.length),
+            bundled.lengthInBytes);
+      }
+    }
+  });
+
   test(
       'all registered local servers switch to the installed resource directory',
       () async {

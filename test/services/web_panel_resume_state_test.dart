@@ -7,27 +7,32 @@ void main() {
     var now = DateTime(2026);
     final state = WebPanelResumeState(now: () => now);
     state.didChangeState(AppLifecycleState.hidden);
-    now = now.add(const Duration(seconds: 25));
+    now = now.add(const Duration(minutes: 4));
     state.didChangeState(AppLifecycleState.paused);
-    now = now.add(const Duration(seconds: 10));
+    now = now.add(const Duration(minutes: 1));
     state.didChangeState(AppLifecycleState.resumed);
     expect(state.foreground, isTrue);
-    expect(state.consumeLongBackground(isIOS: true), isTrue);
-    expect(state.consumeLongBackground(isIOS: true), isFalse);
+    expect(state.consumeBackgroundDuration(), const Duration(minutes: 5));
+    expect(state.consumeBackgroundDuration(), isNull);
   });
 
-  test('short interruptions and Android background stays preserve the view',
-      () {
+  testWidgets('both mobile platforms retire a view at five minutes',
+      (tester) async {
     var now = DateTime(2026);
     final state = WebPanelResumeState(now: () => now);
     state.didChangeState(AppLifecycleState.inactive);
-    now = now.add(const Duration(minutes: 1));
-    expect(state.consumeLongBackground(isIOS: true), isFalse);
+    now = now.add(const Duration(minutes: 5));
+    expect(state.consumeLongBackground(), isFalse);
     state.didChangeState(AppLifecycleState.paused);
-    now = now.add(const Duration(seconds: 3));
-    expect(state.consumeLongBackground(isIOS: true), isFalse);
+    now = now.add(const Duration(minutes: 4, seconds: 59));
+    state.didChangeState(AppLifecycleState.resumed);
+    expect(state.consumeLongBackground(), isFalse);
     state.didChangeState(AppLifecycleState.hidden);
-    now = now.add(const Duration(minutes: 2));
-    expect(state.consumeLongBackground(isIOS: false), isFalse);
-  });
+    now = now.add(const Duration(minutes: 5));
+    state.didChangeState(AppLifecycleState.resumed);
+    expect(state.consumeLongBackground(), isTrue);
+    expect(state.consumeLongBackground(), isFalse);
+  },
+      variant:
+          TargetPlatformVariant({TargetPlatform.android, TargetPlatform.iOS}));
 }

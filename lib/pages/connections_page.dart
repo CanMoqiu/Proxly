@@ -15,10 +15,10 @@ import '../services/web_panel_service.dart';
 import '../services/web_panel_scroll.dart';
 import '../services/web_panel_flag_font.dart';
 import '../services/panel_load_monitor.dart';
-import '../services/app_platform.dart';
 import '../services/tablet_layout.dart';
 import '../services/connection_panel_preferences.dart';
 import '../services/web_panel_device_layout.dart';
+import '../services/startup_cache_maintenance.dart';
 import '../services/web_panel_resume_state.dart';
 import '../services/web_panel_page_probe.dart';
 import '../widgets/panel_error_view.dart';
@@ -358,12 +358,13 @@ class _ConnectionsPageState extends State<ConnectionsPage>
       } else {
         // Use an isolated origin so this WebView cannot mutate ProxyPage state.
         assetServer = AssetHttpServer(
-          'assets/web_panel',
+          WebPanelService.builtinAssetPath,
           controllerBridge: bridge,
         );
         await assetServer.start();
         serverPort = assetServer.port;
       }
+      await StartupCacheMaintenance.instance.prepareWebView();
     } catch (e) {
       await assetServer?.close();
       await fileServer?.close();
@@ -531,7 +532,7 @@ class _ConnectionsPageState extends State<ConnectionsPage>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     _resumeState.didChangeState(state);
     if (state == AppLifecycleState.resumed &&
-        _resumeState.consumeLongBackground(isIOS: AppPlatform.isIOS)) {
+        _resumeState.consumeLongBackground()) {
       _retireSuspendedPage();
     }
     if (state == AppLifecycleState.paused ||

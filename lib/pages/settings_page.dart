@@ -14,7 +14,6 @@ import '../services/connection_feedback.dart';
 import '../services/controller_connection_state.dart';
 import '../services/router_tool.dart';
 import '../services/router_detection_service.dart';
-import '../services/router_detection_session.dart';
 import '../services/web_panel_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/adaptive_ui.dart';
@@ -237,6 +236,8 @@ class _SettingsPageState extends State<SettingsPage>
       );
       return;
     }
+    final backendChanged =
+        _backendChoice != null && _backendChoice != _savedRouterTool;
     setState(() => _saving = true);
     try {
       await ConnectionSettingsStore.instance.saveController(
@@ -251,12 +252,12 @@ class _SettingsPageState extends State<SettingsPage>
         routerTool: _backendChoice ?? _routerTool,
         core: _core,
         routerToolConfirmed: _backendChoice != null,
+        temporaryBackendSelection: backendChanged,
         routerSelectionPending:
             _backendChoice == null && _routerTool == RouterTool.generic,
       );
       await _settingsReload;
       await ClashService.instance.loadConfig();
-      unawaited(RouterDetectionSession.instance.refresh());
       ClashDataHub.instance.resetBaseline(clearSnapshot: true);
       await Future.wait([
         WebPanelSync.instance.reload(),
@@ -265,7 +266,7 @@ class _SettingsPageState extends State<SettingsPage>
       if (mounted) {
         AppFeedback.showSnackBar(
           context,
-          tr('设置已保存'),
+          tr(backendChanged ? '已临时切换代理后端，下次冷启动或后台满 5 分钟返回后将重新识别' : '设置已保存'),
           tone: AppFeedbackTone.success,
         );
       }

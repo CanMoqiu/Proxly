@@ -380,13 +380,18 @@ class ClashService {
     return detail;
   }
 
-  Future<Map<String, dynamic>> getTrafficSnapshot() async {
+  Future<Map<String, dynamic>> getTrafficSnapshot(
+      {bool includeConnections = true}) async {
     return _get('/connections', (data) {
       final conns = data['connections'] as List? ?? [];
-      return {
+      final totals = {
         'downloadTotal': data['downloadTotal'] ?? 0,
         'uploadTotal': data['uploadTotal'] ?? 0,
         'count': conns.length,
+      };
+      if (!includeConnections) return totals;
+      return {
+        ...totals,
         'connections': conns.map((c) {
           final meta = c['metadata'] as Map<String, dynamic>? ?? {};
           final host = (meta['host'] as String?)?.isNotEmpty == true

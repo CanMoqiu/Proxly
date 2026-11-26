@@ -62,12 +62,13 @@ class SshService {
     Duration authTimeout = const Duration(seconds: 15),
     Duration? operationTimeout,
     SSHHostkeyVerifyHandler? onVerifyHostKey,
+    String? deviceId,
     int? expectedGeneration,
   }) async {
     final store = ConnectionSettingsStore.instance;
     final generation = expectedGeneration ?? store.deviceGeneration;
     store.requireDeviceGeneration(generation);
-    final deviceId = store.activeDevice?.id;
+    final trustDeviceId = deviceId ?? store.activeDevice?.id;
     final socket = await SSHSocket.connect(
       host,
       port,
@@ -84,7 +85,7 @@ class SshService {
             port,
             type,
             fingerprint,
-            deviceId: deviceId,
+            deviceId: trustDeviceId,
             expectedGeneration: generation,
           )),
       onPasswordRequest: () {
@@ -184,6 +185,7 @@ class SshService {
     int port = 22,
     bool stderr = false,
     Duration? operationTimeout,
+    String? deviceId,
     int? expectedGeneration,
   }) async {
     final result = await withClient(
@@ -193,6 +195,7 @@ class SshService {
       username: username,
       port: port,
       operationTimeout: operationTimeout,
+      deviceId: deviceId,
       expectedGeneration: expectedGeneration,
     );
     return stderr ? result.stdout + result.stderr : result.stdout;

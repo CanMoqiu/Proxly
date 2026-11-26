@@ -633,6 +633,8 @@ const _english = <String, String>{
   '设置页未保存 SSH 密码，本次输入后会同步保存到设置页。':
       'No SSH password is saved in Settings. This password will also be saved there.',
   '设置已保存': 'Settings saved',
+  '已临时切换代理后端，下次冷启动或后台满 5 分钟返回后将重新识别':
+      'Proxy backend switched temporarily. Detection resumes on the next cold start or after 5 minutes in the background.',
   '深色': 'Dark',
   '时间 旧→新': 'Time: oldest first',
   '时间 新→旧': 'Time: newest first',

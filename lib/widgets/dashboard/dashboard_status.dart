@@ -269,7 +269,8 @@ class _DashboardStatusState extends State<DashboardStatus>
       }
 
       final generation = _connection.generation;
-      final snapshot = await _dataHub.refresh(force: force);
+      final snapshot =
+          await _dataHub.refresh(force: force, includeConnections: false);
       if (generation != _connection.generation || !_canApplySnapshot) return;
       _applyRealtimeSnapshot(snapshot);
     } catch (e) {

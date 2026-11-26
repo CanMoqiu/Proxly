@@ -11,13 +11,17 @@ import 'package:shared_preferences/shared_preferences.dart';
 class _Detector extends RouterDetectionService {
   _Detector(this.respond);
   final Future<RouterDetectionResult> Function(String host) respond;
+  final sshPasswords = <String>[];
   @override
   Future<RouterDetectionResult> detect(
-          {required String host,
-          required String token,
-          required String sshPassword,
-          required int sshPort}) =>
-      respond(host);
+      {required String host,
+      required String token,
+      required String sshPassword,
+      required int sshPort,
+      String? sshDeviceId}) {
+    sshPasswords.add(sshPassword);
+    return respond(host);
+  }
 }
 
 void main() {
@@ -25,8 +29,11 @@ void main() {
   const storage = MethodChannel('plugins.it_nomads.com/flutter_secure_storage');
   final secrets = <String, String>{};
   var writes = 0;
+  var failCredentialWrite = false;
   setUp(() {
     writes = 0;
+    failCredentialWrite = false;
+    ConnectionSettingsStore.instance.expireTemporaryBackendSelections();
     secrets.clear();
     SharedPreferences.setMockInitialValues({
       'clash_host': 'router.local:9090',
@@ -38,6 +45,7 @@ void main() {
       final args = Map<String, dynamic>.from(call.arguments as Map);
       if (call.method == 'read') return secrets[args['key']];
       if (call.method == 'write') {
+        if (failCredentialWrite) throw PlatformException(code: 'unavailable');
         writes++;
         secrets[args['key']] = args['value'];
       }
@@ -219,6 +227,126 @@ void main() {
     expect(settings.host, 'new-router.local:9095');
     expect(settings.routerTool, RouterTool.openClash);
   });
+  test('saved manual choice is temporary, device-scoped and safe on fallback',
+      () async {
+    final store = ConnectionSettingsStore.instance;
+    await store.initializeProfiles();
+    const host = 'router.local:9090';
+    final first = store.activeDevice!;
+    await store.saveController(
+      host: host,
+      token: '',
+      sshPassword: 'first-password',
+      routerTool: RouterTool.openClash,
+      temporaryBackendSelection: true,
+    );
+    var result = RouterTool.nikki;
+    var offline = false;
+    final detector = _Detector((_) async {
+      if (offline) throw StateError('offline');
+      return RouterDetectionResult(
+          tool: result, core: ProxyCore.mihomo, version: 'v1');
+    });
+    final session = RouterDetectionSession(detector: detector);
+    addTearDown(session.dispose);
+    await session.refresh();
+    expect(detector.sshPasswords.single, isEmpty);
+    expect((await store.load()).routerTool, RouterTool.openClash);
+    expect((await store.load()).core, ProxyCore.mihomo);
+
+    await store.saveController(
+      host: 'router.local:9091',
+      token: 'new-token',
+      sshPassword: 'first-password',
+      routerTool: RouterTool.generic,
+      routerSelectionPending: true,
+    );
+    expect((await store.load()).routerTool, RouterTool.openClash);
+    expect(await store.pendingRouterToolSelection(), isNull);
+    final second = await store.saveDevice(
+      name: 'Other router',
+      host: host,
+      token: '',
+      sshPassword: 'second-password',
+      sshPort: 22,
+    );
+    await store.switchDevice(second.id);
+    await session.refresh();
+    expect(detector.sshPasswords.last, 'second-password');
+    expect((await store.load()).routerTool, RouterTool.nikki);
+    await store.switchDevice(first.id);
+    await session.refresh();
+    expect(detector.sshPasswords.last, isEmpty);
+    expect((await store.load()).routerTool, RouterTool.openClash);
+
+    store.expireTemporaryBackendSelections();
+    offline = true;
+    await session.refresh();
+    expect((await store.load()).routerTool, RouterTool.openClash);
+    offline = false;
+    result = RouterTool.generic;
+    await session.refresh();
+    expect(detector.sshPasswords.last, 'first-password');
+    expect((await store.load()).routerTool, RouterTool.openClash);
+    expect(await store.pendingRouterToolSelection(), isNull);
+    result = RouterTool.nikki;
+    await session.refresh();
+    expect((await store.load()).routerTool, RouterTool.nikki);
+  });
+
+  test(
+      'an in-flight result cannot overwrite a later manual save for the same host',
+      () async {
+    final store = ConnectionSettingsStore.instance;
+    await store.initializeProfiles();
+    final oldResult = Completer<RouterDetectionResult>();
+    final started = Completer<void>();
+    const nikki = RouterDetectionResult(
+        tool: RouterTool.nikki, core: ProxyCore.mihomo, version: 'v1');
+    final detector = _Detector((_) async {
+      if (started.isCompleted) return nikki;
+      started.complete();
+      return oldResult.future;
+    });
+    final session = RouterDetectionSession(detector: detector);
+    addTearDown(session.dispose);
+    final running = session.refresh();
+    await started.future;
+    await store.saveController(
+      host: 'router.local:9090',
+      token: '',
+      sshPassword: 'ssh-password',
+      routerTool: RouterTool.openClash,
+      temporaryBackendSelection: true,
+    );
+    oldResult.complete(nikki);
+    await running;
+    expect((await store.load()).routerTool, RouterTool.openClash);
+    expect(detector.sshPasswords, hasLength(2));
+    expect(detector.sshPasswords.last, isEmpty);
+  });
+
+  test(
+      'a failed save leaves the previous backend and skips the temporary choice',
+      () async {
+    final store = ConnectionSettingsStore.instance;
+    await store.initializeProfiles();
+    final initial = store.activeDevice!;
+    failCredentialWrite = true;
+    await expectLater(
+      store.saveController(
+        host: initial.host,
+        token: '',
+        sshPassword: '',
+        routerTool: RouterTool.openClash,
+        temporaryBackendSelection: true,
+      ),
+      throwsA(isA<PlatformException>()),
+    );
+    expect(store.hasTemporaryBackendSelection(initial.id), isFalse);
+    expect((await store.load()).routerTool, initial.routerTool);
+  });
+
   test('a choice from an old popup cannot change a newly saved controller',
       () async {
     final store = ConnectionSettingsStore.instance;

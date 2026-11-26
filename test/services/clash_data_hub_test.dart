@@ -89,6 +89,49 @@ void main() {
     expect(providerCalls, 2);
   });
 
+  test('summary polling preserves totals without caching connection rows',
+      () async {
+    traffic = Completer<http.Response>()
+      ..complete(http.Response(
+          '{"connections":[{"id":"one"}],"downloadTotal":100,"uploadTotal":20}',
+          200));
+    final summary =
+        await hub.refresh(includeConnections: false, includeProviders: false);
+    expect(summary.hasConnectionDetails, isFalse);
+    expect(summary.connections, isEmpty);
+    expect(summary.activeConnections, 1);
+    expect(summary.downloadTotal, 100);
+    expect(summary.uploadTotal, 20);
+
+    final detail = await hub.refresh(includeProviders: false);
+    expect(detail.hasConnectionDetails, isTrue);
+    expect(detail.connections.single.id, 'one');
+    expect(trafficCalls, 2);
+    expect(
+        await hub.refresh(includeConnections: false, includeProviders: false),
+        same(detail));
+    expect(trafficCalls, 2);
+  });
+
+  test('a list opened during a summary poll shares one follow-up detail read',
+      () async {
+    traffic = Completer<http.Response>();
+    final summary =
+        hub.refresh(includeConnections: false, includeProviders: false);
+    final detail = hub.refresh(includeProviders: false);
+    final secondDetail = hub.refresh(includeProviders: false);
+    await Future<void>.delayed(Duration.zero);
+    expect(trafficCalls, 1);
+    traffic!.complete(http.Response('{"connections":[{"id":"one"}]}', 200));
+
+    expect((await summary).hasConnectionDetails, isFalse);
+    final detailed = await detail;
+    expect(detailed.hasConnectionDetails, isTrue);
+    expect(detailed.connections.single.id, 'one');
+    expect(await secondDetail, same(detailed));
+    expect(trafficCalls, 2);
+  });
+
   test('reset rejects in-flight traffic and subscription replies', () async {
     providers = Completer<http.Response>();
     traffic = Completer<http.Response>();

@@ -8,20 +8,43 @@ import 'web_panel_service.dart';
 
 /// Reclaim HTTP caches without clearing cookies or persistent web storage.
 class StartupCacheMaintenance {
-  static Future<void> run({
+  StartupCacheMaintenance({
     Future<void> Function()? cleanupApk,
     Future<void> Function()? clearHttpCache,
     Future<void> Function()? cleanupPanel,
     DateTime? now,
-  }) async {
-    if (!AppPlatform.supportsApkUpdates && !AppPlatform.isIOS) return;
+  })  : _cleanupApk = cleanupApk ?? UpdateService.instance.cleanupInstalledApk,
+        _clearCache = clearHttpCache ?? _clearHttpCache,
+        _cleanupPanel = cleanupPanel ?? WebPanelService.cleanupTemporaryFiles,
+        _now = now;
+
+  static final instance = StartupCacheMaintenance();
+
+  final Future<void> Function() _cleanupApk;
+  final Future<void> Function() _clearCache;
+  final Future<void> Function() _cleanupPanel;
+  final DateTime? _now;
+  Future<void>? _webCacheCheck;
+  bool _webCacheChecked = false;
+
+  Future<void> cleanFiles() async {
+    if (!AppPlatform.supportsUpdateChecks) return;
     await Future.wait([
-      if (AppPlatform.supportsApkUpdates)
-        _bestEffort(cleanupApk ?? UpdateService.instance.cleanupInstalledApk),
-      _bestEffort(cleanupPanel ?? WebPanelService.cleanupTemporaryFiles),
-      _bestEffort(() => _clearDueHttpCache(
-          clearHttpCache ?? _clearHttpCache, now ?? DateTime.now())),
+      if (AppPlatform.supportsApkUpdates) _bestEffort(_cleanupApk),
+      _bestEffort(_cleanupPanel),
     ]);
+  }
+
+  Future<void> prepareWebView() {
+    if (_webCacheChecked || !AppPlatform.supportsUpdateChecks) {
+      return Future.value();
+    }
+    return _webCacheCheck ??= _bestEffort(
+      () => _clearDueHttpCache(_clearCache, _now ?? DateTime.now()),
+    ).whenComplete(() {
+      _webCacheChecked = true;
+      _webCacheCheck = null;
+    });
   }
 
   static Future<void> _clearDueHttpCache(

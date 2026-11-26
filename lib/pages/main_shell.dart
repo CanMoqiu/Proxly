@@ -16,13 +16,15 @@ import '../services/controller_connection_state.dart';
 import '../services/connection_settings_store.dart';
 import '../services/clash_data_hub.dart';
 import '../services/router_detection_session.dart';
+import '../services/web_panel_resume_state.dart';
 import '../services/web_panel_service.dart';
 import '../widgets/app_bottom_navigation_bar.dart';
 import '../widgets/update_dialog.dart';
 
 class MainShell extends StatefulWidget {
-  const MainShell({super.key, this.detectionSession});
+  const MainShell({super.key, this.detectionSession, this.backgroundClock});
   final RouterDetectionSession? detectionSession;
+  final DateTime Function()? backgroundClock;
 
   @override
   State<MainShell> createState() => _MainShellState();
@@ -37,56 +39,64 @@ class _MainShellState extends State<MainShell>
   bool _showConsoleButton = false;
   String _connectionsTabMode = 'webview';
   Timer? _warmupTimer;
-  int? _warmingTab;
-  bool _foreground = true;
-  bool _wasInBackground = false;
+  bool _proxySettled = false;
+  late final _resumeState = WebPanelResumeState(now: widget.backgroundClock);
   int _deviceViewEpoch = 0;
   RouterDetectionSession get _detection =>
       widget.detectionSession ?? RouterDetectionSession.instance;
 
   bool get _canWarm =>
       mounted &&
-      _foreground &&
+      _resumeState.foreground &&
       _routeVisible &&
-      _currentIndex == 0 &&
+      (_currentIndex == 0 || _currentIndex == 1) &&
       ControllerConnectionState.instance.phase ==
           ControllerConnectionPhase.online;
 
   void _scheduleWarmup() {
     _warmupTimer?.cancel();
-    if (!_canWarm || _warmingTab != null) return;
-    _warmupTimer = Timer(const Duration(milliseconds: 800), () {
-      if (!_canWarm || _warmingTab != null) return;
-      final next = !_visitedTabs.contains(1)
-          ? 1
-          : _connectionsTabMode == 'webview' && !_visitedTabs.contains(2)
-              ? 2
-              : null;
-      if (next == null) return;
-      setState(() {
-        _warmingTab = next;
-        _visitedTabs.add(next);
-      });
+    if (!_canWarm) return;
+    final next = !_visitedTabs.contains(1)
+        ? 1
+        : _proxySettled &&
+                _connectionsTabMode == 'webview' &&
+                !_visitedTabs.contains(2)
+            ? 2
+            : null;
+    if (next == null) return;
+    // Defer to the next event so a child load callback can finish building.
+    final delay = next == 1 ? const Duration(milliseconds: 800) : Duration.zero;
+    _warmupTimer = Timer(delay, () {
+      if (!_canWarm || _visitedTabs.contains(next)) return;
+      setState(() => _visitedTabs.add(next));
     });
   }
 
-  void _panelSettled(int index, int epoch) {
-    if (epoch != _deviceViewEpoch || _warmingTab != index) return;
-    _warmingTab = null;
+  void _proxyPanelSettled(int epoch) {
+    if (!mounted || epoch != _deviceViewEpoch || _proxySettled) return;
+    _proxySettled = true;
     _scheduleWarmup();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    _foreground = state == AppLifecycleState.resumed;
-    if (state == AppLifecycleState.hidden ||
-        state == AppLifecycleState.paused) {
-      _wasInBackground = true;
-    } else if (state == AppLifecycleState.resumed && _wasInBackground) {
-      _wasInBackground = false;
-      unawaited(_detection.refresh());
+    _resumeState.didChangeState(state);
+    final elapsed = state == AppLifecycleState.resumed
+        ? _resumeState.consumeBackgroundDuration()
+        : null;
+    if (elapsed != null) {
+      if (elapsed >= WebPanelResumeState.longBackgroundThreshold) {
+        _refreshBackendOnLaunch();
+      } else {
+        unawaited(_detection.refresh());
+      }
     }
     _scheduleWarmup();
+  }
+
+  void _refreshBackendOnLaunch() {
+    ConnectionSettingsStore.instance.expireTemporaryBackendSelections();
+    unawaited(_detection.refresh());
   }
 
   @override
@@ -97,7 +107,7 @@ class _MainShellState extends State<MainShell>
     ConnectionSettingsStore.instance.addListener(_handleDeviceSettings);
     _loadPrefs();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) unawaited(_detection.refresh());
+      if (mounted) _refreshBackendOnLaunch();
     });
     if (AppPlatform.supportsUpdateChecks) {
       Future.delayed(const Duration(seconds: 3), _autoCheckUpdate);
@@ -163,7 +173,7 @@ class _MainShellState extends State<MainShell>
     ClashDataHub.instance.resetBaseline(clearSnapshot: true);
     setState(() {
       _deviceViewEpoch++;
-      _warmingTab = null;
+      _proxySettled = false;
       _visitedTabs
         ..clear()
         ..addAll([0, _currentIndex]);
@@ -237,7 +247,7 @@ class _MainShellState extends State<MainShell>
         ProxyPage(
           key: ValueKey(('proxy', _deviceViewEpoch)),
           asTab: true,
-          onSettled: () => _panelSettled(1, epoch),
+          onSettled: () => _proxyPanelSettled(epoch),
         ),
       if (!_visitedTabs.contains(2))
         const SizedBox.shrink()
@@ -249,7 +259,6 @@ class _MainShellState extends State<MainShell>
       else
         ConnectionsPage(
           key: ValueKey(('connections', _deviceViewEpoch)),
-          onSettled: () => _panelSettled(2, epoch),
         ),
       if (_visitedTabs.contains(3))
         SettingsPage(active: _currentIndex == 3)

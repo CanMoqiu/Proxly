@@ -187,7 +187,11 @@ class _NativeConnectionsPageState extends State<NativeConnectionsPage>
   void _applyRealtimeSnapshot(ClashRealtimeSnapshot snapshot) {
     // ClashDataHub.sequence is globally monotonic; identical sequences mean this
     // page has already rendered the snapshot, including resetBaseline updates.
-    if (!mounted || snapshot.sequence == _lastSnapshotSequence) return;
+    if (!mounted ||
+        !snapshot.hasConnectionDetails ||
+        snapshot.sequence == _lastSnapshotSequence) {
+      return;
+    }
     final connections = snapshot.connections;
 
     final newUpSpeed = <String, int>{};
