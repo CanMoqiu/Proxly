@@ -8,7 +8,7 @@ Proxly bundles Zashboard; no dashboard files need to be deployed on the router. 
 
 Phones use the mobile layout; Android tablets and iPads use the desktop layout. Embedded tabs hide web navigation and the overview sidebar; the standalone console retains them. Connections use cards on phones and tablets, with the same customizable defaults.
 
-Card fields, table columns, and chain display save automatically in separate phone and tablet content profiles. The app manages display mode and sorting; shared imports do not overwrite device-specific connection content. Advanced options switches between native and web Connections.
+Card fields, table columns, and chain display are saved per controller profile, with separate settings for phone and tablet layouts. The app manages display mode and sorting, and imports preserve connection content settings. Once optional settings are visible, use Advanced options to switch between native and web Connections. See [Optional settings](dashboard.en.md#optional-settings).
 
 The iOS Proxy page supports native history-back gestures from Rules to Proxy. Horizontal page swipes inside the panel are disabled; use page buttons or app navigation.
 
@@ -19,13 +19,17 @@ The top-right import entry on Proxy offers two sources:
 - **From core**: reads the controller's `/storage/zashboard` endpoint, requiring core support and saved settings.
 - **From local JS file**: accepts Zashboard JSON data with `.json` or `.js` extensions; it does not execute JavaScript programs.
 
-Files are limited to `5 MiB`, `2000` top-level keys, and `1 MiB` per serialized value. Imports filter credentials and app-managed settings. Rejected imports keep existing settings; successful ones refresh open panels.
+Files are limited to `5 MiB`, `2000` top-level keys, and `1 MiB` per serialized value. Imports apply to the active controller profile and filter credentials and app-managed settings. A failed import preserves existing settings. A successful import refreshes open panels.
+
+## Loading and recovery
+
+When the controller is online and Home or Proxy is in the foreground, the app prepares Proxy first and continues with web Connections. On Android and iOS, after five minutes or more in the background, panels are rebuilt when they next need to appear.
+
+The embedded panels share one HTTP cache check. During initial WebView preparation, the app attempts cleanup if the version or build number has changed or seven days have passed since the last successful cleanup. Credentials, panel preferences, and installed assets are retained.
 
 ## Updates and storage
 
 Check, download, and install panel updates in Advanced options. SHA-256 and ZIP structure are verified before installation; failures retain the current panel. If download succeeded but activation failed, updating again retries activation only. An app update that changes the bundled panel version clears the downloaded older panel and uses the new bundled version.
-
-Periodic HTTP cache cleanup preserves connection credentials, panel preferences, and installed assets. On Android cold launch, update APKs for the installed version or older versions are removed; newer packages awaiting installation remain available for retry.
 
 ## Asset maintenance
 

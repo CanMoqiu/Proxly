@@ -15,22 +15,22 @@ Proxly connects to your own OpenClash, Nikki, or compatible Clash/Mihomo API con
 
 ## Getting started
 
-1. Download a package from [Releases](https://github.com/CanMoqiu/proxly/releases). For iPhone and iPad, follow the [iOS installation guide](docs/ios-selfsign.en.md).
+1. Choose a stable release or a release with **测试版** (test version) in its title. For iPhone and iPad, follow the [iOS installation guide](docs/ios-selfsign.en.md). [Releases](https://github.com/CanMoqiu/proxly/releases)
 2. Enter the controller address and secret. For configuration management, also enter the SSH password and port (default `22`).
-3. Select Continue to detect the proxy software and preselect it in Preferences. Unidentified software uses Mihomo generic configuration; you can also choose manually. Finish Preferences to open Home.
+3. Select **Continue** to detect the proxy software. You can also choose **Proxy backend** manually in the connection form. Finish Preferences to open Home.
 
-You can later edit connection details in Settings, and change proxy software, language, or the Connections view in Advanced options. See the [user guide](docs/dashboard.en.md).
+Go to **Settings → Controller settings** to add or switch devices, or edit the active device’s connection and proxy backend. See the [user guide](docs/dashboard.en.md).
 
 ## Features
 
 | Feature | Description |
 | --- | --- |
-| Home | Runtime status, software and core versions, live traffic, connection overview, and subscription usage; reorder or hide cards |
+| Home | Active device, runtime status, software and core versions, traffic, connection overview, and subscription usage. Reorder, hide, or restore cards |
 | Proxies and rules | Bundled Zashboard for proxy and group selection, rule inspection, and a standalone console |
 | Connections | Native list or web panel; web Connections uses cards on phones and tablets with automatically saved content customization |
 | Quick settings | Adjust proxy mode, DNS, traffic handling, bypass, and other supported settings |
 | Configuration | Switch, edit, upload, rename, export, and delete supported YAML files |
-| Maintenance and updates | Restart proxy services, flush DNS caches, close connections, and update the app or dashboard |
+| Maintenance and updates | Restart proxy services, flush DNS caches, close connections, and update the app or dashboard. iOS can download update IPAs to Files |
 | Interface | Simplified Chinese and English; system, light, and dark themes; portrait and landscape on tablets |
 
 OpenClash and Nikki have dedicated adapters. Other compatible controllers use Mihomo generic configuration, which provides controller API features without SSH configuration management or service restart. Unsupported features are hidden while saved Home preferences are retained. See [adapter support](docs/dashboard.en.md#adapter-support).

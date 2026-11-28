@@ -4,11 +4,10 @@
 
 Supports iPhones and iPads running iOS 18+. iPhones use portrait; iPads support portrait and landscape. The app manages the router's proxy service and does not run a proxy core on the device.
 
-## Installation and updates
+## First installation
 
 1. Download the IPA from [Releases](https://github.com/CanMoqiu/Proxly/releases) and compare its SHA-256 with the release notes.
 2. Import it into your signing tool, follow its signing and installation steps, and complete any iOS trust or Developer Mode requirements.
-3. For updates or renewal, keep the actual Bundle ID, signing identity, and Keychain access configuration consistent and install over the existing app. The project Bundle ID is `top.canmoqiu.proxly`. Uninstalling or changing signing configuration may affect local settings and credential access.
 
 Use either command to verify the digest, replacing `FILE.ipa` with the downloaded path:
 
@@ -20,7 +19,11 @@ Get-FileHash -Algorithm SHA256 FILE.ipa
 shasum -a 256 FILE.ipa
 ```
 
-Tap **Download IPA** in the update prompt. Open Files and find `Proxly/Downloads` under **On My iPhone** or **On My iPad**, then import the package into your signing tool and follow the same steps to install over your existing copy. Certificate lifetime and renewal depend on the signing tool. To compile your own package, see the [mobile build guide](mobile-builds.en.md).
+## Updates and renewal
+
+Starting with 26.11.2, tap **Download IPA** in the update prompt. When the download finishes, open Files and find `Proxly/Downloads` under **On My iPhone** or **On My iPad**, then import the IPA into your signing tool. You can also download it manually from Releases.
+
+Install over the existing app using the same actual Bundle ID, signing identity, and Keychain access configuration. The project Bundle ID is `top.canmoqiu.proxly`. Uninstalling or changing the signing configuration may affect local settings and credential access. Certificate lifetime and renewal depend on the signing tool. To build your own package, see the [mobile build guide](mobile-builds.en.md).
 
 ## First connection
 

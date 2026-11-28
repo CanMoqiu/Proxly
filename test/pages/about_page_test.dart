@@ -1,7 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart' show CupertinoSwitch;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:proxly/l10n/app_locale.dart';
 import 'package:proxly/pages/about_page.dart';
@@ -66,7 +70,7 @@ void main() {
     expect(find.text('请附版本信息、复现步骤和已脱敏的截图'), findsNothing);
     expect(find.text('CanMoqiu/proxly'), findsNothing);
     expect(tester.widget<Text>(find.text('关于')).style!.fontSize, 17);
-    expect(find.text('检测版本'), findsNothing);
+    expect(find.text('检查更新'), findsNothing);
     expect(find.text('更新'), findsOneWidget);
     expect(find.byKey(const ValueKey('about_automatic_update_switch')),
         findsOneWidget);
@@ -123,12 +127,49 @@ void main() {
 
     await _pumpAboutPage(tester, 'zh_CN');
     expect(find.text('更新'), findsOneWidget);
-    expect(find.text('检测版本'), findsNothing);
+    expect(find.text('检查更新'), findsNothing);
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pumpAndSettle();
     await _pumpAboutPage(tester, 'zh_CN');
     expect(find.text('更新'), findsOneWidget);
+  });
+
+  testWidgets('manual update checks use short labels for each state',
+      (tester) async {
+    final failed = Completer<http.Response>();
+    var requests = 0;
+    await http.runWithClient(() async {
+      await _pumpAboutPage(tester, 'zh_CN');
+      final button = find.text('检查更新');
+      final feedback = find.byKey(const ValueKey('app_feedback_banner'));
+      expect(button, findsOneWidget);
+      await tester.tap(button);
+      await tester.pump();
+      expect(find.text('检查中…'), findsOneWidget);
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+      failed.complete(http.Response('', 500));
+      await tester.pumpAndSettle();
+      final retry = find.text('检查失败，重试');
+      expect(retry, findsOneWidget);
+      expect(
+          find.descendant(
+              of: feedback, matching: find.textContaining('GitHub API 请求失败')),
+          findsOneWidget);
+
+      await tester.tap(retry);
+      await tester.pumpAndSettle();
+      expect(find.text('无更新'), findsOneWidget);
+      expect(requests, 2);
+      await tester.pump(const Duration(seconds: 7));
+      await tester.pumpAndSettle();
+      expect(button, findsOneWidget);
+    },
+        () => MockClient((_) async {
+              requests++;
+              if (requests == 1) return failed.future;
+              return http.Response('{"tag_name":"v26.3.9"}', 200);
+            }));
   });
 
   testWidgets(

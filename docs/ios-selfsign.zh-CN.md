@@ -4,11 +4,10 @@
 
 支持 iOS 18+ 的 iPhone 和 iPad。iPhone 使用竖屏，iPad 支持横竖屏。应用管理路由器上的代理服务，不在设备上运行代理内核。
 
-## 安装与更新
+## 首次安装
 
 1. 从 [Releases](https://github.com/CanMoqiu/Proxly/releases) 下载 IPA，核对发布正文的 SHA-256。
 2. 将 IPA 导入你使用的自签工具，按工具要求签名安装，并完成 iOS 提示的信任或开发者模式设置。
-3. 更新或续签时保持实际 Bundle ID、签名身份和 Keychain 访问配置一致，覆盖安装。工程 Bundle ID 为 `top.canmoqiu.proxly`；卸载或改变签名配置可能影响本地配置和凭据访问。
 
 核对摘要可使用以下任一命令，将 `FILE.ipa` 替换为下载路径：
 
@@ -20,7 +19,11 @@ Get-FileHash -Algorithm SHA256 FILE.ipa
 shasum -a 256 FILE.ipa
 ```
 
-更新提醒中点「下载 IPA」后，新包会保存到系统「文件」的「我的 iPhone」或「我的 iPad」中的 `Proxly/Downloads`。从该文件夹把新包导入自签工具，按相同步骤覆盖安装。证书有效期和续签方式由所用工具决定。自行编译见 [双端构建指南](mobile-builds.zh-CN.md)。
+## 更新与续签
+
+从 26.11.2 起，可在更新提醒中点「下载 IPA」。下载完成后，在系统「文件」中打开「我的 iPhone」或「我的 iPad」下的 `Proxly/Downloads`，将 IPA 导入自签工具。也可以从 Releases 手动下载。
+
+覆盖安装时沿用实际 Bundle ID、签名身份和 Keychain 访问配置。工程 Bundle ID 为 `top.canmoqiu.proxly`。卸载或更换签名配置可能影响本地设置和凭据访问。证书有效期和续签方式取决于自签工具。自行编译见 [双端构建指南](mobile-builds.zh-CN.md)。
 
 ## 首次连接
 

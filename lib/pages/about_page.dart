@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import '../widgets/app_popup.dart';
 import '../l10n/app_locale.dart';
 import 'package:flutter/material.dart';
@@ -52,6 +54,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
           : defaultTargetPlatform.name;
   String get _displayVersion => displayAppVersion(_version);
   _UpdateState _updateState = _UpdateState.idle;
+  Timer? _updateStatusTimer;
   UpdateInfo? _latestInfo;
   bool? _automaticCheckEnabled;
   bool _changingAutomaticCheck = false;
@@ -79,6 +82,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
   @override
   void dispose() {
+    _updateStatusTimer?.cancel();
     UpdateService.instance.availableUpdate
         .removeListener(_handleAvailableUpdate);
     super.dispose();
@@ -170,14 +174,17 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
   Future<void> _checkUpdate() async {
     if (_updateState == _UpdateState.checking) return;
+    _updateStatusTimer?.cancel();
     setState(() => _updateState = _UpdateState.checking);
     try {
       final info = await UpdateService.instance.checkForUpdate(silent: false);
       if (!mounted) return;
       if (info == null) {
         setState(() => _updateState = _UpdateState.upToDate);
-        Future.delayed(const Duration(seconds: 3), () {
-          if (mounted) setState(() => _updateState = _UpdateState.idle);
+        _updateStatusTimer = Timer(const Duration(seconds: 3), () {
+          if (mounted && _updateState == _UpdateState.upToDate) {
+            setState(() => _updateState = _UpdateState.idle);
+          }
         });
       } else {
         setState(() {
@@ -266,7 +273,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
         return pill(
           borderColor: blue,
           onTap: _checkUpdate,
-          child: AdaptiveSingleLineText(tr('检测版本'),
+          child: AdaptiveSingleLineText(tr('检查更新'),
               style: TextStyle(fontSize: 13, color: blue)),
         );
       case _UpdateState.checking:

@@ -14,4 +14,4 @@ Reports about credential handling, SSH host verification, YAML path restrictions
 
 ## Supported versions
 
-The latest release and the current `main` branch receive security fixes. Older releases are retained for historical reference and do not receive backported fixes unless explicitly stated.
+The latest stable release and the current `main` branch receive security fixes. Older releases are retained for historical reference and do not receive backported fixes unless explicitly stated.

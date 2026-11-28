@@ -4,21 +4,36 @@
 
 ## Connection setup
 
-On first launch, enter the controller address and secret. Use a LAN IP, `.local` / `.lan` domain, or LAN hostname, such as `192.168.1.1:9090`. The secret must match the controller's `secret`. Check connection tests API access.
+On first launch, enter the controller address and secret. Use a LAN IP, `.local` or `.lan` domain, or LAN hostname. The default controller port is `9090`. A blank device name uses the controller address and port. Enter the same `secret` as on the controller. Select **Test connection** to check API access.
 
 For OpenClash or Nikki configuration management, quick settings, and restart, also enter the SSH password. The account is `root`; the default port is `22` and can be changed. Verify the host fingerprint shown on the first SSH connection before accepting it.
 
-Continue detects proxy software and core and preselects the software in Preferences. Unidentified software uses Mihomo generic configuration. You can change the choice manually or save setup and connect later. Proxy software in Advanced options can be changed at any time, including while offline.
+Select **Continue** to detect the proxy software and core. You can choose **Proxy backend** manually in the connection form or save the device and connect later. When detection is inconclusive, the app keeps any confirmed backend. New devices can use Mihomo generic configuration.
 
-Detection runs on cold launch, return from the background, and after saving connection settings. An uncertain result retains a confirmed choice. When manual confirmation is needed, the selection sheet appears only on Home with a connected controller; connection failure does not open it.
+A backend you select and save in Settings takes priority. Automatic detection resumes on cold launch or after at least five minutes in the background. Brief interruptions preserve the manual selection. A confirmation prompt appears only on Home when the controller is reachable.
+
+### Managing multiple devices
+
+Open **Settings → Controller settings → Switch** to see the device list. Select a device to switch immediately, or use **Add device** to save a separate address, credentials, and backend. To edit an existing device, switch to it first, then edit and save the controller card. Swipe left on an inactive device to delete it after confirmation. Wait for any active remote operation to finish before switching.
+
+An orange outline marks an unsaved field. Leaving the Settings tab restores the saved form values.
 
 ## Home
 
-The default order is Status, Traffic, Overview, Current configuration, Operations, and Quick settings. Status shows software, core version, and connection state. Traffic and Overview show usage, speeds, and connection counts.
+The active device appears to the left of the Home title. The default card order is Runtime status, Traffic information, Overview, Current configuration, Runtime actions, and Quick settings.
 
-Open **Customize dashboard** at the bottom. Touch and hold a card to reorder it, or tap the red minus in its upper-right corner to hide it. Hidden cards appear in their default order under **Available to add**. Tap a card's plus button to put it back on the dashboard. Changes save locally. **Reset layout** restores the default order and visibility.
+Open **Customize dashboard** at the bottom. Touch and hold a card to reorder it, or tap the red minus in its upper-right corner to hide it. Hidden cards appear in their default order under **Available to add**. Tap the plus button on the left to put a card back on the dashboard. Changes save locally. **Reset layout** restores the default order and visibility.
 
-Layout preferences are shared across proxy software. Unsupported cards and options are hidden from Home and Customize home. Cards return to their saved positions when available again; cards never arranged before follow the arranged cards. Switching software does not reveal manually hidden cards.
+Devices and proxy backends share the Home layout. Unsupported cards and options disappear from Home and Customize dashboard. Available cards return to their saved positions. Cards that have never been arranged follow the arranged cards. Manually hidden cards stay hidden.
+
+## App updates
+
+- In **Settings → About Proxly**, check for updates or turn off automatic update checks. Automatic checks run at startup at most once every 24 hours. **Skip this version** applies to both automatic and manual checks.
+- On Android, the update dialog downloads the APK and opens the installer. On iOS, the update dialog downloads the IPA to Files. For its location and installation steps, see the [iOS installation guide](ios-selfsign.en.md#updates-and-renewal).
+
+## Optional settings
+
+Advanced options hides **Connections tab content** and **Show floating theme button** by default. Tap the app icon on About five times to show these options. Tap it five more times to hide them. Saved preferences remain active.
 
 ## Adapter support
 
