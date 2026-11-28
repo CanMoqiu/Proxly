@@ -20,7 +20,7 @@ Get-FileHash -Algorithm SHA256 FILE.ipa
 shasum -a 256 FILE.ipa
 ```
 
-应用更新提醒会打开发布页，下载新包后按相同步骤安装。证书有效期和续签方式由所用工具决定。自行编译见 [双端构建指南](mobile-builds.zh-CN.md)。
+更新提醒中点「下载 IPA」后，新包会保存到系统「文件」的「我的 iPhone」或「我的 iPad」中的 `Proxly/Downloads`。从该文件夹把新包导入自签工具，按相同步骤覆盖安装。证书有效期和续签方式由所用工具决定。自行编译见 [双端构建指南](mobile-builds.zh-CN.md)。
 
 ## 首次连接
 

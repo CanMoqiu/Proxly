@@ -66,12 +66,14 @@ class _DashboardCardListState extends State<DashboardCardList> {
       DashboardCardId.operations,
       DashboardCardId.quickSettings
     };
-    final ids = layout
-        .availableOrder(unavailable: widget.unavailable)
-        .where((id) => editing || layout.isVisible(id))
-        .where((id) =>
-            editing || widget.sshTrustNotice == null || !sshCards.contains(id))
-        .toList();
+    final unavailable = {
+      ...widget.unavailable,
+      if (widget.sshTrustNotice != null) ...sshCards,
+    };
+    final hidden = DashboardCardId.values.where((id) => !layout.isVisible(id));
+    final excluded = {...unavailable, ...hidden};
+    final ids = layout.availableOrder(unavailable: excluded);
+    final addable = hidden.where((id) => !unavailable.contains(id));
     final palette = AppPalette.of(context);
     return AdaptiveContent(
         maxWidth: 1152,
@@ -81,8 +83,8 @@ class _DashboardCardListState extends State<DashboardCardList> {
           padding: AdaptiveScrollPadding.page(context, top: 24),
           onReorder: (oldIndex, newIndex) {
             if (editing) {
-              widget.onSave(layout.reorder(oldIndex, newIndex,
-                  unavailable: widget.unavailable));
+              widget.onSave(
+                  layout.reorder(oldIndex, newIndex, unavailable: excluded));
             }
           },
           footer: Padding(
@@ -93,10 +95,30 @@ class _DashboardCardListState extends State<DashboardCardList> {
                 const SizedBox(height: 12),
               ],
               if (editing) ...[
-                Text(tr('长按卡片拖动排序，关闭开关隐藏卡片'),
-                    textAlign: TextAlign.center,
-                    style:
-                        TextStyle(fontSize: 12, color: palette.textSecondary)),
+                if (addable.isNotEmpty)
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(tr('可添加功能'),
+                          style: Theme.of(context).textTheme.titleSmall),
+                      for (final id in addable)
+                        TextButton.icon(
+                          key: ValueKey('add_${id.name}'),
+                          style: TextButton.styleFrom(
+                              alignment: Alignment.centerLeft),
+                          icon: const Icon(Icons.add_rounded),
+                          label: Text(dashboardCardTitle(id)),
+                          onPressed: () =>
+                              widget.onSave(layout.setVisible(id, true)),
+                        ),
+                      const SizedBox(height: 8),
+                    ],
+                  ),
+                if (ids.length > 1)
+                  Text(tr('长按卡片拖动排序'),
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                          fontSize: 12, color: palette.textSecondary)),
                 const SizedBox(height: DashboardButtonStyle.spacing),
                 TextButton(
                     style: DashboardButtonStyle.action,
@@ -107,7 +129,7 @@ class _DashboardCardListState extends State<DashboardCardList> {
                     child: Text(tr('恢复默认'))),
                 const SizedBox(height: DashboardButtonStyle.spacing),
               ],
-              if (ids.isEmpty)
+              if (!editing && ids.isEmpty)
                 Padding(
                     padding: const EdgeInsets.only(bottom: 12),
                     child: Text(tr('卡片已隐藏，点击下方自定义首页以恢复。'),
@@ -126,35 +148,34 @@ class _DashboardCardListState extends State<DashboardCardList> {
             ]),
           ),
           children: [
-            for (var index = 0; index < ids.length; index++)
+            for (final id in ids)
               Padding(
-                  key: ValueKey('dashboard_${ids[index].name}'),
+                  key: ValueKey('dashboard_${id.name}'),
                   padding: const EdgeInsets.only(bottom: 12),
-                  child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        if (editing)
+                  child: editing
+                      ? Stack(fit: StackFit.passthrough, children: [
                           Padding(
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: 16),
-                              child: Row(children: [
-                                Expanded(
-                                    child: Text(dashboardCardTitle(ids[index]),
-                                        style: const TextStyle(fontSize: 13))),
-                                Switch(
-                                    key: ValueKey('visible_${ids[index].name}'),
-                                    value: layout.isVisible(ids[index]),
-                                    onChanged: (value) => widget.onSave(
-                                        layout.setVisible(ids[index], value))),
-                              ])),
-                        if (layout.isVisible(ids[index]) &&
-                            !(widget.sshTrustNotice != null &&
-                                sshCards.contains(ids[index])))
-                          if (!editing)
-                            widget.cards[ids[index]]!
-                          else
-                            AbsorbPointer(child: widget.cards[ids[index]]!),
-                      ])),
+                            padding: const EdgeInsets.only(top: 12),
+                            child: AbsorbPointer(child: widget.cards[id]!),
+                          ),
+                          Positioned(
+                              top: 0,
+                              right: 0,
+                              child: IconButton(
+                                key: ValueKey('visible_${id.name}'),
+                                tooltip:
+                                    '${tr('隐藏')} ${dashboardCardTitle(id)}',
+                                onPressed: () =>
+                                    widget.onSave(layout.setVisible(id, false)),
+                                icon: CircleAvatar(
+                                  radius: 12,
+                                  backgroundColor: palette.error,
+                                  child: const Icon(Icons.remove_rounded,
+                                      size: 20, color: Colors.white),
+                                ),
+                              )),
+                        ])
+                      : widget.cards[id]!),
           ],
         ));
   }

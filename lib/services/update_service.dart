@@ -11,60 +11,64 @@ import 'package:open_file/open_file.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'github_download_accelerator.dart';
 import 'app_platform.dart';
+import 'app_version.dart';
 import 'version_comparator.dart';
 
 class UpdateInfo {
   final String tag;
   final String apkUrl;
+  final String ipaUrl;
   final String? sha256;
   final String? body;
 
   const UpdateInfo({
     required this.tag,
     this.apkUrl = '',
+    this.ipaUrl = '',
     this.sha256,
     this.body,
   });
-
-  Uri get releasePage => UpdateService.releasePage(tag);
 }
 
-class ApkDownloadSizeGuard {
+enum _UpdatePackage { apk, ipa }
+
+class UpdateDownloadSizeGuard {
   final int maxBytes;
   int receivedBytes = 0;
 
-  ApkDownloadSizeGuard({required this.maxBytes});
+  UpdateDownloadSizeGuard({required this.maxBytes});
 
   void validateContentLength(int? contentLength) {
     if (contentLength != null && contentLength > maxBytes) {
-      throw Exception(tr('APK 文件超过 250 MB 限制'));
+      throw Exception(tr('安装包超过 250 MB 限制'));
     }
   }
 
   void addChunk(int length) {
     receivedBytes += length;
     if (receivedBytes > maxBytes) {
-      throw Exception(tr('APK 文件超过 250 MB 限制'));
+      throw Exception(tr('安装包超过 250 MB 限制'));
     }
   }
 }
 
 class UpdateService {
-  UpdateService._() : _temporaryDirectory = getTemporaryDirectory;
+  UpdateService._()
+      : _temporaryDirectory = getTemporaryDirectory,
+        _documentsDirectory = getApplicationDocumentsDirectory;
   @visibleForTesting
-  UpdateService.forTesting(
-      {required Future<Directory> Function() temporaryDirectory})
-      : _temporaryDirectory = temporaryDirectory;
+  UpdateService.forTesting({
+    required Future<Directory> Function() temporaryDirectory,
+    Future<Directory> Function() documentsDirectory =
+        getApplicationDocumentsDirectory,
+  })  : _temporaryDirectory = temporaryDirectory,
+        _documentsDirectory = documentsDirectory;
   static final instance = UpdateService._();
 
-  static const int maxApkBytes = 250 * 1024 * 1024;
+  static const _maxPackageBytes = 250 * 1024 * 1024;
+  static const _iosDownloadsFolder = 'Downloads';
 
   static const _repo = 'CanMoqiu/proxly';
-  static Uri releasePage(String tag) => Uri(
-        scheme: 'https',
-        host: 'github.com',
-        pathSegments: [..._repo.split('/'), 'releases', 'tag', tag],
-      );
   static const _prefKey = 'last_update_check';
   static const _autoCheckKey = 'automatic_update_check_enabled';
   static const _skipKey = 'skipped_update_version';
@@ -72,6 +76,7 @@ class UpdateService {
 
   final ValueNotifier<UpdateInfo?> availableUpdate = ValueNotifier(null);
   final Future<Directory> Function() _temporaryDirectory;
+  final Future<Directory> Function() _documentsDirectory;
   Future<void>? _apkCleanup;
 
   /// Remove only our obsolete installer, never a newer APK awaiting installation.
@@ -151,27 +156,24 @@ class UpdateService {
 
       if (prefs.getString(_skipKey) == tag) return null;
 
-      // iOS checks release metadata only; installation happens in the browser.
       final assets =
           (json['assets'] as List? ?? []).cast<Map<String, dynamic>>();
-      final extension = AppPlatform.isIOS ? '.ipa' : '.apk';
+      final isIOS = AppPlatform.isIOS;
+      final extension = isIOS ? '.ipa' : '.apk';
       final asset = assets.firstWhere(
-        (a) => (a['name'] as String? ?? '').endsWith(extension),
+        (a) =>
+            (a['name'] as String? ?? '').endsWith(extension) &&
+            (a['browser_download_url'] as String? ?? '').trim().isNotEmpty,
         orElse: () => {},
       );
       if (asset.isEmpty) return null;
-      final apkUrl = AppPlatform.supportsApkUpdates
-          ? asset['browser_download_url'] as String? ?? ''
-          : '';
-      if (AppPlatform.supportsApkUpdates && apkUrl.isEmpty) return null;
-      final sha256 = AppPlatform.supportsApkUpdates
-          ? _parseSha256Digest(asset['digest'] as String?)
-          : null;
+      final downloadUrl = (asset['browser_download_url'] as String).trim();
 
       final update = UpdateInfo(
         tag: tag,
-        apkUrl: apkUrl,
-        sha256: sha256,
+        apkUrl: isIOS ? '' : downloadUrl,
+        ipaUrl: isIOS ? downloadUrl : '',
+        sha256: _parseSha256Digest(asset['digest'] as String?),
         body: json['body'] as String?,
       );
       availableUpdate.value = update;
@@ -209,10 +211,11 @@ class UpdateService {
     await prefs.setString(_skipKey, tag);
   }
 
-  Future<bool> _isLikelyApk(File file) async {
+  Future<bool> _isLikelyPackage(File file, _UpdatePackage package) async {
     if (!await file.exists()) return false;
     final length = await file.length();
-    if (length <= 1024 * 1024 || length > maxApkBytes) {
+    final minimum = package == _UpdatePackage.apk ? 1024 * 1024 + 1 : 4;
+    if (length < minimum || length > _maxPackageBytes) {
       return false;
     }
     final raf = await file.open();
@@ -222,8 +225,9 @@ class UpdateService {
           header[0] == 0x50 &&
           header[1] == 0x4B &&
           ((header[2] == 0x03 && header[3] == 0x04) ||
-              (header[2] == 0x05 && header[3] == 0x06) ||
-              (header[2] == 0x07 && header[3] == 0x08));
+              (package == _UpdatePackage.apk &&
+                  ((header[2] == 0x05 && header[3] == 0x06) ||
+                      (header[2] == 0x07 && header[3] == 0x08))));
     } finally {
       await raf.close();
     }
@@ -238,7 +242,7 @@ class UpdateService {
       if (await file.exists()) await file.delete();
       return null;
     }
-    if (await _isLikelyApk(file) &&
+    if (await _isLikelyPackage(file, _UpdatePackage.apk) &&
         await _matchesExpectedSha256(file, expectedSha256)) {
       return file;
     }
@@ -282,23 +286,96 @@ class UpdateService {
       return cached;
     }
 
+    final tempDir = await _temporaryDirectory();
+    final file = File('${tempDir.path}/proxly_update.apk');
+    await _downloadPackage(
+      url,
+      file,
+      _UpdatePackage.apk,
+      expectedSha256,
+      onProgress,
+      cancelled,
+    );
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_cachedTagKey, tag);
+    return file;
+  }
+
+  /// Save a checked IPA to the app's Downloads folder in iOS Files.
+  Future<File> downloadIpa(
+    String url,
+    String tag,
+    String? expectedSha256,
+    void Function(double) onProgress,
+    ValueNotifier<bool> cancelled,
+  ) async {
+    if (!AppPlatform.isIOS) {
+      throw UnsupportedError('IPA updates are only available on iOS');
+    }
+    if (cancelled.value) throw const _CancelException();
+    if (NumericVersion.tryParse(tag) == null) {
+      throw FormatException(tr('版本格式异常'));
+    }
+
+    final documents = await _documentsDirectory();
+    final downloads = Directory('${documents.path}/$_iosDownloadsFolder');
+    final fileName = 'Proxly-iOS-${displayAppVersion(tag)}.ipa';
+    final file = File('${downloads.path}/$fileName');
+    if (expectedSha256 != null &&
+        await _isLikelyPackage(file, _UpdatePackage.ipa) &&
+        await _matchesExpectedSha256(file, expectedSha256)) {
+      if (cancelled.value) throw const _CancelException();
+      onProgress(1);
+      return file;
+    }
+
+    // Keep partial files outside the Documents directory exposed in Files.
+    final tempDir = await _temporaryDirectory();
+    final staging = await tempDir.createTemp('proxly-ipa-');
+    final stagedFile = File('${staging.path}/$fileName');
+    try {
+      await _downloadPackage(
+        url,
+        stagedFile,
+        _UpdatePackage.ipa,
+        expectedSha256,
+        onProgress,
+        cancelled,
+      );
+      if (cancelled.value) throw const _CancelException();
+      await downloads.create(recursive: true);
+      if (cancelled.value) throw const _CancelException();
+      return await stagedFile.rename(file.path);
+    } finally {
+      if (await stagedFile.exists()) await stagedFile.delete();
+      await staging.delete();
+    }
+  }
+
+  Future<void> _downloadPackage(
+    String url,
+    File file,
+    _UpdatePackage package,
+    String? expectedSha256,
+    void Function(double) onProgress,
+    ValueNotifier<bool> cancelled,
+  ) async {
     Object? lastError;
-    final allowMirrors = expectedSha256 != null;
     for (final candidateUrl in GitHubDownloadAccelerator.candidates(
       url,
-      includeMirrors: allowMirrors,
+      includeMirrors: expectedSha256 != null,
     )) {
       if (cancelled.value) throw const _CancelException();
       try {
-        final file = await _downloadApkFromUrl(
+        await _downloadFromUrl(
           candidateUrl,
+          file,
+          package,
           expectedSha256,
           onProgress,
           cancelled,
         );
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setString(_cachedTagKey, tag);
-        return file;
+        return;
       } catch (e) {
         if (e is _CancelException) rethrow;
         lastError = e;
@@ -309,15 +386,14 @@ class UpdateService {
     throw Exception(tr('下载失败: $lastError'));
   }
 
-  Future<File> _downloadApkFromUrl(
+  Future<void> _downloadFromUrl(
     String url,
+    File file,
+    _UpdatePackage package,
     String? expectedSha256,
     void Function(double) onProgress,
     ValueNotifier<bool> cancelled,
   ) async {
-    final tempDir = await _temporaryDirectory();
-    final file = File('${tempDir.path}/proxly_update.apk');
-    if (await file.exists()) await file.delete();
     final httpClient = HttpClient()
       ..connectionTimeout = const Duration(seconds: 12);
     // Abort stalled headers or bodies without waiting for another data chunk.
@@ -338,7 +414,10 @@ class UpdateService {
       }
       final mime = response.headers.contentType?.mimeType.toLowerCase();
       if (mime != null &&
-          mime != 'application/vnd.android.package-archive' &&
+          mime !=
+              (package == _UpdatePackage.apk
+                  ? 'application/vnd.android.package-archive'
+                  : 'application/x-itunes-ipa') &&
           mime != 'application/octet-stream' &&
           mime != 'binary/octet-stream' &&
           mime != 'application/zip' &&
@@ -347,7 +426,7 @@ class UpdateService {
       }
       final contentLength =
           response.contentLength > 0 ? response.contentLength : null;
-      final sizeGuard = ApkDownloadSizeGuard(maxBytes: maxApkBytes)
+      final sizeGuard = UpdateDownloadSizeGuard(maxBytes: _maxPackageBytes)
         ..validateContentLength(contentLength);
       final output = await file.open(mode: FileMode.write);
       try {
@@ -355,7 +434,7 @@ class UpdateService {
             in response.timeout(const Duration(seconds: 30))) {
           if (cancelled.value) throw const _CancelException();
           sizeGuard.addChunk(chunk.length);
-          // Await disk writes so a fast network cannot queue the entire APK.
+          // Await disk writes so a fast network cannot queue the entire package.
           await output.writeFrom(chunk);
           if (cancelled.value) throw const _CancelException();
           if (contentLength != null && contentLength > 0) {
@@ -368,18 +447,14 @@ class UpdateService {
         await output.close();
       }
 
-      if (!await _isLikelyApk(file)) {
-        if (await file.exists()) await file.delete();
-        throw Exception(tr('下载内容不是有效 APK'));
+      if (!await _isLikelyPackage(file, package)) {
+        throw Exception(tr(
+            package == _UpdatePackage.apk ? '下载内容不是有效 APK' : '下载内容不是有效 IPA'));
       }
       if (!await _matchesExpectedSha256(file, expectedSha256)) {
-        if (await file.exists()) await file.delete();
         throw Exception(tr('下载内容 SHA256 校验失败'));
       }
       if (cancelled.value) throw const _CancelException();
-
-      // Cache marker is written by the caller after a successful attempt.
-      return file;
     } catch (_) {
       if (await file.exists()) await file.delete();
       if (cancelled.value) throw const _CancelException();

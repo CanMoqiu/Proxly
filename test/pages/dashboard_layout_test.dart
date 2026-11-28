@@ -170,6 +170,17 @@ void main() {
     expect(list.layout.order.first, DashboardCardId.traffic);
     await tester.tap(find.byKey(const ValueKey('visible_status')));
     await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('visible_traffic')));
+    await tester.pump();
+    final addStatus = find.byKey(const ValueKey('add_status'));
+    final addTraffic = find.byKey(const ValueKey('add_traffic'));
+    expect(tester.getTopLeft(addStatus).dy,
+        lessThan(tester.getTopLeft(addTraffic).dy));
+    await tester.ensureVisible(addTraffic);
+    await tester.tap(addTraffic);
+    await tester.pumpAndSettle();
+    expect(addTraffic, findsNothing);
+    expect(find.byKey(const ValueKey('dashboard_traffic')), findsOneWidget);
     await toggleEditing(tester);
     expect(find.byKey(const ValueKey('dashboard_status')), findsNothing);
     await tester.pumpWidget(const SizedBox());
@@ -201,7 +212,8 @@ void main() {
     await toggleEditing(tester);
     await tester.pumpAndSettle();
     await scrollToTop(tester);
-    expect(find.byKey(const ValueKey('visible_status')), findsOneWidget);
+    expect(find.text('Available to add'), findsOneWidget);
+    expect(find.byKey(const ValueKey('add_status')), findsOneWidget);
     await tester.scrollUntilVisible(find.text('Reset layout'), 350,
         scrollable: find.byType(Scrollable).first);
     await tester.tap(find.text('Reset layout'));
@@ -267,7 +279,7 @@ void main() {
     final position =
         tester.state<ScrollableState>(find.byType(Scrollable).first).position;
     expect(position.extentAfter, closeTo(0, 0.5));
-    final instructions = find.text(tr('长按卡片拖动排序，关闭开关隐藏卡片'));
+    final instructions = find.text(tr('长按卡片拖动排序'));
     expect(
         tester.getTopLeft(instructions).dy,
         greaterThan(tester

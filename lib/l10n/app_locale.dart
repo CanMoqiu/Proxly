@@ -306,8 +306,8 @@ const _english = <String, String>{
   '当前配置': 'Current configuration',
   '正在检查当前配置...': 'Checking the active configuration...',
   '运行操作': 'Runtime actions',
-  '长按卡片拖动排序，关闭开关隐藏卡片':
-      'Long-press a card to reorder; turn its switch off to hide it',
+  '长按卡片拖动排序': 'Touch and hold a card to reorder it',
+  '可添加功能': 'Available to add',
   '无法确认当前配置；若修改了运行配置，请稍后手动重启 OpenClash':
       'Could not identify the active configuration. Restart OpenClash manually if you changed it.',
   'Clash 状态': 'Clash status',
@@ -315,7 +315,6 @@ const _english = <String, String>{
   'Clash 操作': 'Clash actions',
   '快捷设置': 'Quick settings',
   '自定义首页': 'Customize dashboard',
-  '拖动手柄排序，关闭开关隐藏卡片': 'Drag to reorder; turn off a switch to hide a card',
   '拖动排序': 'Drag to reorder',
   '恢复默认': 'Reset layout',
   '卡片已隐藏，点击下方自定义首页以恢复。':
@@ -337,8 +336,8 @@ const _english = <String, String>{
   '覆盖已有配置？': 'Overwrite existing configuration?',
   '覆盖': 'Overwrite',
   '版本': 'Version',
-  '前往 GitHub 发布页下载 IPA，自签后手动安装。':
-      'Download the IPA from GitHub Releases, then sign and install it manually.',
+  '已保存到「文件」中的 Proxly/Downloads。请用自签工具安装。':
+      'Saved to Proxly/Downloads in Files. Use your signing tool to install it.',
   '正式版': 'Release',
   '测试版': 'Test build',
   '版本信息读取失败，重试': 'Could not load version information. Retry',
@@ -588,7 +587,8 @@ const _english = <String, String>{
   '保存 SSH 密码失败，请重试': 'Could not save the SSH password. Please retry.',
   '操作失败，请重试': 'Operation failed. Please retry.',
   '取消下载': 'Cancel download',
-  '前往发布页': 'Open release page',
+  '下载 IPA': 'Download IPA',
+  '下载完成': 'Download complete',
   '取消': 'Cancel',
   '稍后': 'Later',
   '去开启': 'Open settings',
@@ -672,6 +672,7 @@ const _english = <String, String>{
   '下载': 'Download',
   '下载内容 SHA256 校验失败': 'Downloaded file failed SHA256 verification',
   '下载内容不是有效 APK': 'Downloaded file is not a valid APK',
+  '下载内容不是有效 IPA': 'Downloaded file is not a valid IPA',
   '下载速度': 'Download speed',
   '显示控制台按钮': 'Show Console button',
   '显示主题悬浮球': 'Show floating theme button',
@@ -794,7 +795,7 @@ const _english = <String, String>{
   'OpenClash 设置保存失败': 'Failed to save OpenClash settings',
   '重新读取后设置未生效': 'The setting did not take effect after verification',
   'Mihomo 未能连续通过健康检查': 'Mihomo did not pass consecutive health checks',
-  'APK 文件超过 250 MB 限制': 'The APK exceeds the 250 MB limit',
+  '安装包超过 250 MB 限制': 'The package exceeds the 250 MB limit',
   '检测到 Mihomo 进程发生变化': 'The Mihomo process changed during the operation',
   '实际状态可能不完整，请检查 OpenClash':
       'The actual state may be incomplete; check OpenClash',

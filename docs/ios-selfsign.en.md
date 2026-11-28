@@ -20,7 +20,7 @@ Get-FileHash -Algorithm SHA256 FILE.ipa
 shasum -a 256 FILE.ipa
 ```
 
-App update notices open Releases; download and install the new package using the same steps. Certificate lifetime and renewal depend on the signing tool. To compile your own package, see the [mobile build guide](mobile-builds.en.md).
+Tap **Download IPA** in the update prompt. Open Files and find `Proxly/Downloads` under **On My iPhone** or **On My iPad**, then import the package into your signing tool and follow the same steps to install over your existing copy. Certificate lifetime and renewal depend on the signing tool. To compile your own package, see the [mobile build guide](mobile-builds.en.md).
 
 ## First connection
 

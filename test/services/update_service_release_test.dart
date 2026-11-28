@@ -33,9 +33,12 @@ void main() {
         final update = await service.checkForUpdate(silent: true);
         expect(update, isNotNull);
         expect(update!.tag, 'v27.4.0');
-        expect(
-            update.releasePage.path, '/CanMoqiu/proxly/releases/tag/v27.4.0');
-        expect(update.apkUrl.isEmpty, platform == TargetPlatform.iOS);
+        final isIOS = platform == TargetPlatform.iOS;
+        const download = 'https://github.com/CanMoqiu/proxly/releases/download/'
+            'v27.4.0/app';
+        expect(update.apkUrl, isIOS ? '' : '$download.apk');
+        expect(update.ipaUrl, isIOS ? '$download.ipa' : '');
+        expect(update.sha256, 'a' * 64);
         expect(service.availableUpdate.value, same(update));
         expect(await service.checkForUpdate(silent: true), isNull);
         expect(requests, 1);
@@ -61,7 +64,8 @@ void main() {
                         {
                           'name': 'Proxly-mobile-27.4.$ext',
                           'browser_download_url':
-                              'https://github.com/CanMoqiu/proxly/releases/download/v27.4.0/app.$ext'
+                              'https://github.com/CanMoqiu/proxly/releases/download/v27.4.0/app.$ext',
+                          'digest': 'sha256:${'a' * 64}',
                         }
                       ],
                     }),

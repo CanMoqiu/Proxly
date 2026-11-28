@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:url_launcher/url_launcher.dart';
 import '../l10n/app_locale.dart';
 import '../services/app_platform.dart';
 import '../services/app_version.dart';
@@ -14,8 +13,13 @@ import 'app_feedback.dart';
 class UpdateDialog extends StatefulWidget {
   final UpdateInfo info;
   final bool autoTriggered;
-  const UpdateDialog(
-      {super.key, required this.info, this.autoTriggered = false});
+  final UpdateService? updateService;
+  const UpdateDialog({
+    super.key,
+    required this.info,
+    this.autoTriggered = false,
+    this.updateService,
+  });
 
   @override
   State<UpdateDialog> createState() => _UpdateDialogState();
@@ -24,9 +28,12 @@ class UpdateDialog extends StatefulWidget {
 class _UpdateDialogState extends State<UpdateDialog> {
   bool _busy = false;
   bool _downloading = false;
+  bool _ipaSaved = false;
   double _progress = 0;
   String? _error;
   final _cancelled = ValueNotifier(false);
+  UpdateService get _updateService =>
+      widget.updateService ?? UpdateService.instance;
 
   @override
   void dispose() {
@@ -52,17 +59,6 @@ class _UpdateDialogState extends State<UpdateDialog> {
   }
 
   Future<void> _startDownload() => _perform(() async {
-        if (AppPlatform.isIOS) {
-          try {
-            final opened = await launchUrl(widget.info.releasePage,
-                mode: LaunchMode.externalApplication);
-            if (!opened) throw StateError('Browser unavailable');
-            if (mounted && !_cancelled.value) AppPopup.close(context);
-          } catch (_) {
-            if (mounted) setState(() => _error = tr('无法打开链接，请检查浏览器设置'));
-          }
-          return;
-        }
         if (AppPlatform.supportsApkUpdates) {
           final status = await Permission.requestInstallPackages.status;
           if (!mounted || _cancelled.value) return;
@@ -77,15 +73,39 @@ class _UpdateDialogState extends State<UpdateDialog> {
           _progress = 0;
         });
         try {
-          final file = await UpdateService.instance.downloadApk(
-              widget.info.apkUrl, widget.info.tag, widget.info.sha256,
-              (progress) {
-            if (mounted) {
+          void onProgress(double progress) {
+            if (mounted && !_cancelled.value) {
               setState(() => _progress = progress);
             }
-          }, _cancelled);
+          }
+
+          final info = widget.info;
+          if (AppPlatform.isIOS) {
+            await _updateService.downloadIpa(
+              info.ipaUrl,
+              info.tag,
+              info.sha256,
+              onProgress,
+              _cancelled,
+            );
+            if (mounted && !_cancelled.value) {
+              setState(() {
+                _downloading = false;
+                _ipaSaved = true;
+              });
+            }
+            return;
+          }
+
+          final file = await _updateService.downloadApk(
+            info.apkUrl,
+            info.tag,
+            info.sha256,
+            onProgress,
+            _cancelled,
+          );
           if (_cancelled.value || !mounted) return;
-          await UpdateService.instance.installApk(file);
+          await _updateService.installApk(file);
           if (mounted && !_cancelled.value) AppPopup.close(context);
         } catch (error) {
           if (mounted && !_cancelled.value) {
@@ -98,12 +118,12 @@ class _UpdateDialogState extends State<UpdateDialog> {
       });
 
   Future<void> _skipVersion() => _perform(() async {
-        await UpdateService.instance.skipVersion(widget.info.tag);
+        await _updateService.skipVersion(widget.info.tag);
         if (mounted && !_cancelled.value) AppPopup.close(context);
       });
 
   Future<void> _disableAutomaticChecks() => _perform(() async {
-        await UpdateService.instance.setAutomaticCheckEnabled(false);
+        await _updateService.setAutomaticCheckEnabled(false);
         if (!mounted || _cancelled.value) return;
         AppFeedback.showSnackBar(context, tr('更新检测已关闭，可在关于页重新开启'),
             tone: AppFeedbackTone.success);
@@ -119,19 +139,25 @@ class _UpdateDialogState extends State<UpdateDialog> {
   Widget build(BuildContext context) {
     AppLocaleScope.watch(context);
     final palette = AppPalette.of(context);
+    final version = displayAppVersion(widget.info.tag);
+    final title = switch ((_ipaSaved, _downloading)) {
+      (true, _) => '下载完成',
+      (_, true) => '正在下载 $version',
+      _ => '发现新版本 $version',
+    };
     return PopScope(
         onPopInvokedWithResult: (didPop, result) {
           if (didPop) _cancelled.value = true;
         },
         child: AppDialog(
-          title: Text(tr(_downloading
-              ? '正在下载 ${displayAppVersion(widget.info.tag)}'
-              : '发现新版本 ${displayAppVersion(widget.info.tag)}')),
+          title: Text(tr(title)),
           content: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                if (_downloading)
+                if (_ipaSaved)
+                  Text(tr('已保存到「文件」中的 Proxly/Downloads。请用自签工具安装。'))
+                else if (_downloading)
                   _DownloadingContent(
                       progress: _progress, hintColor: palette.textSecondary)
                 else
@@ -143,24 +169,27 @@ class _UpdateDialogState extends State<UpdateDialog> {
                   Text(_error!, style: TextStyle(color: palette.error)),
                 if (_busy && !_downloading) const LinearProgressIndicator(),
               ]),
-          actions: _downloading
-              ? [
-                  TextButton(onPressed: _cancel, child: Text(tr('取消下载'))),
-                ]
-              : [
-                  if (widget.autoTriggered) ...[
-                    TextButton(
-                        onPressed: _busy ? null : _disableAutomaticChecks,
-                        child: Text(tr('关闭更新检测'))),
-                    TextButton(
-                        onPressed: _busy ? null : _skipVersion,
-                        child: Text(tr('跳过此版本'))),
-                  ] else
-                    TextButton(onPressed: _cancel, child: Text(tr('取消'))),
-                  FilledButton(
-                      onPressed: _busy ? null : _startDownload,
-                      child: Text(tr(AppPlatform.isIOS ? '前往发布页' : '立即更新'))),
-                ],
+          actions: _ipaSaved
+              ? [FilledButton(onPressed: _cancel, child: Text(tr('完成')))]
+              : _downloading
+                  ? [
+                      TextButton(onPressed: _cancel, child: Text(tr('取消下载'))),
+                    ]
+                  : [
+                      if (widget.autoTriggered) ...[
+                        TextButton(
+                            onPressed: _busy ? null : _disableAutomaticChecks,
+                            child: Text(tr('关闭更新检测'))),
+                        TextButton(
+                            onPressed: _busy ? null : _skipVersion,
+                            child: Text(tr('跳过此版本'))),
+                      ] else
+                        TextButton(onPressed: _cancel, child: Text(tr('取消'))),
+                      FilledButton(
+                          onPressed: _busy ? null : _startDownload,
+                          child:
+                              Text(tr(AppPlatform.isIOS ? '下载 IPA' : '立即更新'))),
+                    ],
         ));
   }
 }
@@ -181,10 +210,11 @@ class _AvailableContent extends StatelessWidget {
     final notes =
         localizedReleaseNotes(body, languageCode: locale.languageCode);
     if (notes.isEmpty) {
+      if (AppPlatform.isIOS) return const SizedBox.shrink();
       return Padding(
         padding: const EdgeInsets.only(bottom: 12),
         child: Text(
-          tr(AppPlatform.isIOS ? '前往 GitHub 发布页下载 IPA，自签后手动安装。' : '是否立即下载并安装？'),
+          tr('是否立即下载并安装？'),
           style: TextStyle(fontSize: 13, color: hintColor),
         ),
       );

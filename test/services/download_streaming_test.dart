@@ -18,6 +18,7 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   final testHttpOverride = HttpOverrides.current;
   late Directory directory;
+  late Directory documents;
   late UpdateService updates;
   late ValueNotifier<bool> cancelled;
   const pathChannel = MethodChannel('plugins.flutter.io/path_provider');
@@ -26,8 +27,11 @@ void main() {
     HttpOverrides.global = null;
     debugDefaultTargetPlatformOverride = TargetPlatform.android;
     directory = await Directory.systemTemp.createTemp('proxly-download-');
-    updates =
-        UpdateService.forTesting(temporaryDirectory: () async => directory);
+    documents = Directory('${directory.path}/Documents');
+    updates = UpdateService.forTesting(
+      temporaryDirectory: () async => directory,
+      documentsDirectory: () async => documents,
+    );
     cancelled = ValueNotifier(false);
     SharedPreferences.setMockInitialValues({});
     PackageInfo.setMockInitialValues(
@@ -143,6 +147,79 @@ void main() {
             (_) => fail('Cancelled download reported progress'), cancelled),
         throwsException);
     expect(await apk.readAsBytes(), orderedEquals(apkBytes));
+  });
+
+  final ipaBytes = ZipEncoder().encode(Archive()
+    ..addFile(ArchiveFile(
+        'Payload/Runner.app/Info.plist', 5, utf8.encode('plist'))))!;
+
+  test('IPA is saved in Documents/Downloads and reused with a matching digest',
+      () async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+    var requests = 0;
+    final url = await serve((request) {
+      requests++;
+      request.response
+        ..headers.contentType = ContentType('application', 'x-itunes-ipa')
+        ..contentLength = ipaBytes.length
+        ..add(ipaBytes);
+      unawaited(request.response.close());
+    });
+    final digest = sha256.convert(ipaBytes).toString();
+    final progress = <double>[];
+    final file = await updates.downloadIpa(
+        url, 'v26.11.0', digest, progress.add, cancelled);
+    expect(file.path, '${documents.path}/Downloads/Proxly-iOS-26.11.ipa');
+    expect(await file.readAsBytes(), orderedEquals(ipaBytes));
+    expect(progress.last, 1);
+    expect(
+      (await updates.downloadIpa(url, 'v26.11.0', digest, (_) {}, cancelled))
+          .path,
+      file.path,
+    );
+    expect(requests, 1);
+    expect(await directory.list().toList(), hasLength(1));
+  });
+
+  test('failed IPA verification preserves the previous file and cleans staging',
+      () async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+    final saved = File('${documents.path}/Downloads/Proxly-iOS-26.11.1.ipa');
+    await saved.parent.create(recursive: true);
+    await saved.writeAsString('previous file');
+    final url = await serve((request) {
+      request.response.add(ipaBytes);
+      unawaited(request.response.close());
+    });
+    await expectLater(
+      updates.downloadIpa(url, 'v26.11.1', '0' * 64, (_) {}, cancelled),
+      throwsException,
+    );
+    expect(await saved.readAsString(), 'previous file');
+    expect(await directory.list().toList(), hasLength(1));
+  });
+
+  test('cancelling a stalled IPA download keeps partial files out of Files',
+      () async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+    final ready = Completer<void>();
+    final url = await serve((request) {
+      request.response
+        ..bufferOutput = false
+        ..headers.contentType = ContentType.binary
+        ..add(ipaBytes);
+      unawaited(request.response.flush().catchError((_) {}));
+    });
+    final download = updates.downloadIpa(url, 'v26.11.1', null, (_) {
+      if (!ready.isCompleted) ready.complete();
+    }, cancelled);
+    final failure = expectLater(download.timeout(const Duration(seconds: 3)),
+        throwsA(allOf(isException, isNot(isA<TimeoutException>()))));
+    await ready.future.timeout(const Duration(seconds: 2));
+    expect(await documents.exists(), isFalse);
+    cancelled.value = true;
+    await failure;
+    expect(await directory.list().toList(), isEmpty);
   });
 
   Future<void> installPanel(Stream<List<int>> stream, String digest,

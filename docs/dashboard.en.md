@@ -16,7 +16,7 @@ Detection runs on cold launch, return from the background, and after saving conn
 
 The default order is Status, Traffic, Overview, Current configuration, Operations, and Quick settings. Status shows software, core version, and connection state. Traffic and Overview show usage, speeds, and connection counts.
 
-Open Customize home at the bottom, long-press and drag to reorder, and use switches to show or hide cards. Changes save locally. Restore defaults resets order and visibility. Customize home remains available even when every card is hidden.
+Open **Customize dashboard** at the bottom. Touch and hold a card to reorder it, or tap the red minus in its upper-right corner to hide it. Hidden cards appear in their default order under **Available to add**. Tap one to put it back on the dashboard. Changes save locally. **Reset layout** restores the default order and visibility.
 
 Layout preferences are shared across proxy software. Unsupported cards and options are hidden from Home and Customize home. Cards return to their saved positions when available again; cards never arranged before follow the arranged cards. Switching software does not reveal manually hidden cards.
 

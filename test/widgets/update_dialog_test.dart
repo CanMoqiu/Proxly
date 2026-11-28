@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
@@ -68,20 +69,11 @@ void main() {
   }
 
   testWidgets(
-      'iOS repeated update taps and late browser completion keep the owning page',
+      'iOS repeated taps start one download and cancellation keeps the owning page',
       (tester) async {
     SharedPreferences.setMockInitialValues({'app_language': 'en'});
     await AppLocaleController.instance.load();
-    final opened = Completer<bool>();
-    int launches = 0;
-    const channel = MethodChannel('plugins.flutter.io/url_launcher');
-    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel,
-        (_) {
-      launches++;
-      return opened.future;
-    });
-    addTearDown(() => tester.binding.defaultBinaryMessenger
-        .setMockMethodCallHandler(channel, null));
+    final service = _IpaUpdateService();
     final navigator = GlobalKey<NavigatorState>();
     await tester.pumpWidget(AppLocaleScope(
         controller: AppLocaleController.instance,
@@ -94,21 +86,21 @@ void main() {
                 onPressed: () => AppPopup.dialog<void>(
                     context: context,
                     builder: (_) =>
-                        const UpdateDialog(info: UpdateInfo(tag: 'v26.7.0'))),
+                        UpdateDialog(info: _ipaUpdate, updateService: service)),
                 child: const Text('Open'))))));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Open'));
     await tester.pumpAndSettle();
     final press = tester
-        .widget<FilledButton>(
-            find.widgetWithText(FilledButton, 'Open release page'))
+        .widget<FilledButton>(find.widgetWithText(FilledButton, 'Download IPA'))
         .onPressed!;
     press();
     press();
     await tester.pump();
-    expect(launches, 1);
-    await tester.tap(find.text('Cancel'));
-    opened.complete(true);
+    expect(service.requests, 1);
+    await tester.tap(find.text('Cancel download'));
+    expect(service.cancelled!.value, isTrue);
+    service.result.complete(File('Proxly-iOS-27.4.ipa'));
     await tester.pumpAndSettle();
     expect(find.byType(UpdateDialog), findsNothing);
     expect(find.text('Open'), findsOneWidget);
@@ -200,21 +192,12 @@ void main() {
       variant:
           TargetPlatformVariant({TargetPlatform.android, TargetPlatform.iOS}));
 
-  for (final opens in [true, false]) {
-    testWidgets(
-        'iOS update opens GitHub externally and handles browser success=$opens',
+  for (final succeeds in [true, false]) {
+    testWidgets('iOS download shows its progress and handles success=$succeeds',
         (tester) async {
       SharedPreferences.setMockInitialValues({'app_language': 'en'});
       await AppLocaleController.instance.load();
-      const channel = MethodChannel('plugins.flutter.io/url_launcher');
-      final calls = <MethodCall>[];
-      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel,
-          (call) async {
-        calls.add(call);
-        return opens;
-      });
-      addTearDown(() => tester.binding.defaultBinaryMessenger
-          .setMockMethodCallHandler(channel, null));
+      final service = _IpaUpdateService();
       await tester.pumpWidget(AppLocaleScope(
         controller: AppLocaleController.instance,
         child: MaterialApp(
@@ -223,8 +206,9 @@ void main() {
                         body: TextButton(
                       onPressed: () => AppPopup.dialog<void>(
                           context: context,
-                          builder: (_) => const UpdateDialog(
-                                info: UpdateInfo(tag: 'v27.4.0'),
+                          builder: (_) => UpdateDialog(
+                                info: _ipaUpdate,
+                                updateService: service,
                               )),
                       child: const Text('Open'),
                     )))),
@@ -232,20 +216,62 @@ void main() {
       await tester.tap(find.text('Open'));
       await tester.pumpAndSettle();
       expect(find.textContaining('27.4.0'), findsNothing);
-      await tester.tap(find.text('Open release page'));
+      await tester.tap(find.text('Download IPA'));
+      await tester.pump();
+      expect(service.requests, 1);
+      expect(find.text('40%'), findsOneWidget);
+      if (succeeds) {
+        service.result.complete(File('Proxly-iOS-27.4.ipa'));
+      } else {
+        service.result.completeError(Exception('Connection lost'));
+      }
       await tester.pumpAndSettle();
-      expect(calls.length, 1);
-      expect(calls.single.method, 'launch');
-      expect(calls.single.arguments['url'],
-          'https://github.com/CanMoqiu/proxly/releases/tag/v27.4.0');
-      expect(calls.single.arguments['useSafariVC'], isFalse);
       expect(find.byType(LinearProgressIndicator), findsNothing);
-      expect(find.byType(UpdateDialog), opens ? findsNothing : findsOneWidget);
-      if (!opens) {
+      expect(find.byType(UpdateDialog), findsOneWidget);
+      if (succeeds) {
         expect(
-            find.text('Could not open the link. Check your browser settings'),
-            findsOneWidget);
+          find.textContaining('Proxly/Downloads in Files'),
+          findsOneWidget,
+        );
+        await tester.tap(find.text('Done'));
+        await tester.pumpAndSettle();
+        expect(find.byType(UpdateDialog), findsNothing);
+      } else {
+        expect(find.textContaining('Connection lost'), findsOneWidget);
+        expect(find.text('Download IPA').hitTestable(), findsOneWidget);
       }
     }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
+  }
+}
+
+const _ipaUpdate = UpdateInfo(
+  tag: 'v27.4.0',
+  ipaUrl: 'https://example.com/Proxly-iOS-27.4.ipa',
+  sha256: 'expected-sha256',
+);
+
+class _IpaUpdateService extends UpdateService {
+  _IpaUpdateService()
+      : super.forTesting(temporaryDirectory: () async => Directory.systemTemp);
+
+  final result = Completer<File>();
+  ValueNotifier<bool>? cancelled;
+  int requests = 0;
+
+  @override
+  Future<File> downloadIpa(
+    String url,
+    String tag,
+    String? expectedSha256,
+    void Function(double) onProgress,
+    ValueNotifier<bool> cancelled,
+  ) {
+    expect(url, _ipaUpdate.ipaUrl);
+    expect(tag, _ipaUpdate.tag);
+    expect(expectedSha256, _ipaUpdate.sha256);
+    requests++;
+    this.cancelled = cancelled;
+    onProgress(0.4);
+    return result.future;
   }
 }
