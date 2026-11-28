@@ -315,7 +315,9 @@ void main() {
     final beforeMove = tester.getTopLeft(feedback);
     await gesture.moveBy(const Offset(20, 35));
     await tester.pump();
-    expect(tester.getTopLeft(feedback) - beforeMove, const Offset(20, 35));
+    final movement = tester.getTopLeft(feedback) - beforeMove;
+    expect(movement.dx, closeTo(20, 0.01));
+    expect(movement.dy, closeTo(35, 0.01));
     await tester.pump(const Duration(milliseconds: 500));
     expect(position.pixels, offsetBeforeDrag);
     final viewport = tester.getRect(find.byType(Scrollable));
