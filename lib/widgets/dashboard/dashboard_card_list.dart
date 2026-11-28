@@ -99,18 +99,20 @@ class _DashboardCardListState extends State<DashboardCardList> {
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Text(tr('可添加功能'),
-                          style: Theme.of(context).textTheme.titleSmall),
-                      for (final id in addable)
-                        TextButton.icon(
+                      Padding(
+                        padding: const EdgeInsets.only(left: 8, bottom: 10),
+                        child: Text(tr('可添加功能'),
+                            style: Theme.of(context).textTheme.titleSmall),
+                      ),
+                      for (final id in addable) ...[
+                        _AddDashboardCard(
                           key: ValueKey('add_${id.name}'),
-                          style: TextButton.styleFrom(
-                              alignment: Alignment.centerLeft),
-                          icon: const Icon(Icons.add_rounded),
-                          label: Text(dashboardCardTitle(id)),
-                          onPressed: () =>
+                          id: id,
+                          onAdd: () =>
                               widget.onSave(layout.setVisible(id, true)),
                         ),
+                        const SizedBox(height: DashboardButtonStyle.spacing),
+                      ],
                       const SizedBox(height: 8),
                     ],
                   ),
@@ -163,12 +165,15 @@ class _DashboardCardListState extends State<DashboardCardList> {
                               right: 0,
                               child: IconButton(
                                 key: ValueKey('visible_${id.name}'),
+                                style: DashboardButtonStyle.icon,
+                                alignment: Alignment.topRight,
+                                padding: const EdgeInsets.only(right: 2),
                                 tooltip:
                                     '${tr('隐藏')} ${dashboardCardTitle(id)}',
                                 onPressed: () =>
                                     widget.onSave(layout.setVisible(id, false)),
                                 icon: CircleAvatar(
-                                  radius: 12,
+                                  radius: 14,
                                   backgroundColor: palette.error,
                                   child: const Icon(Icons.remove_rounded,
                                       size: 20, color: Colors.white),
@@ -178,5 +183,71 @@ class _DashboardCardListState extends State<DashboardCardList> {
                       : widget.cards[id]!),
           ],
         ));
+  }
+}
+
+class _AddDashboardCard extends StatelessWidget {
+  const _AddDashboardCard({super.key, required this.id, required this.onAdd});
+
+  final DashboardCardId id;
+  final VoidCallback onAdd;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = AppPalette.of(context);
+    final theme = Theme.of(context);
+    final title = dashboardCardTitle(id);
+    final icon = switch (id) {
+      DashboardCardId.status => Icons.monitor_heart_outlined,
+      DashboardCardId.traffic => Icons.swap_vert_rounded,
+      DashboardCardId.overview => Icons.bar_chart_rounded,
+      DashboardCardId.currentYaml => Icons.description_outlined,
+      DashboardCardId.operations => Icons.bolt_rounded,
+      DashboardCardId.quickSettings => Icons.tune_rounded,
+    };
+    return Material(
+      color: palette.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: palette.border, width: 0.5),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(4, 4, 12, 4),
+        child: Row(
+          children: [
+            IconButton(
+              style: DashboardButtonStyle.icon,
+              tooltip: '${tr('添加')} $title',
+              onPressed: onAdd,
+              icon: CircleAvatar(
+                radius: 15,
+                backgroundColor: theme.colorScheme.primary,
+                foregroundColor: theme.colorScheme.onPrimary,
+                child: const Icon(Icons.add_rounded, size: 20),
+              ),
+            ),
+            const SizedBox(width: 2),
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: palette.inputBackground,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(icon, size: 20, color: palette.textSecondary),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                title,
+                style: theme.textTheme.bodyMedium
+                    ?.copyWith(fontWeight: FontWeight.w600),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }

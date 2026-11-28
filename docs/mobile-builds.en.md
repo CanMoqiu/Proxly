@@ -73,7 +73,7 @@ The official certificate SHA-256 is `938c46e51d9149a2cec9f3af7efc4da730894e9e1ec
 
 ## iOS builds
 
-Native compilation requires macOS, Xcode, and CocoaPods. Actions installs the pinned Flutter toolchain, runs the simulator WebView integration test, and produces a device Release package. It checks that `ios/Podfile.lock` has not drifted. Simulator output cannot replace a device package. See the [iOS installation guide](ios-selfsign.en.md) for installation.
+Native compilation requires macOS, Xcode, and CocoaPods. Actions installs the pinned Flutter toolchain, runs static analysis and the regular test suite, then produces a device Release package and checks `ios/Podfile.lock`. To verify WebViews separately, boot an iPhone simulator and run `flutter test integration_test/web_panel_smoke_test.dart -d <device-id>`. See the [iOS installation guide](ios-selfsign.en.md) for installation.
 
 ## Before publishing
 

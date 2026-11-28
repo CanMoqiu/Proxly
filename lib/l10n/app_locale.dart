@@ -308,6 +308,7 @@ const _english = <String, String>{
   '运行操作': 'Runtime actions',
   '长按卡片拖动排序': 'Touch and hold a card to reorder it',
   '可添加功能': 'Available to add',
+  '添加': 'Add',
   '无法确认当前配置；若修改了运行配置，请稍后手动重启 OpenClash':
       'Could not identify the active configuration. Restart OpenClash manually if you changed it.',
   'Clash 状态': 'Clash status',

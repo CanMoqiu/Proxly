@@ -9,6 +9,7 @@ import 'package:proxly/theme/app_theme.dart';
 import 'package:proxly/widgets/dashboard/dashboard_card_list.dart';
 import 'package:proxly/widgets/dashboard/dashboard_card_titles.dart';
 import 'package:proxly/widgets/dashboard/clash_overview_card.dart';
+import 'package:proxly/widgets/dashboard/clash_status_card.dart';
 import 'package:proxly/widgets/dashboard/quick_settings_card.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -134,6 +135,14 @@ void main() {
     }
     await toggleEditing(tester);
     await scrollToTop(tester);
+    final hideStatus = find.byKey(const ValueKey('visible_status'));
+    final badge =
+        find.descendant(of: hideStatus, matching: find.byType(CircleAvatar));
+    final statusBounds = tester.getRect(find.byType(ClashStatusCard));
+    final badgeBounds = tester.getRect(badge);
+    expect(badgeBounds.right, closeTo(statusBounds.right - 2, 0.1));
+    expect(badgeBounds.center.dy, closeTo(statusBounds.top + 2, 0.1));
+    expect(tester.getSize(hideStatus).shortestSide, greaterThanOrEqualTo(48));
     final haptics = <String>[];
     tester.binding.defaultBinaryMessenger
         .setMockMethodCallHandler(SystemChannels.platform, (call) async {
@@ -168,7 +177,7 @@ void main() {
     await gesture.up();
     await tester.pumpAndSettle();
     expect(list.layout.order.first, DashboardCardId.traffic);
-    await tester.tap(find.byKey(const ValueKey('visible_status')));
+    await tester.tap(hideStatus);
     await tester.pump();
     await tester.tap(find.byKey(const ValueKey('visible_traffic')));
     await tester.pump();
@@ -176,8 +185,22 @@ void main() {
     final addTraffic = find.byKey(const ValueKey('add_traffic'));
     expect(tester.getTopLeft(addStatus).dy,
         lessThan(tester.getTopLeft(addTraffic).dy));
+    final addButton =
+        find.descendant(of: addTraffic, matching: find.byType(IconButton));
+    expect(
+        find.descendant(
+            of: addButton, matching: find.byIcon(Icons.add_rounded)),
+        findsOneWidget);
     await tester.ensureVisible(addTraffic);
-    await tester.tap(addTraffic);
+    final addTitle = find.descendant(
+        of: addTraffic,
+        matching: find.text(dashboardCardTitle(DashboardCardId.traffic)));
+    await tester.tapAt(tester.getCenter(addTitle));
+    final addBounds = tester.getRect(addTraffic);
+    await tester.tapAt(Offset(addBounds.right - 8, addBounds.center.dy));
+    await tester.pump();
+    expect(addTraffic, findsOneWidget);
+    await tester.tap(addButton);
     await tester.pumpAndSettle();
     expect(addTraffic, findsNothing);
     expect(find.byKey(const ValueKey('dashboard_traffic')), findsOneWidget);

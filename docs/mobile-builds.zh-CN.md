@@ -73,7 +73,7 @@ flutter build apk --release --target-platform android-arm64,android-x64
 
 ## iOS 构建
 
-原生编译需要 macOS、Xcode 和 CocoaPods。Actions 安装固定 Flutter 工具链、执行模拟器 WebView 集成测试并生成设备 Release 包；构建后检查 `ios/Podfile.lock` 未漂移。不要用模拟器产物代替设备包。安装步骤见 [iOS 安装指南](ios-selfsign.zh-CN.md)。
+原生编译需要 macOS、Xcode 和 CocoaPods。Actions 安装固定版本的 Flutter 工具链，运行静态检查和常规测试，然后生成设备 Release 包。构建后会核对 `ios/Podfile.lock`。如需验证模拟器中的 WebView，可在已启动的 iPhone 模拟器上单独运行 `flutter test integration_test/web_panel_smoke_test.dart -d <设备 ID>`。安装步骤见 [iOS 安装指南](ios-selfsign.zh-CN.md)。
 
 ## 发布前核验
 

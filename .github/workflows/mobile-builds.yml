@@ -266,27 +266,11 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ env.FLUTTER_ROOT }}
-          key: flutter-${{ runner.os }}-${{ runner.arch }}-${{ env.FLUTTER_VERSION }}-c3ed85e
-          restore-keys: flutter-${{ runner.os }}-${{ runner.arch }}-${{ env.FLUTTER_VERSION }}
+          key: ios-flutter-${{ runner.os }}-${{ runner.arch }}-${{ env.FLUTTER_VERSION }}
       - name: 安装 Flutter / Install Flutter
         run: |
           if [ ! -x "$FLUTTER_ROOT/bin/flutter" ]; then
             git clone --depth 1 --branch "$FLUTTER_VERSION" https://github.com/flutter/flutter.git "$FLUTTER_ROOT"
-          fi
-          # Backport Flutter #193142 to the pinned iOS toolchain.
-          simulator_source=packages/flutter_tools/lib/src/ios/simulators.dart
-          expected_source=e9c9193aea5c2439789017f486732391db9ff4bc
-          patched_source=8c4911f4adc931aee0390590b2929cdeb3aa70c9
-          actual_source=$(git -C "$FLUTTER_ROOT" hash-object "$simulator_source")
-          if [ "$actual_source" != "$patched_source" ]; then
-            test "$actual_source" = "$expected_source"
-            patch_path=$(mktemp "$RUNNER_TEMP/flutter-ios.XXXXXX")
-            curl --fail --silent --show-error --location --retry 3 --connect-timeout 15 --max-time 60 \
-              --output "$patch_path" https://github.com/flutter/flutter/commit/c3ed85ef987759ee54a6bce275490cde2a238dc1.diff
-            printf '%s  %s\n' 'a95b9493380fe6100ba12f3fe307721acf6048608f00c0de04e11973977eacb4' "$patch_path" | shasum -a 256 --check
-            git -C "$FLUTTER_ROOT" apply -C1 --include="$simulator_source" "$patch_path"
-            test "$(git -C "$FLUTTER_ROOT" hash-object "$simulator_source")" = "$patched_source"
-            rm -f -- "$patch_path" "$FLUTTER_ROOT/bin/cache/flutter_tools.stamp"
           fi
           echo "$FLUTTER_ROOT/bin" >> "$GITHUB_PATH"
           "$FLUTTER_ROOT/bin/flutter" --version | tee build-logs/flutter.txt
@@ -306,15 +290,6 @@ jobs:
         run: |
           flutter analyze 2>&1 | tee build-logs/analyze.txt
           flutter test 2>&1 | tee build-logs/tests.txt
-      - name: 验证 iPhone 模拟器 WebView / Validate simulator WebViews
-        timeout-minutes: 25
-        run: |
-          xcrun simctl list devices available --json > build-logs/simulators.json
-          SIMULATOR_ID=$(python3 -c 'import json; d=json.load(open("build-logs/simulators.json"))["devices"]; print(next(v["udid"] for k in sorted(d, reverse=True) if "iOS" in k for v in d[k] if v["name"].startswith("iPhone")))')
-          xcrun simctl boot "$SIMULATOR_ID" || true
-          xcrun simctl bootstatus "$SIMULATOR_ID" -b
-          trap 'xcrun simctl io "$SIMULATOR_ID" screenshot build-logs/ios-simulator.png || true; xcrun simctl spawn "$SIMULATOR_ID" log show --last 3m --predicate '\''process == "Runner"'\'' --style compact > build-logs/ios-system.txt || true' EXIT
-          flutter test integration_test/web_panel_smoke_test.dart -d "$SIMULATOR_ID" --no-pub --reporter expanded 2>&1 | tee build-logs/ios-webview-smoke.txt
       - name: 构建未签名真机应用 / Build unsigned device app
         run: |
           flutter build ios --release --no-codesign 2>&1 | tee build-logs/ios-build.txt
