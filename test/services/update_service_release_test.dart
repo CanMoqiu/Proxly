@@ -24,6 +24,54 @@ void main() {
   });
 
   for (final platform in [TargetPlatform.iOS, TargetPlatform.android]) {
+    test('$platform recognizes a placeholder tag with a matching release asset',
+        () async {
+      debugDefaultTargetPlatformOverride = platform;
+      PackageInfo.setMockInitialValues(
+        appName: 'Proxly',
+        packageName: 'top.canmoqiu.proxly',
+        version: '26.11.1',
+        buildNumber: '40',
+        buildSignature: '',
+      );
+      final isIOS = platform == TargetPlatform.iOS;
+      final package = isIOS ? 'iOS' : 'Android';
+      final extension = isIOS ? 'ipa' : 'apk';
+      const placeholder = 'untagged-673133f04491053165ae';
+      final url = 'https://github.com/CanMoqiu/Proxly/releases/download/'
+          '$placeholder/Proxly-$package-26.11.2.$extension';
+      var assetVersion = '26.11.1';
+      await http.runWithClient(() async {
+        final service = UpdateService.instance;
+        expect(await service.checkForUpdate(silent: false), isNull);
+        assetVersion = '26.11.2';
+        final update = await service.checkForUpdate(silent: false);
+        expect(update?.tag, 'v26.11.2');
+        expect(isIOS ? update?.ipaUrl : update?.apkUrl, url);
+        expect(update?.sha256, 'a' * 64);
+        await service.skipVersion('v26.11.2');
+        expect(await service.checkForUpdate(silent: false), isNull);
+      },
+          () => MockClient((_) async {
+                return http.Response(
+                    jsonEncode({
+                      'tag_name': placeholder,
+                      'name': 'Proxly 26.11.2（测试版）',
+                      'assets': [
+                        {
+                          'name': 'Proxly-$package-$assetVersion.$extension',
+                          'browser_download_url': url,
+                          'digest': 'sha256:${'a' * 64}',
+                        }
+                      ],
+                    }),
+                    200,
+                    headers: {
+                      'content-type': 'application/json; charset=utf-8'
+                    });
+              }));
+    });
+
     test('$platform shares metadata checks, throttling, skip and opt-out',
         () async {
       debugDefaultTargetPlatformOverride = platform;

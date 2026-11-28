@@ -73,6 +73,10 @@ class UpdateService {
   static const _autoCheckKey = 'automatic_update_check_enabled';
   static const _skipKey = 'skipped_update_version';
   static const _cachedTagKey = 'cached_apk_tag';
+  static final _placeholderTag = RegExp(r'^untagged-[0-9a-f]+$');
+  static final _releaseTitle = RegExp(
+    r'^Proxly (\d{2}\.\d+(?:\.\d+)?)(?:（测试版）| \(Test version\))?$',
+  );
 
   final ValueNotifier<UpdateInfo?> availableUpdate = ValueNotifier(null);
   final Future<Directory> Function() _temporaryDirectory;
@@ -140,14 +144,18 @@ class UpdateService {
         throw Exception(tr('GitHub API 返回格式异常'));
       }
       final json = decoded;
-      final tag = (json['tag_name'] as String? ?? '').trim();
+      final githubTag = (json['tag_name'] as String? ?? '').trim();
       final info = await PackageInfo.fromPlatform();
       final localTag = 'v${info.version}';
 
       // Throttle successful checks even when no newer release is available.
       await prefs.setInt(_prefKey, DateTime.now().millisecondsSinceEpoch);
 
-      if (tag.isEmpty) return null;
+      if (githubTag.isEmpty) return null;
+      final hasPlaceholderTag = _placeholderTag.hasMatch(githubTag);
+      final tag =
+          hasPlaceholderTag ? _tagFromReleaseTitle(json['name']) : githubTag;
+      if (tag == null) throw FormatException(tr('版本格式异常'));
       final comparison = compareNumericVersions(tag, localTag);
       if (comparison == null) {
         throw FormatException(tr('版本格式异常'));
@@ -160,12 +168,17 @@ class UpdateService {
           (json['assets'] as List? ?? []).cast<Map<String, dynamic>>();
       final isIOS = AppPlatform.isIOS;
       final extension = isIOS ? '.ipa' : '.apk';
-      final asset = assets.firstWhere(
-        (a) =>
-            (a['name'] as String? ?? '').endsWith(extension) &&
-            (a['browser_download_url'] as String? ?? '').trim().isNotEmpty,
-        orElse: () => {},
-      );
+      final platform = isIOS ? 'iOS' : 'Android';
+      // A placeholder tag is usable only when the package confirms the title.
+      final expectedName =
+          'Proxly-$platform-${displayAppVersion(tag)}$extension';
+      final asset = assets.firstWhere((asset) {
+        final name = asset['name'] as String? ?? '';
+        final matchesName =
+            hasPlaceholderTag ? name == expectedName : name.endsWith(extension);
+        return matchesName &&
+            (asset['browser_download_url'] as String? ?? '').trim().isNotEmpty;
+      }, orElse: () => {});
       if (asset.isEmpty) return null;
       final downloadUrl = (asset['browser_download_url'] as String).trim();
 
@@ -185,6 +198,13 @@ class UpdateService {
       }
       rethrow;
     }
+  }
+
+  String? _tagFromReleaseTitle(Object? value) {
+    if (value is! String) return null;
+    final version = _releaseTitle.firstMatch(value.trim())?.group(1);
+    if (version == null) return null;
+    return version.split('.').length == 2 ? 'v$version.0' : 'v$version';
   }
 
   Future<bool> isAutomaticCheckEnabled() async {
